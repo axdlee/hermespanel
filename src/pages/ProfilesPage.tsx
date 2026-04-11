@@ -208,6 +208,22 @@ export function ProfilesPage({ notify, profiles, refreshProfiles }: PageProps) {
     }
   }
 
+  async function openInFinder(path: string, label: string, revealInFinder = false) {
+    setRunningAction(`open:${label}`);
+    try {
+      const result = await api.openInFinder({ path, revealInFinder });
+      setLastCommand(result);
+      notify(
+        result.success ? 'success' : 'error',
+        result.success ? `${label} 已在 Finder 中打开。` : `${label} 打开失败，请检查命令输出。`,
+      );
+    } catch (reason) {
+      notify('error', String(reason));
+    } finally {
+      setRunningAction(null);
+    }
+  }
+
   return (
     <div className="two-column wide-left">
       <Panel
@@ -255,6 +271,18 @@ export function ProfilesPage({ notify, profiles, refreshProfiles }: PageProps) {
           aside={
             selectedProfile ? (
               <Toolbar>
+                <Button
+                  disabled={runningAction !== null}
+                  onClick={() => void openInFinder(selectedProfile.homePath, `${selectedProfile.name} 目录`)}
+                >
+                  打开目录
+                </Button>
+                <Button
+                  disabled={runningAction !== null || !selectedProfile.aliasPath}
+                  onClick={() => selectedProfile.aliasPath && void openInFinder(selectedProfile.aliasPath, `${selectedProfile.name} Alias`, true)}
+                >
+                  定位 Alias
+                </Button>
                 <Button
                   kind="primary"
                   disabled={selectedProfile.isActive || runningAction !== null}

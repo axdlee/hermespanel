@@ -21,6 +21,7 @@ pub fn run() {
             commands::sessions::list_sessions,
             commands::sessions::get_session_detail,
             commands::skills::list_skills,
+            commands::desktop::open_in_finder,
             commands::cron::get_cron_jobs,
             commands::cron::run_cron_action,
             commands::cron::create_cron_job,

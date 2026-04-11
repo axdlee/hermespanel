@@ -15,6 +15,7 @@
   - 跟随当前 `active_profile`
   - 切换查看不同 profile 的本地状态
   - 将当前选择写回为 Hermes 默认 profile
+  - 在 macOS 下直接用 Finder 打开 profile 目录与定位 alias
   - 复用 `hermes profile create` 创建新 profile
   - 复用 `hermes profile rename` 重命名非 `default` profile
   - 复用 `hermes profile export` 导出 profile 归档
@@ -44,6 +45,7 @@
 - Cron 作业
   - 读取当前 profile 下 `cron/jobs.json`
   - 展示调度、下次运行、最近运行、delivery、skills、错误信息
+  - 在 macOS 下直接用 Finder 定位 `jobs.json`
   - 复用 `hermes cron pause|resume|run` 做非破坏性操作
   - 复用 `hermes cron create|edit` 创建和编辑定时作业
   - 复用 `hermes cron remove` 删除作业，并要求输入完整 `job_id` 确认

@@ -298,3 +298,10 @@ pub struct CronDeleteRequest {
     pub job_id: String,
     pub confirm_id: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopOpenRequest {
+    pub path: String,
+    pub reveal_in_finder: bool,
+}

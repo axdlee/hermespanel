@@ -274,6 +274,22 @@ export function CronPage({ notify, profile }: PageProps) {
     }
   }
 
+  async function openInFinder(path: string, label: string, revealInFinder = false) {
+    setRunningAction(`open:${label}`);
+    try {
+      const result = await api.openInFinder({ path, revealInFinder });
+      setLastCommand(result);
+      notify(
+        result.success ? 'success' : 'error',
+        result.success ? `${label} 已在 Finder 中打开。` : `${label} 打开失败，请检查命令输出。`,
+      );
+    } catch (reason) {
+      notify('error', String(reason));
+    } finally {
+      setRunningAction(null);
+    }
+  }
+
   if (loading && !snapshot) {
     return <LoadingState label="正在读取 cron 作业列表。" />;
   }
@@ -343,6 +359,12 @@ export function CronPage({ notify, profile }: PageProps) {
           aside={
             selectedJob ? (
               <Toolbar>
+                <Button
+                  onClick={() => snapshot?.jobsPath && void openInFinder(snapshot.jobsPath, 'jobs.json', true)}
+                  disabled={runningAction !== null || !snapshot?.jobsPath}
+                >
+                  定位 jobs.json
+                </Button>
                 <Button onClick={openEditEditor} disabled={runningAction !== null}>编辑</Button>
                 <Button
                   onClick={() => void runAction('run')}

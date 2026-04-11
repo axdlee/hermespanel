@@ -8,6 +8,7 @@ import type {
   CronJobsSnapshot,
   CronUpdateRequest,
   DashboardSnapshot,
+  DesktopOpenRequest,
   LogReadResult,
   MemoryFileDetail,
   MemoryFileSummary,
@@ -68,6 +69,8 @@ export const api = {
     call<CommandRunResult>('update_cron_job', withProfile(profile, { request })),
   deleteCronJob: (request: CronDeleteRequest, profile?: string) =>
     call<CommandRunResult>('delete_cron_job', withProfile(profile, { request })),
+  openInFinder: (request: DesktopOpenRequest) =>
+    call<CommandRunResult>('open_in_finder', { request }),
   runCronAction: (action: string, jobId: string, profile?: string) =>
     call<CommandRunResult>('run_cron_action', withProfile(profile, { action, jobId })),
   readLog: (

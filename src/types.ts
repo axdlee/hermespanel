@@ -222,6 +222,11 @@ export interface CronDeleteRequest {
   confirmId: string;
 }
 
+export interface DesktopOpenRequest {
+  path: string;
+  revealInFinder: boolean;
+}
+
 export type NoticeTone = 'success' | 'error' | 'info';
 
 export interface NoticeState {
