@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "HermesPanel 默认权限",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
