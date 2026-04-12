@@ -1,12 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { Button, EmptyState, KeyValueRow, LoadingState, MetricCard, Panel, Pill, Toolbar } from '../components/ui';
+import { Button, EmptyState, InfoTip, KeyValueRow, LoadingState, MetricCard, Panel, Pill, Toolbar } from '../components/ui';
 import { RuntimePostureView } from '../components/runtime-posture';
 import type { DiagnosticKind } from '../lib/diagnostics';
+import { handoffToTerminal, openFinderLocation, type CommandScope } from '../lib/desktop';
 import { formatEpoch, formatTimestamp } from '../lib/format';
 import { buildRuntimePosture } from '../lib/posture';
 import { api } from '../lib/api';
-import type { CommandRunResult, DashboardSnapshot, LogReadResult, ProfileSummary } from '../types';
+import type {
+  BinaryStatus,
+  CommandRunResult,
+  DashboardSnapshot,
+  InstallationSnapshot,
+  LogReadResult,
+  ProfileSummary,
+} from '../types';
 import type { PageProps } from './types';
 
 type HealthTone = 'neutral' | 'good' | 'warn' | 'bad';
@@ -25,14 +33,31 @@ interface HealthItem {
   detail: string;
 }
 
+interface WorkspaceArtifact {
+  key: string;
+  label: string;
+  path: string;
+  exists: boolean;
+}
+
+interface LauncherAction {
+  key: string;
+  label: string;
+  command: string;
+  kind?: 'primary' | 'secondary' | 'danger';
+  scope?: CommandScope;
+  disabled?: boolean;
+  confirmMessage?: string;
+}
+
 const AUTO_REFRESH_MS = 15_000;
 
 const DIAGNOSTIC_ACTIONS: Array<{ key: DiagnosticKind; label: string; kind: 'primary' | 'secondary' }> = [
-  { key: 'version', label: 'Hermes 版本', kind: 'secondary' as const },
-  { key: 'status', label: '全量状态', kind: 'secondary' as const },
-  { key: 'gateway-status', label: '网关诊断', kind: 'secondary' as const },
-  { key: 'dump', label: '安装摘要', kind: 'secondary' as const },
-  { key: 'doctor', label: '健康检查', kind: 'primary' as const },
+  { key: 'doctor', label: '健康检查', kind: 'primary' },
+  { key: 'status', label: '全量状态', kind: 'secondary' },
+  { key: 'gateway-status', label: '网关诊断', kind: 'secondary' },
+  { key: 'dump', label: '安装摘要', kind: 'secondary' },
+  { key: 'version', label: '版本', kind: 'secondary' },
 ];
 
 const LOG_OPTIONS = [
@@ -42,96 +67,140 @@ const LOG_OPTIONS = [
   { key: 'errors', label: 'errors.log' },
 ];
 
-const WORKSPACE_SHORTCUTS = [
-  { key: 'profiles', label: 'Profile 管理' },
-  { key: 'gateway', label: '网关控制' },
-  { key: 'config', label: '配置中心' },
-  { key: 'extensions', label: '扩展能力' },
-  { key: 'logs', label: '日志查看' },
-  { key: 'cron', label: 'Cron 作业' },
-  { key: 'diagnostics', label: '诊断面板' },
-] as const;
-
 const isMacPlatform = typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent);
 
-function buildHealthItems(data: DashboardSnapshot, profileSummary: ProfileSummary | null): HealthItem[] {
+function dependencyTone(dependency: BinaryStatus): HealthTone {
+  if (dependency.found) {
+    return 'good';
+  }
+
+  return ['hermes', 'curl', 'git', 'python3'].includes(dependency.name) ? 'bad' : 'warn';
+}
+
+function buildHealthItems(
+  data: DashboardSnapshot,
+  installation: InstallationSnapshot,
+  profileSummary: ProfileSummary | null,
+): HealthItem[] {
   const gateway = data.gateway;
-  const hasFatalPlatform = gateway?.platforms.some((platform) => platform.state === 'fatal') ?? false;
-  const missingMemory = data.memoryFiles.filter((item) => !item.exists);
   const modelReady = Boolean(data.config.modelDefault && data.config.modelProvider);
+  const missingMemory = data.memoryFiles.filter((item) => !item.exists);
   const hasAlias = Boolean(profileSummary?.aliases.length);
-  const workspaceSignals = [data.counts.sessions > 0, data.counts.skills > 0, data.counts.cronJobs > 0].filter(Boolean).length;
-  const memoryEnabled = data.config.memoryEnabled !== false;
-  const memoryProvider = data.config.memoryProvider || 'builtin-file';
+  const missingCoreDependencies = installation.dependencies.filter(
+    (item) => !item.found && ['curl', 'git', 'python3'].includes(item.name),
+  );
 
   return [
     {
+      key: 'binary',
+      title: 'Hermes CLI',
+      tone: installation.binaryFound ? 'good' : 'bad',
+      summary: installation.binaryFound ? '已安装' : '未安装',
+      detail: installation.hermesBinary ?? '先执行一键安装，再接管 setup、model、gateway 和 skills。 ',
+    },
+    {
       key: 'gateway',
       title: 'Gateway',
-      tone: !gateway ? 'warn' : hasFatalPlatform ? 'bad' : gateway.gatewayState === 'running' ? 'good' : 'warn',
-      summary: !gateway ? '未读取到运行态' : gateway.gatewayState === 'running' ? '运行中' : gateway.gatewayState,
+      tone: !gateway ? 'warn' : gateway.gatewayState === 'running' ? 'good' : 'warn',
+      summary: gateway ? gateway.gatewayState : '未检测到',
       detail: gateway
         ? `${gateway.activeAgents} 个活跃 Agent · ${gateway.platforms.length} 个平台状态`
-        : '尚未发现 gateway_state.json，可先执行一次网关启动或诊断。',
+        : '还没有运行态文件，可先做 gateway setup 或直接启动。 ',
     },
     {
       key: 'model',
-      title: '模型配置',
+      title: '模型与 Provider',
       tone: modelReady ? 'good' : 'warn',
-      summary: modelReady ? `${data.config.modelProvider} / ${data.config.modelDefault}` : 'provider 或 model 缺失',
+      summary: modelReady ? `${data.config.modelProvider} / ${data.config.modelDefault}` : '尚未完整配置',
       detail: data.config.modelBaseUrl
         ? `Base URL: ${data.config.modelBaseUrl}`
-        : '未配置 Base URL 时将使用 provider 默认地址。',
+        : '建议先跑 `hermes model` 或 `hermes setup`，避免 CLI 和 gateway 启动后才暴露问题。 ',
     },
     {
-      key: 'env',
-      title: 'Secrets',
-      tone: profileSummary?.envExists ? 'good' : 'warn',
-      summary: profileSummary?.envExists ? '.env 已就绪' : '.env 缺失',
-      detail: profileSummary?.envExists
-        ? '敏感凭证文件已存在，可直接通过 Finder 定位。'
-        : '建议补齐 API Key 或平台密钥，避免运行期才暴露问题。',
+      key: 'dependencies',
+      title: '基础依赖',
+      tone: missingCoreDependencies.length === 0 ? 'good' : 'warn',
+      summary: missingCoreDependencies.length === 0 ? '核心依赖齐备' : `缺失 ${missingCoreDependencies.length} 项`,
+      detail: missingCoreDependencies.length === 0
+        ? `${installation.dependencies.filter((item) => item.found).length}/${installation.dependencies.length} 个依赖已就绪`
+        : `缺失项：${missingCoreDependencies.map((item) => item.name).join('、')}`,
     },
     {
       key: 'memory',
-      title: '记忆链',
-      tone: !memoryEnabled ? 'warn' : missingMemory.length === 0 ? 'good' : 'warn',
-      summary: !memoryEnabled
+      title: '记忆链路',
+      tone: data.config.memoryEnabled === false ? 'warn' : missingMemory.length === 0 ? 'good' : 'warn',
+      summary: data.config.memoryEnabled === false
         ? 'memory 已关闭'
         : missingMemory.length === 0
-          ? '核心记忆完整'
-          : `缺失 ${missingMemory.length} 项记忆文件`,
-      detail: !memoryEnabled
-        ? `当前 provider: ${memoryProvider}，但运行态已关闭文件记忆闭环。`
+          ? '记忆文件齐备'
+          : `缺失 ${missingMemory.length} 项`,
+      detail: data.config.memoryEnabled === false
+        ? `当前 provider: ${data.config.memoryProvider || 'builtin-file'}`
         : missingMemory.length === 0
-          ? `${data.memoryFiles.length} 个记忆文件都已就绪 · provider ${memoryProvider}`
-          : `缺失项: ${missingMemory.map((item) => item.label).join('、')}`,
+          ? `${data.memoryFiles.length} 个记忆文件均已就绪`
+          : `缺失：${missingMemory.map((item) => item.label).join('、')}`,
     },
     {
       key: 'alias',
       title: 'Profile Alias',
       tone: hasAlias ? 'good' : 'warn',
-      summary: hasAlias ? `${profileSummary?.aliases.length ?? 0} 个 alias` : '尚未创建 alias',
+      summary: hasAlias ? `${profileSummary?.aliases.length ?? 0} 个 alias` : '未创建 alias',
       detail: hasAlias
         ? profileSummary?.aliases
           .map((alias) => alias.isPrimary ? `${alias.name} (primary)` : alias.name)
           .join('、') ?? '—'
-        : '建议保留至少一个 primary alias，方便 CLI、cron 和脚本切换 profile。',
+        : '建议至少保留一个 primary alias，方便脚本、cron 和多 profile 切换。 ',
+    },
+  ];
+}
+
+function buildWorkspaceArtifacts(
+  data: DashboardSnapshot,
+  installation: InstallationSnapshot,
+): WorkspaceArtifact[] {
+  return [
+    {
+      key: 'home',
+      label: 'Hermes Home',
+      path: installation.hermesHome,
+      exists: installation.hermesHomeExists,
     },
     {
-      key: 'workspace',
-      title: '工作区活跃度',
-      tone: workspaceSignals >= 2 ? 'good' : workspaceSignals === 1 ? 'neutral' : 'warn',
-      summary: `${data.counts.sessions} 会话 / ${data.counts.skills} 技能 / ${data.counts.cronJobs} Cron`,
-      detail: workspaceSignals >= 2
-        ? '本地工作区已经有明显使用痕迹，可直接持续迭代。'
-        : '如果这是新 profile，先跑一次会话或补几个技能会更容易验证全链路。',
+      key: 'config',
+      label: 'config.yaml',
+      path: `${data.hermesHome}/config.yaml`,
+      exists: installation.configExists,
+    },
+    {
+      key: 'env',
+      label: '.env',
+      path: `${data.hermesHome}/.env`,
+      exists: installation.envExists,
+    },
+    {
+      key: 'state-db',
+      label: 'state.db',
+      path: `${data.hermesHome}/state.db`,
+      exists: installation.stateDbExists,
+    },
+    {
+      key: 'gateway-state',
+      label: 'gateway_state.json',
+      path: `${data.hermesHome}/gateway_state.json`,
+      exists: installation.gatewayStateExists,
+    },
+    {
+      key: 'logs',
+      label: 'logs/',
+      path: `${data.hermesHome}/logs`,
+      exists: installation.logsDirExists,
     },
   ];
 }
 
 export function DashboardPage({ notify, profile, profiles, refreshProfiles, navigate }: PageProps) {
   const [data, setData] = useState<DashboardSnapshot | null>(null);
+  const [installation, setInstallation] = useState<InstallationSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -150,7 +219,7 @@ export function DashboardPage({ notify, profile, profiles, refreshProfiles, navi
   );
 
   async function load(options?: { includeProfiles?: boolean; silent?: boolean }) {
-    const hasSnapshot = data !== null;
+    const hasSnapshot = data !== null && installation !== null;
     if (hasSnapshot) {
       setRefreshing(true);
     } else {
@@ -159,11 +228,13 @@ export function DashboardPage({ notify, profile, profiles, refreshProfiles, navi
     }
 
     try {
-      const [snapshot] = await Promise.all([
+      const [dashboardSnapshot, installationSnapshot] = await Promise.all([
         api.getDashboardSnapshot(profile),
+        api.getInstallationSnapshot(profile),
         options?.includeProfiles ? refreshProfiles(profile) : Promise.resolve(),
       ]);
-      setData(snapshot);
+      setData(dashboardSnapshot);
+      setInstallation(installationSnapshot);
       setError(null);
       setLastLoadedAt(new Date().toISOString());
     } catch (reason) {
@@ -200,24 +271,25 @@ export function DashboardPage({ notify, profile, profiles, refreshProfiles, navi
     }
   }
 
-  async function storeResult(label: string, result: CommandRunResult, shouldReload = false) {
+  function storeResult(label: string, result: CommandRunResult) {
     setLastResult({
       label,
       result,
       finishedAt: new Date().toISOString(),
     });
-    notify(result.success ? 'success' : 'error', `${label} 已执行。`);
-    if (shouldReload) {
-      await load({ silent: true });
-      await loadLogPreview({ silent: true });
-    }
   }
 
   async function runDiagnostic(kind: DiagnosticKind, label: string) {
-    setRunningAction(`diagnostic:${kind}`);
+    const actionKey = `diagnostic:${kind}`;
+    setRunningAction(actionKey);
     try {
       const result = await api.runDiagnostic(kind, profile);
-      await storeResult(label, result, kind === 'gateway-status' || kind === 'doctor' || kind === 'status');
+      storeResult(label, result);
+      notify(result.success ? 'success' : 'error', `${label} 已执行。`);
+      if (kind === 'gateway-status' || kind === 'doctor' || kind === 'status') {
+        await load({ silent: true });
+        await loadLogPreview({ silent: true });
+      }
     } catch (reason) {
       notify('error', String(reason));
     } finally {
@@ -225,11 +297,15 @@ export function DashboardPage({ notify, profile, profiles, refreshProfiles, navi
     }
   }
 
-  async function runGatewayAction(action: string, label: string) {
-    setRunningAction(`gateway:${action}`);
+  async function runGatewayAction(action: 'start' | 'restart' | 'stop', label: string) {
+    const actionKey = `gateway:${action}`;
+    setRunningAction(actionKey);
     try {
       const result = await api.runGatewayAction(action, profile);
-      await storeResult(label, result, true);
+      storeResult(label, result);
+      notify(result.success ? 'success' : 'error', `${label} 已执行。`);
+      await load({ silent: true });
+      await loadLogPreview({ silent: true });
     } catch (reason) {
       notify('error', String(reason));
     } finally {
@@ -237,16 +313,40 @@ export function DashboardPage({ notify, profile, profiles, refreshProfiles, navi
     }
   }
 
-  async function openInFinder(path: string, label: string, revealInFinder = false) {
-    setRunningAction(`finder:${label}`);
-    try {
-      const result = await api.openInFinder({ path, revealInFinder });
-      await storeResult(label, result);
-    } catch (reason) {
-      notify('error', String(reason));
-    } finally {
-      setRunningAction(null);
-    }
+  async function openInFinder(actionKey: string, path: string, label: string, revealInFinder = false) {
+    await openFinderLocation({
+      actionKey,
+      label,
+      notify,
+      onResult: storeResult,
+      path,
+      revealInFinder,
+      setBusy: setRunningAction,
+    });
+  }
+
+  async function openInTerminal(
+    actionKey: string,
+    label: string,
+    command: string,
+    options?: {
+      scope?: CommandScope;
+      workingDirectory?: string | null;
+      confirmMessage?: string;
+    },
+  ) {
+    await handoffToTerminal({
+      actionKey,
+      command,
+      confirmMessage: options?.confirmMessage,
+      label,
+      notify,
+      onResult: storeResult,
+      profile,
+      scope: options?.scope,
+      setBusy: setRunningAction,
+      workingDirectory: options?.workingDirectory ?? null,
+    });
   }
 
   function toggleAutoRefresh() {
@@ -277,15 +377,15 @@ export function DashboardPage({ notify, profile, profiles, refreshProfiles, navi
   }, [autoRefresh, logName, profile]);
 
   if (loading) {
-    return <LoadingState label="正在加载 HermesPanel 仪表盘。" />;
+    return <LoadingState label="正在加载 HermesPanel 控制中心。" />;
   }
 
-  if (error || !data) {
+  if (error || !data || !installation) {
     return (
-      <Panel title="仪表盘">
+      <Panel title="控制中心">
         <EmptyState
           title="读取失败"
-          description={error ?? '未能读取 Hermes 桌面快照。'}
+          description={error ?? '未能读取 Hermes 控制中心快照。'}
         />
         <Toolbar>
           <Button onClick={() => void load()}>重试</Button>
@@ -294,26 +394,126 @@ export function DashboardPage({ notify, profile, profiles, refreshProfiles, navi
     );
   }
 
-  const configPath = `${data.hermesHome}/config.yaml`;
-  const envPath = `${data.hermesHome}/.env`;
-  const logsPath = `${data.hermesHome}/logs`;
-  const cronPath = `${data.hermesHome}/cron`;
   const primaryAlias = currentProfile?.aliases.find((alias) => alias.isPrimary) ?? currentProfile?.aliases[0] ?? null;
-  const healthItems = buildHealthItems(data, currentProfile);
   const posture = buildRuntimePosture({ dashboard: data });
+  const healthItems = buildHealthItems(data, installation, currentProfile);
+  const workspaceArtifacts = buildWorkspaceArtifacts(data, installation);
   const runtimeWarnings = [...data.warnings];
+  const dependencyReadyCount = installation.dependencies.filter((item) => item.found).length;
+  const workingDirectory = installation.hermesHomeExists ? installation.hermesHome : null;
 
   if (isMacPlatform) {
     runtimeWarnings.push(
-      'macOS 提示：如果从 Finder 启动后发现 alias、PATH 或网关状态异常，优先检查 Hermes Binary 路径与 `~/.local/bin` 中的 wrapper。',
+      'macOS 提示：Terminal 接管使用系统 Terminal，交互式 setup / model / skills config 会在那里持续运行，执行完再回面板刷新。',
     );
   }
+
+  const lifecycleActions: LauncherAction[] = [
+    {
+      key: 'terminal:quick-install',
+      label: installation.binaryFound ? '重新安装 CLI' : '一键安装 CLI',
+      command: installation.quickInstallCommand,
+      kind: 'primary' as const,
+      scope: 'global' as const,
+      disabled: false,
+    },
+    {
+      key: 'terminal:update',
+      label: '升级 CLI',
+      command: installation.updateCommand,
+      kind: 'secondary' as const,
+      scope: 'global' as const,
+      disabled: !installation.binaryFound,
+    },
+    {
+      key: 'terminal:uninstall',
+      label: '卸载 CLI',
+      command: installation.uninstallCommand,
+      kind: 'danger' as const,
+      scope: 'global' as const,
+      disabled: !installation.binaryFound,
+      confirmMessage: '确定在 Terminal 中执行 `hermes uninstall` 吗？这会移除 Hermes CLI。',
+    },
+  ];
+
+  const setupActions: LauncherAction[] = [
+    {
+      key: 'terminal:setup',
+      label: '全量 Setup',
+      command: installation.setupCommand,
+      kind: 'primary' as const,
+    },
+    {
+      key: 'terminal:model',
+      label: '配置模型',
+      command: installation.modelCommand,
+      kind: 'secondary' as const,
+    },
+    {
+      key: 'terminal:config-migrate',
+      label: '迁移配置',
+      command: installation.configMigrateCommand,
+      kind: 'secondary' as const,
+    },
+    {
+      key: 'terminal:claw-migrate',
+      label: '导入 OpenClaw',
+      command: installation.clawMigrateCommand,
+      kind: 'secondary' as const,
+    },
+  ];
+
+  const toolingActions: LauncherAction[] = [
+    {
+      key: 'terminal:terminal-setup',
+      label: '终端后端',
+      command: installation.terminalSetupCommand,
+    },
+    {
+      key: 'terminal:tools-setup',
+      label: '工具选择',
+      command: installation.toolsSetupCommand,
+    },
+    {
+      key: 'terminal:skills-config',
+      label: '技能开关',
+      command: installation.skillsConfigCommand,
+    },
+  ];
+
+  const gatewayServiceActions: LauncherAction[] = [
+    {
+      key: 'terminal:gateway-install',
+      label: '安装服务',
+      command: installation.gatewayInstallCommand,
+      kind: 'primary' as const,
+      disabled: !installation.binaryFound,
+    },
+    {
+      key: 'terminal:gateway-setup',
+      label: '配置渠道',
+      command: installation.gatewaySetupCommand,
+      kind: 'secondary' as const,
+      disabled: !installation.binaryFound,
+    },
+    {
+      key: 'terminal:gateway-uninstall',
+      label: '卸载服务',
+      command: installation.gatewayUninstallCommand,
+      kind: 'danger' as const,
+      disabled: !installation.binaryFound,
+      confirmMessage: '确定卸载当前 profile 的 gateway 服务吗？',
+    },
+  ];
 
   return (
     <div className="page-stack">
       <Panel
-        title="Hermes 工作台"
-        subtitle="借鉴 ClawPanel 的工作台思路，但只包装 Hermes CLI、本地状态目录与运行产物，不改 Hermes Agent 本体。"
+        title="Hermes 控制中心"
+        subtitle="安装、接管、运行总览"
+        tip={(
+          <InfoTip content="首页只保留最常用的安装、接管、运行与诊断动作。说明信息改为后置，避免一进页面就被文案和重复入口淹没。"/>
+        )}
         aside={(
           <Toolbar>
             <Button
@@ -331,164 +531,168 @@ export function DashboardPage({ notify, profile, profiles, refreshProfiles, navi
           </Toolbar>
         )}
       >
-        <div className="hero-grid">
-          <div className="hero-copy">
-            <p className="hero-title">本地 Hermes 控制台</p>
-            <p className="hero-subtitle">
-              把 `~/.hermes`、gateway、会话、技能、记忆文件和 profile alias 收拢成统一桌面工作区。
+        <div className="control-hero">
+          <div className="hero-copy control-hero-copy">
+            <div className="status-row">
+              <span className={`status-chip ${installation.binaryFound ? 'good' : 'bad'}`}>
+                {installation.binaryFound ? 'CLI Installed' : 'CLI Missing'}
+              </span>
+              <span className={`status-chip ${data.gateway?.gatewayState === 'running' ? 'good' : 'warn'}`}>
+                {data.gateway?.gatewayState === 'running' ? 'Gateway Running' : 'Gateway Idle'}
+              </span>
+              <span className={`status-chip ${data.config.modelProvider && data.config.modelDefault ? 'good' : 'warn'}`}>
+                {data.config.modelProvider && data.config.modelDefault ? 'Model Ready' : 'Model Pending'}
+              </span>
+            </div>
+            <p className="hero-title">
+              {installation.binaryFound ? '真正可操作的 Hermes 桌面治理台' : '先安装 Hermes，再接管 setup / model / gateway'}
             </p>
-            <div className="detail-list">
+            <p className="hero-subtitle">安装、升级、setup、gateway、日志与目录入口都收敛在首页。</p>
+            <div className="detail-list compact">
               <KeyValueRow label="当前 Profile" value={data.profileName} />
               <KeyValueRow label="Hermes Home" value={data.hermesHome} />
-              <KeyValueRow label="Hermes Binary" value={data.hermesBinary} />
+              <KeyValueRow label="Hermes Binary" value={installation.hermesBinary ?? '未检测到'} />
               <KeyValueRow label="Primary Alias" value={primaryAlias?.name ?? '未创建'} />
+              <KeyValueRow label="版本摘要" value={installation.versionOutput.trim() || '—'} />
               <KeyValueRow label="最后刷新" value={formatTimestamp(lastLoadedAt)} />
             </div>
           </div>
-          <div className="metrics-grid">
-            <MetricCard label="会话数" value={data.counts.sessions} hint="来自 state.db 的历史对话" />
-            <MetricCard label="技能数" value={data.counts.skills} hint="已扫描本地 skills 目录" />
-            <MetricCard label="Cron 作业" value={data.counts.cronJobs} hint="复用 Hermes 原生 cron/jobs.json" />
-            <MetricCard label="日志文件" value={data.counts.logFiles} hint="用于运行期排障与回溯" />
-            <MetricCard label="平台配置" value={data.counts.configuredPlatforms} hint="来自当前 gateway 运行态" />
+          <div className="metrics-grid metrics-grid-tight">
+            <MetricCard label="CLI" value={installation.binaryFound ? 'Ready' : 'Missing'} hint="Hermes 本体安装状态" />
+            <MetricCard label="依赖" value={`${dependencyReadyCount}/${installation.dependencies.length}`} hint="CLI 周边依赖可见度" />
+            <MetricCard label="会话数" value={data.counts.sessions} hint="来自 state.db" />
+            <MetricCard label="技能数" value={data.counts.skills} hint="已扫描本地 skills" />
+            <MetricCard label="Cron 作业" value={data.counts.cronJobs} hint="天然是 Hermes 的自动化闭环" />
             <MetricCard
-              label="Alias 数"
-              value={currentProfile?.aliases.length ?? 0}
-              hint={primaryAlias ? `主 alias: ${primaryAlias.name}` : '建议至少保留一个 primary alias'}
+              label="平台配置"
+              value={data.gateway?.platforms.length ?? data.counts.configuredPlatforms}
+              hint={data.gateway ? `${data.gateway.activeAgents} 个活跃 Agent` : '尚未发现运行态'}
             />
           </div>
         </div>
       </Panel>
 
-      <Panel
-        title="运行姿态"
-        subtitle="把 Hermes 真正决定 agent 行为的几条主链路收拢在一起看：首页偏总览，配置页会给更细的能力侧信息。"
-      >
-        <RuntimePostureView posture={posture} navigate={navigate} />
-      </Panel>
-
       <div className="two-column wide-left">
         <Panel
-          title="快捷工作台"
-          subtitle="把最常用的网关控制、诊断与本地目录入口收在首页，减少切页成本。"
+          title="安装与接管"
+          subtitle="把 Hermes CLI 生命周期、profile 配置向导、tooling 和 gateway service 入口直接放在首页。"
         >
-          <div className="workbench-grid">
-            <section className="action-card">
+          <div className="control-card-grid">
+            <section className="action-card action-card-compact">
               <div className="action-card-header">
                 <div>
-                  <p className="eyebrow">Gateway</p>
-                  <h3 className="action-card-title">网关控制</h3>
+                  <p className="eyebrow">Lifecycle</p>
+                  <h3 className="action-card-title">CLI 生命周期</h3>
+                </div>
+                <Pill tone={installation.binaryFound ? 'good' : 'bad'}>
+                  {installation.binaryFound ? '可用' : '未安装'}
+                </Pill>
+              </div>
+              <p className="action-card-copy">
+                复用 Hermes 官方安装脚本与 `update / uninstall`，不在客户端里私自重写安装逻辑。
+              </p>
+              <Toolbar>
+                {lifecycleActions.map((item) => (
+                  <Button
+                    key={item.key}
+                    kind={item.kind}
+                    onClick={() => void openInTerminal(item.key, item.label, item.command, {
+                      scope: item.scope,
+                      confirmMessage: item.confirmMessage,
+                    })}
+                    disabled={runningAction !== null || item.disabled}
+                  >
+                    {runningAction === item.key ? `${item.label}…` : item.label}
+                  </Button>
+                ))}
+              </Toolbar>
+            </section>
+
+            <section className="action-card action-card-compact">
+              <div className="action-card-header">
+                <div>
+                  <p className="eyebrow">Profile Setup</p>
+                  <h3 className="action-card-title">向导式接管</h3>
+                </div>
+                <Pill tone={data.config.modelProvider && data.config.modelDefault ? 'good' : 'warn'}>
+                  {data.config.modelProvider && data.config.modelDefault ? '已配置' : '待补齐'}
+                </Pill>
+              </div>
+              <p className="action-card-copy">
+                针对 Hermes 的核心特性，把 `setup / model / config migrate / claw migrate` 做成第一层入口。
+              </p>
+              <Toolbar>
+                {setupActions.map((item) => (
+                  <Button
+                    key={item.key}
+                    kind={item.kind}
+                    onClick={() => void openInTerminal(item.key, item.label, item.command, {
+                      scope: 'profile',
+                      workingDirectory,
+                    })}
+                    disabled={runningAction !== null || !installation.binaryFound}
+                  >
+                    {runningAction === item.key ? `${item.label}…` : item.label}
+                  </Button>
+                ))}
+              </Toolbar>
+            </section>
+
+            <section className="action-card action-card-compact">
+              <div className="action-card-header">
+                <div>
+                  <p className="eyebrow">Tooling</p>
+                  <h3 className="action-card-title">工具与技能</h3>
+                </div>
+                <Pill tone={data.counts.skills > 0 ? 'good' : 'warn'}>
+                  {data.counts.skills > 0 ? `${data.counts.skills} 个技能` : '待配置'}
+                </Pill>
+              </div>
+              <p className="action-card-copy">
+                Hermes 的差异化能力在 toolsets、terminal backend、skills hub 和记忆插件，这里直接拉通。
+              </p>
+              <Toolbar>
+                {toolingActions.map((item) => (
+                  <Button
+                    key={item.key}
+                    onClick={() => void openInTerminal(item.key, item.label, item.command, {
+                      scope: 'profile',
+                      workingDirectory,
+                    })}
+                    disabled={runningAction !== null || !installation.binaryFound}
+                  >
+                    {runningAction === item.key ? `${item.label}…` : item.label}
+                  </Button>
+                ))}
+              </Toolbar>
+            </section>
+
+            <section className="action-card action-card-compact">
+              <div className="action-card-header">
+                <div>
+                  <p className="eyebrow">Gateway Service</p>
+                  <h3 className="action-card-title">消息网关服务</h3>
                 </div>
                 <Pill tone={data.gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
                   {data.gateway?.gatewayState ?? '未检测到'}
                 </Pill>
               </div>
               <p className="action-card-copy">
-                直接透传 `hermes gateway start|restart|stop`，客户端只显示结果和运行态变化。
+                既能直接 `start / restart / stop`，也能把 `gateway install / setup / uninstall` 交给 Terminal 做完整闭环。
               </p>
               <Toolbar>
-                <Button
-                  kind="primary"
-                  onClick={() => void runGatewayAction('start', '启动 Gateway')}
-                  disabled={runningAction !== null}
-                >
-                  {runningAction === 'gateway:start' ? '启动中…' : '启动'}
-                </Button>
-                <Button
-                  onClick={() => void runGatewayAction('restart', '重启 Gateway')}
-                  disabled={runningAction !== null}
-                >
-                  {runningAction === 'gateway:restart' ? '重启中…' : '重启'}
-                </Button>
-                <Button
-                  kind="danger"
-                  onClick={() => void runGatewayAction('stop', '停止 Gateway')}
-                  disabled={runningAction !== null}
-                >
-                  {runningAction === 'gateway:stop' ? '停止中…' : '停止'}
-                </Button>
-              </Toolbar>
-            </section>
-
-            <section className="action-card">
-              <div className="action-card-header">
-                <div>
-                  <p className="eyebrow">Doctor</p>
-                  <h3 className="action-card-title">Hermes 诊断</h3>
-                </div>
-                <Pill tone="neutral">CLI 原生输出</Pill>
-              </div>
-              <p className="action-card-copy">
-                复用 `hermes version|status|dump|doctor`，不在面板里自造第二套诊断逻辑。
-              </p>
-              <Toolbar>
-                {DIAGNOSTIC_ACTIONS.map((item) => (
+                {gatewayServiceActions.map((item) => (
                   <Button
                     key={item.key}
                     kind={item.kind}
-                    onClick={() => void runDiagnostic(item.key, item.label)}
-                    disabled={runningAction !== null}
+                    onClick={() => void openInTerminal(item.key, item.label, item.command, {
+                      scope: 'profile',
+                      workingDirectory,
+                      confirmMessage: item.confirmMessage,
+                    })}
+                    disabled={runningAction !== null || item.disabled}
                   >
-                    {runningAction === `diagnostic:${item.key}` ? `${item.label}…` : item.label}
-                  </Button>
-                ))}
-              </Toolbar>
-            </section>
-
-            <section className="action-card">
-              <div className="action-card-header">
-                <div>
-                  <p className="eyebrow">Finder</p>
-                  <h3 className="action-card-title">macOS 快捷入口</h3>
-                </div>
-                <Pill tone="neutral">桌面集成</Pill>
-              </div>
-              <p className="action-card-copy">
-                直接打开 Hermes Home、logs、cron 目录，或在 Finder 中定位关键配置文件和主 alias。
-              </p>
-              <Toolbar>
-                <Button onClick={() => void openInFinder(data.hermesHome, '打开 Hermes Home')} disabled={runningAction !== null}>
-                  打开 Home
-                </Button>
-                <Button onClick={() => void openInFinder(logsPath, '打开 logs 目录')} disabled={runningAction !== null}>
-                  打开 logs
-                </Button>
-                <Button onClick={() => void openInFinder(cronPath, '打开 cron 目录')} disabled={runningAction !== null}>
-                  打开 cron
-                </Button>
-                <Button onClick={() => void openInFinder(configPath, '定位 config.yaml', true)} disabled={runningAction !== null}>
-                  定位 config.yaml
-                </Button>
-                <Button
-                  onClick={() => void openInFinder(envPath, '定位 .env', true)}
-                  disabled={runningAction !== null || !currentProfile?.envExists}
-                >
-                  定位 .env
-                </Button>
-                <Button
-                  onClick={() => primaryAlias && void openInFinder(primaryAlias.path, '定位主 Alias', true)}
-                  disabled={runningAction !== null || !primaryAlias}
-                >
-                  定位主 Alias
-                </Button>
-              </Toolbar>
-            </section>
-
-            <section className="action-card">
-              <div className="action-card-header">
-                <div>
-                  <p className="eyebrow">Workspace</p>
-                  <h3 className="action-card-title">工作流跳转</h3>
-                </div>
-                <Pill tone="neutral">页面入口</Pill>
-              </div>
-              <p className="action-card-copy">
-                需要继续细查时，直接从首页跳到对应页面，不用再从侧边栏重新找。
-              </p>
-              <Toolbar>
-                {WORKSPACE_SHORTCUTS.map((item) => (
-                  <Button key={item.key} onClick={() => navigate(item.key)}>
-                    {item.label}
+                    {runningAction === item.key ? `${item.label}…` : item.label}
                   </Button>
                 ))}
               </Toolbar>
@@ -497,8 +701,148 @@ export function DashboardPage({ notify, profile, profiles, refreshProfiles, navi
         </Panel>
 
         <Panel
-          title="系统体检"
-          subtitle="围绕 Hermes 的真实运行对象给出健康摘要，帮助你在首页快速发现配置和运行风险。"
+          title="运行控制"
+          subtitle="参考 ClawPanel 的 service / doctor / shortcut 组合方式，把最常用的操作集中到首页右侧。"
+        >
+          <div className="control-card-grid">
+            <section className="action-card action-card-compact">
+              <div className="action-card-header">
+                <div>
+                  <p className="eyebrow">Runtime</p>
+                  <h3 className="action-card-title">Gateway 控制</h3>
+                </div>
+                <Pill tone={data.gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
+                  {data.gateway?.gatewayState ?? '未运行'}
+                </Pill>
+              </div>
+              <p className="action-card-copy">
+                首页直接控制当前 profile 的 gateway，不需要切页才能完成启停和重启。
+              </p>
+              <Toolbar>
+                <Button
+                  kind="primary"
+                  onClick={() => void runGatewayAction('start', '启动 Gateway')}
+                  disabled={runningAction !== null || !installation.binaryFound}
+                >
+                  {runningAction === 'gateway:start' ? '启动中…' : '启动'}
+                </Button>
+                <Button
+                  onClick={() => void runGatewayAction('restart', '重启 Gateway')}
+                  disabled={runningAction !== null || !installation.binaryFound}
+                >
+                  {runningAction === 'gateway:restart' ? '重启中…' : '重启'}
+                </Button>
+                <Button
+                  kind="danger"
+                  onClick={() => void runGatewayAction('stop', '停止 Gateway')}
+                  disabled={runningAction !== null || !installation.binaryFound}
+                >
+                  {runningAction === 'gateway:stop' ? '停止中…' : '停止'}
+                </Button>
+              </Toolbar>
+            </section>
+
+            <section className="action-card action-card-compact">
+              <div className="action-card-header">
+                <div>
+                  <p className="eyebrow">Doctor</p>
+                  <h3 className="action-card-title">原生诊断</h3>
+                </div>
+                <Pill tone="neutral">CLI Output</Pill>
+              </div>
+              <p className="action-card-copy">
+                保持 0 侵入，只展示 `hermes doctor / status / gateway status / dump` 的原生输出，不造第二套诊断体系。
+              </p>
+              <Toolbar>
+                {DIAGNOSTIC_ACTIONS.map((item) => (
+                  <Button
+                    key={item.key}
+                    kind={item.kind}
+                    onClick={() => void runDiagnostic(item.key, item.label)}
+                    disabled={runningAction !== null || !installation.binaryFound}
+                  >
+                    {runningAction === `diagnostic:${item.key}` ? `${item.label}…` : item.label}
+                  </Button>
+                ))}
+              </Toolbar>
+            </section>
+
+            <section className="action-card action-card-compact">
+              <div className="action-card-header">
+                <div>
+                  <p className="eyebrow">Finder</p>
+                  <h3 className="action-card-title">macOS 材料入口</h3>
+                </div>
+                <Pill tone="neutral">Desktop</Pill>
+              </div>
+              <p className="action-card-copy">
+                把关键文件和目录直接拉到 Finder，配合 Terminal handoff 才能形成真正可操作的桌面闭环。
+              </p>
+              <Toolbar>
+                <Button
+                  onClick={() => void openInFinder('finder:home', installation.hermesHome, '打开 Hermes Home')}
+                  disabled={runningAction !== null || !installation.hermesHomeExists}
+                >
+                  打开 Home
+                </Button>
+                <Button
+                  onClick={() => void openInFinder('finder:logs', `${data.hermesHome}/logs`, '打开 logs 目录')}
+                  disabled={runningAction !== null || !installation.logsDirExists}
+                >
+                  打开 logs
+                </Button>
+                <Button
+                  onClick={() => void openInFinder('finder:config', `${data.hermesHome}/config.yaml`, '定位 config.yaml', true)}
+                  disabled={runningAction !== null || !installation.configExists}
+                >
+                  定位 config
+                </Button>
+                <Button
+                  onClick={() => void openInFinder('finder:env', `${data.hermesHome}/.env`, '定位 .env', true)}
+                  disabled={runningAction !== null || !installation.envExists}
+                >
+                  定位 .env
+                </Button>
+                <Button
+                  onClick={() => primaryAlias && void openInFinder('finder:alias', primaryAlias.path, '定位主 Alias', true)}
+                  disabled={runningAction !== null || !primaryAlias}
+                >
+                  定位 Alias
+                </Button>
+              </Toolbar>
+            </section>
+
+            <section className="action-card action-card-compact">
+              <div className="action-card-header">
+                <div>
+                  <p className="eyebrow">Workspace</p>
+                  <h3 className="action-card-title">当前实例摘要</h3>
+                </div>
+                <Pill tone="neutral">Workspace</Pill>
+              </div>
+              <div className="detail-list compact">
+                <KeyValueRow label="当前 Profile" value={data.profileName} />
+                <KeyValueRow label="主 Alias" value={primaryAlias?.name ?? '未创建'} />
+                <KeyValueRow label="会话数" value={data.counts.sessions} />
+                <KeyValueRow label="技能数" value={data.counts.skills} />
+                <KeyValueRow label="Cron 作业" value={data.counts.cronJobs} />
+              </div>
+            </section>
+          </div>
+        </Panel>
+      </div>
+
+      <div className="two-column wide-left">
+        <Panel
+          title="运行姿态"
+          subtitle="围绕 model/provider、terminal backend、context engine、memory、toolsets 和 gateway 看真实运行链路。"
+        >
+          <RuntimePostureView posture={posture} navigate={navigate} />
+        </Panel>
+
+        <Panel
+          title="系统就绪度"
+          subtitle="把安装、依赖、关键文件和运行提醒收敛到一个更适合排查问题的右侧面板。"
         >
           <div className="health-grid">
             {healthItems.map((item) => (
@@ -511,13 +855,52 @@ export function DashboardPage({ notify, profile, profiles, refreshProfiles, navi
               </section>
             ))}
           </div>
+
+          <div className="status-list">
+            {installation.dependencies.map((dependency) => (
+              <section className="status-item" key={dependency.name}>
+                <div>
+                  <div className="status-item-title">{dependency.name}</div>
+                  <p className="status-item-copy">{dependency.note}</p>
+                  <span className="status-item-path">{dependency.path ?? '未检测到可执行路径'}</span>
+                </div>
+                <Pill tone={dependencyTone(dependency)}>
+                  {dependency.found ? '已发现' : '缺失'}
+                </Pill>
+              </section>
+            ))}
+          </div>
+
+          <div className="artifact-grid">
+            {workspaceArtifacts.map((item) => (
+              <section className="artifact-card" key={item.key}>
+                <div className="artifact-card-header">
+                  <strong>{item.label}</strong>
+                  <Pill tone={item.exists ? 'good' : 'warn'}>
+                    {item.exists ? '存在' : '缺失'}
+                  </Pill>
+                </div>
+                <p>{item.path}</p>
+              </section>
+            ))}
+          </div>
+
+          {runtimeWarnings.length > 0 ? (
+            <div className="warning-stack">
+              {runtimeWarnings.map((warning) => (
+                <div className="warning-item" key={warning}>
+                  {warning}
+                </div>
+              ))}
+            </div>
+          ) : null}
         </Panel>
       </div>
 
       <div className="two-column wide-left">
         <Panel
-          title="快捷输出"
-          subtitle="集中显示最近一次快捷动作的命令、退出码与输出，避免来回切到诊断页。"
+          title="最近输出"
+          subtitle="无论是直接执行 gateway/doctor，还是把命令交给 Terminal，最后都能在这里看到最近一次动作摘要。"
         >
           {lastResult ? (
             <div className="result-stack">
@@ -535,126 +918,66 @@ export function DashboardPage({ notify, profile, profiles, refreshProfiles, navi
                 <KeyValueRow label="退出码" value={lastResult.result.exitCode} />
                 <KeyValueRow label="完成时间" value={formatTimestamp(lastResult.finishedAt)} />
               </div>
-              <pre className="code-block">{lastResult.result.stdout || 'stdout 为空'}</pre>
+              <pre className="code-block compact-code">{lastResult.result.stdout || 'stdout 为空'}</pre>
               {lastResult.result.stderr ? (
-                <pre className="code-block">{lastResult.result.stderr}</pre>
+                <pre className="code-block compact-code">{lastResult.result.stderr}</pre>
               ) : null}
             </div>
           ) : (
             <EmptyState
-              title="暂无快捷输出"
-              description="执行上面的任一快捷动作后，命令输出会统一汇总到这里。"
+              title="暂无执行摘要"
+              description="首页上的任何快捷动作执行后，都会把结果回写到这里，便于确认这次操作是否真正完成。"
+            />
+          )}
+
+          <div className="detail-list compact top-gap">
+            <KeyValueRow label="当前版本信息" value={installation.versionOutput.trim() || '—'} />
+          </div>
+        </Panel>
+
+        <Panel
+          title="日志尾部预览"
+          subtitle="保留 ClawPanel 那种首页先看日志尾部的节奏，先做判断，再决定是否切到日志页深挖。"
+          aside={(
+            <Toolbar>
+              <select
+                className="select-input"
+                value={logName}
+                onChange={(event) => setLogName(event.target.value)}
+              >
+                {LOG_OPTIONS.map((item) => (
+                  <option key={item.key} value={item.key}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+              <Button onClick={() => void loadLogPreview()} disabled={logLoading}>
+                {logLoading ? '读取中…' : '刷新日志'}
+              </Button>
+            </Toolbar>
+          )}
+        >
+          {logPreview ? (
+            <>
+              <div className="detail-list compact">
+                <KeyValueRow label="文件" value={logPreview.filePath} />
+                <KeyValueRow label="返回行数" value={logPreview.lines.length} />
+              </div>
+              <pre className="code-block compact-code">{logPreview.lines.join('\n') || '没有匹配到日志行。'}</pre>
+            </>
+          ) : (
+            <EmptyState
+              title="暂无日志预览"
+              description={logError ?? '还没有读取到日志内容，可切换日志类型后再试。'}
             />
           )}
         </Panel>
-
-        <div className="page-stack">
-          <Panel title="当前配置摘要">
-            <div className="detail-list">
-              <KeyValueRow label="默认模型" value={data.config.modelDefault} />
-              <KeyValueRow label="提供商" value={data.config.modelProvider} />
-              <KeyValueRow label="Base URL" value={data.config.modelBaseUrl ?? '—'} />
-              <KeyValueRow label="终端后端" value={data.config.terminalBackend} />
-              <KeyValueRow label="工作目录" value={data.config.terminalCwd} />
-              <KeyValueRow label="Context Engine" value={data.config.contextEngine ?? '—'} />
-              <KeyValueRow label="人格" value={data.config.personality} />
-              <KeyValueRow
-                label="Toolsets"
-                value={data.config.toolsets.length ? data.config.toolsets.join(', ') : '—'}
-              />
-              <KeyValueRow label="记忆功能" value={String(data.config.memoryEnabled ?? false)} />
-              <KeyValueRow label="记忆 Provider" value={data.config.memoryProvider || 'builtin-file'} />
-              <KeyValueRow label="用户画像" value={String(data.config.userProfileEnabled ?? false)} />
-            </div>
-          </Panel>
-
-          <Panel title="网关状态摘要">
-            {data.gateway ? (
-              <div className="detail-list">
-                <KeyValueRow
-                  label="运行状态"
-                  value={(
-                    <Pill tone={data.gateway.gatewayState === 'running' ? 'good' : 'warn'}>
-                      {data.gateway.gatewayState}
-                    </Pill>
-                  )}
-                />
-                <KeyValueRow label="PID" value={data.gateway.pid ?? '—'} />
-                <KeyValueRow label="活跃 Agent" value={data.gateway.activeAgents} />
-                <KeyValueRow label="更新时间" value={formatTimestamp(data.gateway.updatedAt)} />
-                {data.gateway.platforms.map((platform) => (
-                  <KeyValueRow
-                    key={platform.name}
-                    label={platform.name}
-                    value={(
-                      <span>
-                        <Pill
-                          tone={
-                            platform.state === 'connected'
-                              ? 'good'
-                              : platform.state === 'fatal'
-                                ? 'bad'
-                                : 'warn'
-                          }
-                        >
-                          {platform.state}
-                        </Pill>
-                        {platform.errorMessage ? ` ${platform.errorMessage}` : ''}
-                      </span>
-                    )}
-                  />
-                ))}
-              </div>
-            ) : (
-              <EmptyState title="未检测到运行态" description="尚未读取到 gateway_state.json。" />
-            )}
-          </Panel>
-
-          <Panel
-            title="日志尾部预览"
-            subtitle="参考 ClawPanel 的 log tail 思路，把最近日志直接带到首页，先看再决定是否深入日志页。"
-            aside={(
-              <Toolbar>
-                <select
-                  className="select-input"
-                  value={logName}
-                  onChange={(event) => setLogName(event.target.value)}
-                >
-                  {LOG_OPTIONS.map((item) => (
-                    <option key={item.key} value={item.key}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-                <Button onClick={() => void loadLogPreview()} disabled={logLoading}>
-                  {logLoading ? '读取中…' : '刷新日志'}
-                </Button>
-                <Button onClick={() => navigate('logs')}>进入日志页</Button>
-              </Toolbar>
-            )}
-          >
-            {logPreview ? (
-              <>
-                <div className="detail-list compact">
-                  <KeyValueRow label="文件" value={logPreview.filePath} />
-                  <KeyValueRow label="返回行数" value={logPreview.lines.length} />
-                </div>
-                <pre className="code-block">{logPreview.lines.join('\n') || '没有匹配到日志行。'}</pre>
-              </>
-            ) : (
-              <EmptyState
-                title="暂无日志预览"
-                description={logError ?? '还没有读取到日志内容，可切换日志类型后再试。'}
-              />
-            )}
-          </Panel>
-        </div>
       </div>
 
       <div className="two-column">
         <Panel title="最近会话">
           {data.recentSessions.length === 0 ? (
-            <EmptyState title="暂无会话" description="先运行一次 Hermes 对话，会话库就会出现。" />
+            <EmptyState title="暂无会话" description="先运行一次 Hermes 对话，会话历史就会回到这里。" />
           ) : (
             <div className="list-stack">
               {data.recentSessions.map((session) => (
@@ -694,21 +1017,6 @@ export function DashboardPage({ notify, profile, profiles, refreshProfiles, navi
           </div>
         </Panel>
       </div>
-
-      <Panel title="运行提醒与版本">
-        {runtimeWarnings.length === 0 ? (
-          <EmptyState title="状态健康" description="当前未发现明显的本地运行风险。" />
-        ) : (
-          <div className="warning-stack">
-            {runtimeWarnings.map((warning) => (
-              <div className="warning-item" key={warning}>
-                {warning}
-              </div>
-            ))}
-          </div>
-        )}
-        <pre className="code-block">{data.versionOutput}</pre>
-      </Panel>
     </div>
   );
 }

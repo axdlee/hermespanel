@@ -10,7 +10,9 @@ import type {
   CronUpdateRequest,
   DashboardSnapshot,
   DesktopOpenRequest,
+  DesktopTerminalRequest,
   ExtensionsSnapshot,
+  InstallationSnapshot,
   LogReadResult,
   MemoryFileDetail,
   MemoryFileSummary,
@@ -58,6 +60,8 @@ export const api = {
     call<CommandRunResult>('delete_profile_alias', { request }),
   getDashboardSnapshot: (profile?: string) =>
     call<DashboardSnapshot>('get_dashboard_snapshot', withProfile(profile)),
+  getInstallationSnapshot: (profile?: string) =>
+    call<InstallationSnapshot>('get_installation_snapshot', withProfile(profile)),
   getConfigDocuments: (profile?: string) =>
     call<ConfigDocuments>('get_config_documents', withProfile(profile)),
   getExtensionsSnapshot: (profile?: string) =>
@@ -85,6 +89,8 @@ export const api = {
     call<CommandRunResult>('delete_cron_job', withProfile(profile, { request })),
   openInFinder: (request: DesktopOpenRequest) =>
     call<CommandRunResult>('open_in_finder', { request }),
+  openInTerminal: (request: DesktopTerminalRequest) =>
+    call<CommandRunResult>('open_in_terminal', { request }),
   runCronAction: (action: string, jobId: string, profile?: string) =>
     call<CommandRunResult>('run_cron_action', withProfile(profile, { action, jobId })),
   readLog: (

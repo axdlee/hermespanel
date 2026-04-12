@@ -6,6 +6,7 @@ export function Panel(
     subtitle?: string;
     aside?: ReactNode;
     className?: string;
+    tip?: ReactNode;
   }>,
 ) {
   return (
@@ -13,7 +14,12 @@ export function Panel(
       {(props.title || props.subtitle || props.aside) && (
         <header className="panel-header">
           <div>
-            {props.title && <h2 className="panel-title">{props.title}</h2>}
+            {props.title && (
+              <div className="panel-title-row">
+                <h2 className="panel-title">{props.title}</h2>
+                {props.tip}
+              </div>
+            )}
             {props.subtitle && <p className="panel-subtitle">{props.subtitle}</p>}
           </div>
           {props.aside}
@@ -35,6 +41,68 @@ export function MetricCard(props: {
       <strong className="metric-value">{props.value}</strong>
       {props.hint && <span className="metric-hint">{props.hint}</span>}
     </div>
+  );
+}
+
+export function StatCard(props: {
+  label: string;
+  value: ReactNode;
+  meta?: ReactNode;
+  tone?: 'running' | 'stopped' | 'warning';
+  actions?: ReactNode;
+}) {
+  return (
+    <section className="stat-card">
+      <div className="stat-card-header">
+        <span className="stat-card-label">{props.label}</span>
+        {props.tone ? <span className={`status-dot ${props.tone}`} /> : null}
+      </div>
+      <div className="stat-card-value">{props.value}</div>
+      {props.meta ? <div className="stat-card-meta">{props.meta}</div> : null}
+      {props.actions ? <div className="stat-card-actions">{props.actions}</div> : null}
+    </section>
+  );
+}
+
+export function OverviewCard(props: {
+  title: string;
+  value: ReactNode;
+  meta?: ReactNode;
+  actions?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={`overview-card ${props.className ?? ''}`.trim()}>
+      <div className="overview-card-body">
+        <div className="overview-card-title">{props.title}</div>
+        <div className="overview-card-value">{props.value}</div>
+        {props.meta ? <div className="overview-card-meta">{props.meta}</div> : null}
+        {props.actions ? <div className="overview-card-actions">{props.actions}</div> : null}
+      </div>
+    </section>
+  );
+}
+
+export function ServiceStrip(props: PropsWithChildren<{
+  title: string;
+  description?: ReactNode;
+  badge?: ReactNode;
+  actions?: ReactNode;
+}>) {
+  return (
+    <section className="service-card">
+      <div className="service-info">
+        <div>
+          <div className="service-name">{props.title}</div>
+          {props.description ? <div className="service-desc">{props.description}</div> : null}
+          {props.children}
+        </div>
+      </div>
+      <div className="service-actions">
+        {props.badge}
+        {props.actions}
+      </div>
+    </section>
   );
 }
 
@@ -109,5 +177,14 @@ export function Button(props: PropsWithChildren<{
     >
       {props.children}
     </button>
+  );
+}
+
+export function InfoTip(props: { content: ReactNode; label?: string }) {
+  return (
+    <span className="info-tip" tabIndex={0} aria-label="更多信息">
+      <span className="info-tip-trigger">{props.label ?? '?'}</span>
+      <span className="info-tip-bubble">{props.content}</span>
+    </span>
   );
 }

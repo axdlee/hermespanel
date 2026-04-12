@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { Button, EmptyState, KeyValueRow, MetricCard, Panel, Pill, Toolbar } from '../components/ui';
 import { api } from '../lib/api';
+import { handoffToTerminal, openFinderLocation } from '../lib/desktop';
 import { isRemoteDelivery, platformTone } from '../lib/runtime';
 import type {
   CommandRunResult,
@@ -9,6 +10,7 @@ import type {
   CronJobsSnapshot,
   DashboardSnapshot,
   ExtensionsSnapshot,
+  InstallationSnapshot,
   ProfileAliasCreateRequest,
   ProfileAliasDeleteRequest,
   ProfileCreateRequest,
@@ -27,6 +29,7 @@ interface ProfileRuntimeBundle {
   config: ConfigDocuments;
   extensions: ExtensionsSnapshot;
   cron: CronJobsSnapshot;
+  installation: InstallationSnapshot;
 }
 
 function chooseCompareName(
@@ -154,6 +157,7 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles }: Pag
   const [deleteConfirm, setDeleteConfirm] = useState('');
 
   const [runningAction, setRunningAction] = useState<string | null>(null);
+  const [lastCommandLabel, setLastCommandLabel] = useState<string | null>(null);
   const [lastCommand, setLastCommand] = useState<CommandRunResult | null>(null);
   const [runtimeBundles, setRuntimeBundles] = useState<Record<string, ProfileRuntimeBundle>>({});
   const [loadingRuntimeNames, setLoadingRuntimeNames] = useState<string[]>([]);
@@ -230,15 +234,16 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles }: Pag
 
     setLoadingRuntimeNames((current) => (current.includes(profileName) ? current : [...current, profileName]));
     try {
-      const [dashboard, config, extensions, cron] = await Promise.all([
+      const [dashboard, config, extensions, cron, installation] = await Promise.all([
         api.getDashboardSnapshot(profileName),
         api.getConfigDocuments(profileName),
         api.getExtensionsSnapshot(profileName),
         api.getCronJobs(profileName),
+        api.getInstallationSnapshot(profileName),
       ]);
       setRuntimeBundles((current) => ({
         ...current,
-        [profileName]: { dashboard, config, extensions, cron },
+        [profileName]: { dashboard, config, extensions, cron, installation },
       }));
     } catch (reason) {
       notify('error', `${profileName} 运行态读取失败：${String(reason)}`);
@@ -267,6 +272,7 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles }: Pag
   const compareWarnings = selectedProfile && selectedRuntime && compareProfile && compareRuntime
     ? profileDrifts(selectedProfile, selectedRuntime, compareProfile, compareRuntime)
     : [];
+  const selectedInstallation = selectedRuntime?.installation;
 
   async function refreshProfileWorkspace(forceName?: string) {
     const target = forceName ?? selectedProfile?.name;
@@ -296,6 +302,7 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles }: Pag
         noAlias,
       };
       const result = await api.createProfile(request);
+      setLastCommandLabel(`创建 Profile ${normalizedName}`);
       setLastCommand(result);
       notify(result.success ? 'success' : 'error', `profile ${normalizedName} 创建命令已执行。`);
       await refreshProfiles(normalizedName);
@@ -316,6 +323,7 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles }: Pag
     setRunningAction(`activate:${name}`);
     try {
       await api.setActiveProfile(name);
+      setLastCommandLabel(`切换默认 Profile ${name}`);
       await refreshProfiles(name);
       await loadRuntimeBundle(name, true);
       notify('success', `已将 ${name} 设为 Hermes 默认 profile。`);
@@ -345,6 +353,7 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles }: Pag
         newName: normalizedName,
       };
       const result = await api.renameProfile(request);
+      setLastCommandLabel(`重命名 Profile ${selectedProfile.name}`);
       setLastCommand(result);
       notify(result.success ? 'success' : 'error', `profile ${selectedProfile.name} 重命名命令已执行。`);
       setRuntimeBundles((current) => {
@@ -376,6 +385,7 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles }: Pag
         output: exportOutput.trim() || null,
       };
       const result = await api.exportProfile(request);
+      setLastCommandLabel(`导出 Profile ${selectedProfile.name}`);
       setLastCommand(result);
       notify(result.success ? 'success' : 'error', `profile ${selectedProfile.name} 导出命令已执行。`);
     } catch (reason) {
@@ -399,6 +409,7 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles }: Pag
         importName: importName.trim() || null,
       };
       const result = await api.importProfile(request);
+      setLastCommandLabel(`导入 Profile ${importName.trim() || archive}`);
       setLastCommand(result);
       const preferredProfile = importName.trim() || undefined;
       await refreshProfiles(preferredProfile);
@@ -433,6 +444,7 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles }: Pag
         confirmName: deleteConfirm.trim(),
       };
       const result = await api.deleteProfile(request);
+      setLastCommandLabel(`删除 Profile ${request.profileName}`);
       setLastCommand(result);
       setRuntimeBundles((current) => {
         const next = { ...current };
@@ -463,6 +475,7 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles }: Pag
         aliasName: normalizedAliasName,
       };
       const result = await api.createProfileAlias(request);
+      setLastCommandLabel(`创建 Alias ${normalizedAliasName}`);
       setLastCommand(result);
       await refreshProfiles(selectedProfile.name);
       notify(result.success ? 'success' : 'error', `profile ${selectedProfile.name} alias 创建命令已执行。`);
@@ -496,6 +509,7 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles }: Pag
         confirmName: removeAliasConfirm.trim(),
       };
       const result = await api.deleteProfileAlias(request);
+      setLastCommandLabel(`删除 Alias ${normalizedAliasName}`);
       setLastCommand(result);
       if (result.success) {
         setRemoveAliasConfirm('');
@@ -515,19 +529,37 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles }: Pag
   }
 
   async function openInFinder(path: string, label: string, revealInFinder = false) {
-    setRunningAction(`open:${label}`);
-    try {
-      const result = await api.openInFinder({ path, revealInFinder });
-      setLastCommand(result);
-      notify(
-        result.success ? 'success' : 'error',
-        result.success ? `${label} 已在 Finder 中打开。` : `${label} 打开失败，请检查命令输出。`,
-      );
-    } catch (reason) {
-      notify('error', String(reason));
-    } finally {
-      setRunningAction(null);
-    }
+    await openFinderLocation({
+      actionKey: `open:${label}`,
+      label,
+      notify,
+      onResult: (resultLabel, result) => {
+        setLastCommandLabel(resultLabel);
+        setLastCommand(result);
+      },
+      path,
+      revealInFinder,
+      setBusy: setRunningAction,
+    });
+  }
+
+  async function openInTerminal(profileName: string, actionKey: string, label: string, command: string, confirmMessage?: string) {
+    await handoffToTerminal({
+      actionKey,
+      command,
+      confirmMessage,
+      label,
+      notify,
+      onResult: (resultLabel, result) => {
+        setLastCommandLabel(resultLabel);
+        setLastCommand(result);
+      },
+      profile: profileName,
+      setBusy: setRunningAction,
+      workingDirectory: runtimeBundles[profileName]?.installation.hermesHomeExists
+        ? runtimeBundles[profileName]?.installation.hermesHome
+        : null,
+    });
   }
 
   return (
@@ -544,7 +576,7 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles }: Pag
         {profileItems.length === 0 ? (
           <EmptyState title="未发现 profile" description="当前还没有可管理的 Hermes profile。" />
         ) : (
-          <div className="list-stack">
+          <div className="list-stack profile-rail">
             {profileItems.map((item) => (
               <button
                 key={item.name}
@@ -623,6 +655,188 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles }: Pag
             </div>
           ) : (
             <EmptyState title="未选择 profile" description="从左侧选择一个 Hermes profile 查看详情。" />
+          )}
+        </Panel>
+
+        <Panel
+          title="Profile 接管与工作区"
+          subtitle="把每个 Hermes profile 当成独立实例来治理，直接接管 setup、gateway、skills、plugins 和记忆 Provider。"
+        >
+          {selectedProfile && selectedInstallation ? (
+            <div className="control-card-grid">
+              <section className="action-card action-card-compact">
+                <div className="action-card-header">
+                  <div>
+                    <p className="eyebrow">Workspace</p>
+                    <h3 className="action-card-title">实例工作区</h3>
+                  </div>
+                  <Pill tone={selectedProfile.isActive ? 'good' : 'warn'}>
+                    {selectedProfile.isActive ? '当前默认' : '独立实例'}
+                  </Pill>
+                </div>
+                <p className="action-card-copy">
+                  先确认 home、config、env、日志和状态文件都在，再决定是做迁移、修复还是切换默认 profile。
+                </p>
+                <p className="command-line">{selectedProfile.homePath}</p>
+                <Toolbar>
+                  <Button onClick={() => void openInFinder(selectedProfile.homePath, `${selectedProfile.name} 目录`)} disabled={runningAction !== null}>
+                    打开目录
+                  </Button>
+                  <Button
+                    onClick={() => void openInFinder(selectedRuntime?.config.configPath ?? '', `${selectedProfile.name} config.yaml`, true)}
+                    disabled={runningAction !== null || !selectedRuntime}
+                  >
+                    定位配置
+                  </Button>
+                  <Button
+                    onClick={() => void openInFinder(selectedRuntime?.config.envPath ?? '', `${selectedProfile.name} .env`, true)}
+                    disabled={runningAction !== null || !selectedRuntime}
+                  >
+                    定位 .env
+                  </Button>
+                  <Button
+                    kind="primary"
+                    disabled={selectedProfile.isActive || runningAction !== null}
+                    onClick={() => void activateProfile(selectedProfile.name)}
+                  >
+                    {runningAction === `activate:${selectedProfile.name}` ? '同步中…' : selectedProfile.isActive ? '已是默认' : '设为默认'}
+                  </Button>
+                </Toolbar>
+              </section>
+
+              <section className="action-card action-card-compact">
+                <div className="action-card-header">
+                  <div>
+                    <p className="eyebrow">Bootstrap</p>
+                    <h3 className="action-card-title">Setup / Model / Gateway</h3>
+                  </div>
+                  <Pill tone={selectedInstallation.binaryFound ? 'good' : 'bad'}>
+                    {selectedInstallation.binaryFound ? 'CLI 就绪' : 'CLI 缺失'}
+                  </Pill>
+                </div>
+                <p className="action-card-copy">
+                  针对选中的 profile 直接进入 Hermes 官方交互式向导，不让你在多实例之间来回跳。
+                </p>
+                <p className="command-line">
+                  {selectedInstallation.setupCommand} · {selectedInstallation.modelCommand} · {selectedInstallation.gatewaySetupCommand}
+                </p>
+                <Toolbar>
+                  <Button
+                    kind="primary"
+                    onClick={() => void openInTerminal(selectedProfile.name, 'profile:setup', '全量 Setup', selectedInstallation.setupCommand)}
+                    disabled={runningAction !== null || !selectedInstallation.binaryFound}
+                  >
+                    {runningAction === 'profile:setup' ? '全量 Setup…' : '全量 Setup'}
+                  </Button>
+                  <Button
+                    onClick={() => void openInTerminal(selectedProfile.name, 'profile:model', '模型 / Provider', selectedInstallation.modelCommand)}
+                    disabled={runningAction !== null || !selectedInstallation.binaryFound}
+                  >
+                    {runningAction === 'profile:model' ? '模型 / Provider…' : '模型 / Provider'}
+                  </Button>
+                  <Button
+                    onClick={() => void openInTerminal(selectedProfile.name, 'profile:gateway-setup', 'Gateway Setup', selectedInstallation.gatewaySetupCommand)}
+                    disabled={runningAction !== null || !selectedInstallation.binaryFound}
+                  >
+                    {runningAction === 'profile:gateway-setup' ? 'Gateway Setup…' : 'Gateway Setup'}
+                  </Button>
+                  <Button onClick={() => void refreshProfileWorkspace(selectedProfile.name)} disabled={runningAction !== null || selectedRuntimeLoading}>
+                    刷新实例
+                  </Button>
+                </Toolbar>
+              </section>
+
+              <section className="action-card action-card-compact">
+                <div className="action-card-header">
+                  <div>
+                    <p className="eyebrow">Capability</p>
+                    <h3 className="action-card-title">Tools / Skills / Memory / Plugins</h3>
+                  </div>
+                  <Pill tone={selectedRuntime && enabledToolCount(selectedRuntime) > 0 ? 'good' : 'warn'}>
+                    {selectedRuntime ? `${enabledToolCount(selectedRuntime)} 个工具` : '待接管'}
+                  </Pill>
+                </div>
+                <p className="action-card-copy">
+                  Hermes 的差异化能力面主要就在这里，尤其适合多 profile 环境下快速切换与验证。
+                </p>
+                <p className="command-line">
+                  {selectedInstallation.toolsSetupCommand} · {selectedInstallation.skillsConfigCommand} · hermes memory setup · hermes plugins
+                </p>
+                <Toolbar>
+                  <Button
+                    onClick={() => void openInTerminal(selectedProfile.name, 'profile:tools-setup', '工具选择', selectedInstallation.toolsSetupCommand)}
+                    disabled={runningAction !== null || !selectedInstallation.binaryFound}
+                  >
+                    {runningAction === 'profile:tools-setup' ? '工具选择…' : '工具选择'}
+                  </Button>
+                  <Button
+                    onClick={() => void openInTerminal(selectedProfile.name, 'profile:skills-config', '技能开关', selectedInstallation.skillsConfigCommand)}
+                    disabled={runningAction !== null || !selectedInstallation.binaryFound}
+                  >
+                    {runningAction === 'profile:skills-config' ? '技能开关…' : '技能开关'}
+                  </Button>
+                  <Button
+                    onClick={() => void openInTerminal(selectedProfile.name, 'profile:memory-setup', '记忆 Provider', 'hermes memory setup')}
+                    disabled={runningAction !== null || !selectedInstallation.binaryFound}
+                  >
+                    {runningAction === 'profile:memory-setup' ? '记忆 Provider…' : '记忆 Provider'}
+                  </Button>
+                  <Button
+                    onClick={() => void openInTerminal(selectedProfile.name, 'profile:plugins', '插件与 Context Engine', 'hermes plugins')}
+                    disabled={runningAction !== null || !selectedInstallation.binaryFound}
+                  >
+                    {runningAction === 'profile:plugins' ? '插件与 Context Engine…' : '插件与 Context Engine'}
+                  </Button>
+                </Toolbar>
+              </section>
+
+              <section className="action-card action-card-compact">
+                <div className="action-card-header">
+                  <div>
+                    <p className="eyebrow">Artifacts</p>
+                    <h3 className="action-card-title">运行物料与恢复点</h3>
+                  </div>
+                  <Pill tone={selectedWarnings.length === 0 ? 'good' : 'warn'}>
+                    {selectedWarnings.length === 0 ? '完整' : `${selectedWarnings.length} 条提醒`}
+                  </Pill>
+                </div>
+                <p className="action-card-copy">
+                  当某个实例状态漂移时，优先确认核心文件和运行物料是否齐全，再决定是否导出、迁移或回滚。
+                </p>
+                <div className="pill-row">
+                  <Pill tone={selectedInstallation.configExists ? 'good' : 'warn'}>config.yaml</Pill>
+                  <Pill tone={selectedInstallation.envExists ? 'good' : 'warn'}>.env</Pill>
+                  <Pill tone={selectedInstallation.stateDbExists ? 'good' : 'warn'}>state.db</Pill>
+                  <Pill tone={selectedInstallation.gatewayStateExists ? 'good' : 'warn'}>gateway_state.json</Pill>
+                  <Pill tone={selectedInstallation.logsDirExists ? 'good' : 'warn'}>logs</Pill>
+                </div>
+                <Toolbar>
+                  <Button
+                    onClick={() => void openInFinder(`${selectedProfile.homePath}/state.db`, `${selectedProfile.name} state.db`, true)}
+                    disabled={runningAction !== null || !selectedInstallation.stateDbExists}
+                  >
+                    定位 state.db
+                  </Button>
+                  <Button
+                    onClick={() => void openInFinder(`${selectedProfile.homePath}/gateway_state.json`, `${selectedProfile.name} gateway_state.json`, true)}
+                    disabled={runningAction !== null || !selectedInstallation.gatewayStateExists}
+                  >
+                    定位网关状态
+                  </Button>
+                  <Button
+                    onClick={() => void openInFinder(`${selectedProfile.homePath}/logs`, `${selectedProfile.name} logs`)}
+                    disabled={runningAction !== null || !selectedInstallation.logsDirExists}
+                  >
+                    打开 logs
+                  </Button>
+                  <Button onClick={() => void openInTerminal(selectedProfile.name, 'profile:status', '查看实例状态', 'hermes status --all')} disabled={runningAction !== null || !selectedInstallation.binaryFound}>
+                    查看实例状态
+                  </Button>
+                </Toolbar>
+              </section>
+            </div>
+          ) : (
+            <EmptyState title="请选择 profile" description="选中一个 profile 后，这里会显示它的接管动作、运行物料和实例级治理入口。" />
           )}
         </Panel>
 
@@ -1132,6 +1346,7 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles }: Pag
           {lastCommand ? (
             <>
               <div className="detail-list compact">
+                <KeyValueRow label="动作类型" value={lastCommandLabel || '治理动作'} />
                 <KeyValueRow label="命令" value={lastCommand.command} />
                 <KeyValueRow label="退出码" value={lastCommand.exitCode} />
                 <KeyValueRow label="结果" value={<Pill tone={lastCommand.success ? 'good' : 'bad'}>{String(lastCommand.success)}</Pill>} />

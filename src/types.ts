@@ -177,10 +177,46 @@ export interface CommandRunResult {
   stderr: string;
 }
 
+export interface BinaryStatus {
+  name: string;
+  found: boolean;
+  path?: string | null;
+  note: string;
+}
+
+export interface InstallationSnapshot {
+  profileName: string;
+  hermesHome: string;
+  hermesHomeExists: boolean;
+  configExists: boolean;
+  envExists: boolean;
+  stateDbExists: boolean;
+  gatewayStateExists: boolean;
+  logsDirExists: boolean;
+  binaryFound: boolean;
+  hermesBinary?: string | null;
+  versionOutput: string;
+  dependencies: BinaryStatus[];
+  quickInstallCommand: string;
+  updateCommand: string;
+  uninstallCommand: string;
+  setupCommand: string;
+  modelCommand: string;
+  terminalSetupCommand: string;
+  toolsSetupCommand: string;
+  gatewayInstallCommand: string;
+  gatewayUninstallCommand: string;
+  gatewaySetupCommand: string;
+  configMigrateCommand: string;
+  skillsConfigCommand: string;
+  clawMigrateCommand: string;
+}
+
 export interface DashboardSnapshot {
   profileName: string;
   hermesHome: string;
   hermesBinary: string;
+  binaryFound: boolean;
   versionOutput: string;
   config: ConfigSummary;
   gateway?: GatewayStateSnapshot | null;
@@ -312,6 +348,11 @@ export interface CronDeleteRequest {
 export interface DesktopOpenRequest {
   path: string;
   revealInFinder: boolean;
+}
+
+export interface DesktopTerminalRequest {
+  command: string;
+  workingDirectory?: string | null;
 }
 
 export type NoticeTone = 'success' | 'error' | 'info';

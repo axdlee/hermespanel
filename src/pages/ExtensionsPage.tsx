@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { Button, ContextBanner, EmptyState, KeyValueRow, LoadingState, MetricCard, Panel, Pill, Toolbar } from '../components/ui';
+import { Button, ContextBanner, EmptyState, InfoTip, KeyValueRow, LoadingState, MetricCard, Panel, Pill, Toolbar } from '../components/ui';
 import { api } from '../lib/api';
+import { handoffToTerminal, openFinderLocation } from '../lib/desktop';
 import {
   buildConfigDrilldownIntent,
   buildDiagnosticsDrilldownIntent,
@@ -13,6 +14,7 @@ import type {
   CommandRunResult,
   DashboardSnapshot,
   ExtensionsSnapshot,
+  InstallationSnapshot,
   NamedCount,
   RuntimeSkillItem,
   SkillItem,
@@ -76,6 +78,7 @@ function primaryInvestigationTool(investigation: ExtensionsPageIntent | null) {
 export function ExtensionsPage({ notify, profile, navigate, pageIntent, consumePageIntent }: PageProps) {
   const [extensions, setExtensions] = useState<ExtensionsSnapshot | null>(null);
   const [dashboard, setDashboard] = useState<DashboardSnapshot | null>(null);
+  const [installation, setInstallation] = useState<InstallationSnapshot | null>(null);
   const [skills, setSkills] = useState<SkillItem[]>([]);
   const [investigation, setInvestigation] = useState<ExtensionsPageIntent | null>(null);
   const [rawKind, setRawKind] = useState<RawOutputKind>('tools');
@@ -85,6 +88,7 @@ export function ExtensionsPage({ notify, profile, navigate, pageIntent, consumeP
   const [toolNamesInput, setToolNamesInput] = useState('');
   const [pluginNameInput, setPluginNameInput] = useState('');
   const [runningAction, setRunningAction] = useState<string | null>(null);
+  const [lastCommandLabel, setLastCommandLabel] = useState<string | null>(null);
   const [lastCommand, setLastCommand] = useState<CommandRunResult | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -93,13 +97,15 @@ export function ExtensionsPage({ notify, profile, navigate, pageIntent, consumeP
       setLoading(true);
     }
     try {
-      const [nextExtensions, nextDashboard, nextSkills] = await Promise.all([
+      const [nextExtensions, nextDashboard, nextInstallation, nextSkills] = await Promise.all([
         api.getExtensionsSnapshot(profile),
         api.getDashboardSnapshot(profile),
+        api.getInstallationSnapshot(profile),
         api.listSkills(profile),
       ]);
       setExtensions(nextExtensions);
       setDashboard(nextDashboard);
+      setInstallation(nextInstallation);
       setSkills(nextSkills);
       setSelectedPlatform((current) =>
         nextExtensions.toolInventory.some((item) => item.platformKey === current)
@@ -117,15 +123,31 @@ export function ExtensionsPage({ notify, profile, navigate, pageIntent, consumeP
   }
 
   async function openInFinder(path: string, label: string, revealInFinder = false) {
-    try {
-      const result = await api.openInFinder({ path, revealInFinder });
-      notify(
-        result.success ? 'success' : 'error',
-        result.success ? `${label} 已在 Finder 中打开。` : `${label} 打开失败，请检查命令输出。`,
-      );
-    } catch (reason) {
-      notify('error', String(reason));
-    }
+    await openFinderLocation({
+      actionKey: `finder:${label}`,
+      label,
+      notify,
+      path,
+      revealInFinder,
+      setBusy: setRunningAction,
+    });
+  }
+
+  async function openInTerminal(actionKey: string, label: string, command: string, confirmMessage?: string) {
+    await handoffToTerminal({
+      actionKey,
+      command,
+      confirmMessage,
+      label,
+      notify,
+      onResult: (resultLabel, result) => {
+        setLastCommandLabel(resultLabel);
+        setLastCommand(result);
+      },
+      profile,
+      setBusy: setRunningAction,
+      workingDirectory: installation?.hermesHomeExists ? installation.hermesHome : null,
+    });
   }
 
   async function executeToolAction(
@@ -148,6 +170,7 @@ export function ExtensionsPage({ notify, profile, navigate, pageIntent, consumeP
     setRunningAction(actionId);
     try {
       const result = await api.runToolAction(action, platformKey, normalizedNames, profile);
+      setLastCommandLabel(options?.label ?? normalizedNames.join('、'));
       setLastCommand(result);
       if (options?.clearInput) {
         setToolNamesInput('');
@@ -177,6 +200,7 @@ export function ExtensionsPage({ notify, profile, navigate, pageIntent, consumeP
     setRunningAction(actionId);
     try {
       const result = await api.runPluginAction(action, normalizedName, profile);
+      setLastCommandLabel(`插件 ${normalizedName} · ${action}`);
       setLastCommand(result);
       if (options?.clearInput) {
         setPluginNameInput(normalizedName);
@@ -196,6 +220,7 @@ export function ExtensionsPage({ notify, profile, navigate, pageIntent, consumeP
   }
 
   useEffect(() => {
+    setLastCommandLabel(null);
     setLastCommand(null);
     void load();
   }, [profile]);
@@ -262,7 +287,7 @@ export function ExtensionsPage({ notify, profile, navigate, pageIntent, consumeP
 
   const batchToolNames = useMemo(() => normalizeToolNames(toolNamesInput), [toolNamesInput]);
 
-  if (loading || !extensions || !dashboard) {
+  if (loading || !extensions || !dashboard || !installation) {
     return <LoadingState label="正在构建 Hermes 扩展能力工作台。" />;
   }
 
@@ -272,8 +297,12 @@ export function ExtensionsPage({ notify, profile, navigate, pageIntent, consumeP
   const sourceLocalCount = extensions.skillSourceCounts.find((item) => item.name === 'local')?.count ?? 0;
   const sourceBuiltinCount = extensions.skillSourceCounts.find((item) => item.name === 'builtin')?.count ?? 0;
   const runtimeSkillMismatch = sourceLocalCount !== skills.length;
+  const pluginTerminalName = pluginNameInput.trim();
   const warnings: string[] = [];
 
+  if (!installation.binaryFound) {
+    warnings.push('当前没有检测到 Hermes CLI，扩展安装、技能配置和 memory provider 切换都无法真正执行。');
+  }
   if (!extensions.toolPlatforms.length) {
     warnings.push('当前没有解析出任何 tools summary 平台，说明 Hermes 工具面摘要没有成功返回。');
   }
@@ -385,23 +414,20 @@ export function ExtensionsPage({ notify, profile, navigate, pageIntent, consumeP
     <div className="page-stack">
       <Panel
         title="扩展能力台"
-        subtitle="聚焦 Hermes 自己的 `tools / plugins / memory / skills` 运行能力面，帮助你区分“目录里有”与“运行时真的生效”。"
+        subtitle="tools、plugins、skills、provider"
+        tip={(
+          <InfoTip content="扩展页聚焦运行态扩展闭环：tools、plugins、skills 和 memory provider。跨页跳转收缩到真正需要的上下文动作，常规导航统一交给侧边栏。"/>
+        )}
         aside={(
           <Toolbar>
             <Button onClick={() => void load()}>刷新</Button>
-            <Button onClick={() => navigate('skills')}>进入技能页</Button>
-            <Button onClick={() => navigate('diagnostics')}>进入诊断页</Button>
-            <Button onClick={() => navigate('config')}>进入配置页</Button>
           </Toolbar>
         )}
       >
         <div className="hero-grid">
           <div className="hero-copy">
             <p className="hero-title">Hermes Runtime Extension Surface</p>
-            <p className="hero-subtitle">
-              这里看的是 Hermes 运行时真正暴露出来的能力表面，而不是单纯的本地文件目录。现在你不只可以看，还可以直接对
-              `tools` 和 `plugins` 做启停编排，同时保留原生命令输出用于核对。
-            </p>
+            <p className="hero-subtitle">这里看运行态，而不是只看本地目录。</p>
             <div className="detail-list">
               <KeyValueRow label="当前 Profile" value={extensions.profileName} />
               <KeyValueRow label="Hermes Home" value={extensions.hermesHome} />
@@ -446,6 +472,148 @@ export function ExtensionsPage({ notify, profile, navigate, pageIntent, consumeP
         />
       ) : null}
 
+      <Panel
+        title="扩展接管与安装"
+        subtitle="把 tools、skills、plugins、memory provider 的官方入口拉进同一页，形成真正可操作的扩展运营台。"
+      >
+        <div className="control-card-grid">
+          <section className="action-card action-card-compact">
+            <div className="action-card-header">
+              <div>
+                <p className="eyebrow">Tools</p>
+                <h3 className="action-card-title">工具面接管</h3>
+              </div>
+              <Pill tone={toolsEnabled > 0 ? 'good' : 'warn'}>
+                {toolsEnabled > 0 ? `${toolsEnabled}/${toolsTotal}` : '待启用'}
+              </Pill>
+            </div>
+            <p className="action-card-copy">
+              先用 Hermes 官方交互式工具面配置，再回到下方做平台级批量启停和日志核对。
+            </p>
+            <p className="command-line">hermes tools · {installation.toolsSetupCommand}</p>
+            <Toolbar>
+              <Button
+                kind="primary"
+                onClick={() => void openInTerminal('extensions:tools', '工具面配置', 'hermes tools')}
+                disabled={runningAction !== null || !installation.binaryFound}
+              >
+                {runningAction === 'extensions:tools' ? '工具面配置…' : '工具面配置'}
+              </Button>
+              <Button
+                onClick={() => void openInTerminal('extensions:tools-setup', '工具选择向导', installation.toolsSetupCommand)}
+                disabled={runningAction !== null || !installation.binaryFound}
+              >
+                {runningAction === 'extensions:tools-setup' ? '工具选择向导…' : '工具选择向导'}
+              </Button>
+            </Toolbar>
+          </section>
+
+          <section className="action-card action-card-compact">
+            <div className="action-card-header">
+              <div>
+                <p className="eyebrow">Skills</p>
+                <h3 className="action-card-title">技能来源与安装态</h3>
+              </div>
+              <Pill tone={runtimeSkillMismatch ? 'warn' : 'good'}>
+                {runtimeSkillMismatch ? '安装态偏差' : '安装态对齐'}
+              </Pill>
+            </div>
+            <p className="action-card-copy">
+              技能既有目录态也有安装态，优先用官方 registry / config 入口核对，再回到技能页看本地目录。
+            </p>
+            <p className="command-line">hermes skills browse · {installation.skillsConfigCommand} · hermes skills list</p>
+            <Toolbar>
+              <Button
+                kind="primary"
+                onClick={() => void openInTerminal('extensions:skills-browse', '技能浏览器', 'hermes skills browse')}
+                disabled={runningAction !== null || !installation.binaryFound}
+              >
+                {runningAction === 'extensions:skills-browse' ? '技能浏览器…' : '技能浏览器'}
+              </Button>
+              <Button
+                onClick={() => void openInTerminal('extensions:skills-config', '技能开关', installation.skillsConfigCommand)}
+                disabled={runningAction !== null || !installation.binaryFound}
+              >
+                {runningAction === 'extensions:skills-config' ? '技能开关…' : '技能开关'}
+              </Button>
+            </Toolbar>
+          </section>
+
+          <section className="action-card action-card-compact">
+            <div className="action-card-header">
+              <div>
+                <p className="eyebrow">Provider</p>
+                <h3 className="action-card-title">Memory / Context Provider</h3>
+              </div>
+              <Pill tone={extensions.memoryRuntime.provider.includes('none') ? 'warn' : 'good'}>
+                {extensions.memoryRuntime.provider}
+              </Pill>
+            </div>
+            <p className="action-card-copy">
+              Hermes 的记忆 provider 和 context engine 都应通过官方交互式入口切换，而不是在客户端私自重建逻辑。
+            </p>
+            <p className="command-line">hermes memory setup · hermes plugins</p>
+            <Toolbar>
+              <Button
+                kind="primary"
+                onClick={() => void openInTerminal('extensions:memory-setup', '记忆 Provider', 'hermes memory setup')}
+                disabled={runningAction !== null || !installation.binaryFound}
+              >
+                {runningAction === 'extensions:memory-setup' ? '记忆 Provider…' : '记忆 Provider'}
+              </Button>
+              <Button
+                onClick={() => void openInTerminal('extensions:plugins-panel', '插件与 Provider 面板', 'hermes plugins')}
+                disabled={runningAction !== null || !installation.binaryFound}
+              >
+                {runningAction === 'extensions:plugins-panel' ? '插件与 Provider 面板…' : '插件与 Provider 面板'}
+              </Button>
+            </Toolbar>
+          </section>
+
+          <section className="action-card action-card-compact">
+            <div className="action-card-header">
+              <div>
+                <p className="eyebrow">Plugin Ops</p>
+                <h3 className="action-card-title">插件安装 / 更新 / 移除</h3>
+              </div>
+              <Pill tone={pluginTerminalName ? 'good' : 'warn'}>
+                {pluginTerminalName || '等待输入 owner/repo'}
+              </Pill>
+            </div>
+            <p className="action-card-copy">
+              这里直接把 plugin 生命周期命令交给 Terminal，既保留 Hermes 原生命令，又能补上安装闭环。
+            </p>
+            <p className="command-line">
+              {pluginTerminalName
+                ? `hermes plugins install ${pluginTerminalName} · hermes plugins update ${pluginTerminalName} · hermes plugins remove ${pluginTerminalName}`
+                : '输入 owner/repo 或已安装插件名后即可执行 install / update / remove'}
+            </p>
+            <Toolbar>
+              <Button
+                kind="primary"
+                onClick={() => void openInTerminal('extensions:plugin-install', '安装插件', `hermes plugins install ${pluginTerminalName}`)}
+                disabled={runningAction !== null || !installation.binaryFound || !pluginTerminalName}
+              >
+                {runningAction === 'extensions:plugin-install' ? '安装插件…' : '安装插件'}
+              </Button>
+              <Button
+                onClick={() => void openInTerminal('extensions:plugin-update', '更新插件', `hermes plugins update ${pluginTerminalName}`)}
+                disabled={runningAction !== null || !installation.binaryFound || !pluginTerminalName}
+              >
+                {runningAction === 'extensions:plugin-update' ? '更新插件…' : '更新插件'}
+              </Button>
+              <Button
+                kind="danger"
+                onClick={() => void openInTerminal('extensions:plugin-remove', '移除插件', `hermes plugins remove ${pluginTerminalName}`, `确定移除插件 ${pluginTerminalName || ''} 吗？`)}
+                disabled={runningAction !== null || !installation.binaryFound || !pluginTerminalName}
+              >
+                {runningAction === 'extensions:plugin-remove' ? '移除插件…' : '移除插件'}
+              </Button>
+            </Toolbar>
+          </section>
+        </div>
+      </Panel>
+
       <div className="two-column wide-left">
         <Panel title="运行健康" subtitle="把工具面、记忆 provider、插件层和技能来源放在一起看，快速判断扩展闭环有没有搭起来。">
           <div className="health-grid">
@@ -488,11 +656,7 @@ export function ExtensionsPage({ notify, profile, navigate, pageIntent, consumeP
           </div>
           <Toolbar>
             <Button onClick={() => void openInFinder(extensions.hermesHome, 'Hermes Home')}>打开 Home</Button>
-            <Button onClick={() => navigate('memory')}>进入记忆页</Button>
-            <Button onClick={() => navigate('skills')}>进入技能页</Button>
-            <Button onClick={() => navigate('logs', extensionLogsIntent)}>进入日志页</Button>
-            <Button onClick={() => navigate('diagnostics', extensionDiagnosticsIntent)}>进入诊断页</Button>
-            <Button onClick={() => navigate('config', extensionConfigIntent)}>进入配置页</Button>
+            <Button onClick={() => navigate('logs', extensionLogsIntent)}>查看日志</Button>
           </Toolbar>
           {warnings.length > 0 ? (
             <div className="warning-stack">
@@ -688,7 +852,6 @@ export function ExtensionsPage({ notify, profile, navigate, pageIntent, consumeP
             >
               {runningPluginDisable ? '停用插件中…' : '停用插件'}
             </Button>
-            <Button onClick={() => navigate('config')}>核对配置</Button>
           </Toolbar>
           <p className="helper-text">
             `plugins list` 当前主要暴露“已安装插件”，不会像 tools 一样直接给出启用态，所以这里把命令入口和原始输出一起保留，方便你判读真实状态。
@@ -841,6 +1004,7 @@ export function ExtensionsPage({ notify, profile, navigate, pageIntent, consumeP
           {lastCommand ? (
             <div className="result-stack">
               <div className="detail-list compact">
+                <KeyValueRow label="动作类型" value={lastCommandLabel ?? '治理动作'} />
                 <KeyValueRow label="命令" value={lastCommand.command} />
                 <KeyValueRow label="退出码" value={lastCommand.exitCode} />
                 <KeyValueRow label="执行结果" value={<Pill tone={lastCommand.success ? 'good' : 'bad'}>{String(lastCommand.success)}</Pill>} />
@@ -868,7 +1032,6 @@ export function ExtensionsPage({ notify, profile, navigate, pageIntent, consumeP
                 <option value="plugins">plugins list</option>
                 <option value="skills">skills list</option>
               </select>
-              <Button onClick={() => navigate('diagnostics')}>进入诊断页</Button>
             </Toolbar>
           )}
         >

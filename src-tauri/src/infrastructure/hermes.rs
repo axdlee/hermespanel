@@ -13,16 +13,31 @@ use walkdir::WalkDir;
 
 use crate::error::{AppError, AppResult};
 use crate::models::{
-    CommandRunResult, ConfigDocuments, ConfigSummary, CronCreateRequest, CronDeleteRequest,
-    CronJobItem, CronJobsSnapshot, CronUpdateRequest, DashboardCounts, DashboardSnapshot,
-    ExtensionsSnapshot, GatewayPlatformState, GatewayStateSnapshot, HermesHome, LogReadResult,
-    MemoryFileDetail, MemoryFileSummary, MemoryProviderOption, MemoryRuntimeSnapshot, NamedCount,
-    PluginRuntimeSnapshot, ProfileAliasCreateRequest, ProfileAliasDeleteRequest, ProfileAliasItem,
-    ProfileCreateRequest, ProfileDeleteRequest, ProfileExportRequest, ProfileImportRequest,
-    ProfileRenameRequest, ProfileSummary, ProfilesSnapshot, RuntimeSkillItem, SessionDetail,
-    SessionMessage, SessionRecord, SkillFrontmatter, SkillItem, ToolPlatformInventory,
-    ToolPlatformSummary, ToolRuntimeItem,
+    BinaryStatus, CommandRunResult, ConfigDocuments, ConfigSummary, CronCreateRequest,
+    CronDeleteRequest, CronJobItem, CronJobsSnapshot, CronUpdateRequest, DashboardCounts,
+    DashboardSnapshot, ExtensionsSnapshot, GatewayPlatformState, GatewayStateSnapshot, HermesHome,
+    InstallationSnapshot, LogReadResult, MemoryFileDetail, MemoryFileSummary, MemoryProviderOption,
+    MemoryRuntimeSnapshot, NamedCount, PluginRuntimeSnapshot, ProfileAliasCreateRequest,
+    ProfileAliasDeleteRequest, ProfileAliasItem, ProfileCreateRequest, ProfileDeleteRequest,
+    ProfileExportRequest, ProfileImportRequest, ProfileRenameRequest, ProfileSummary,
+    ProfilesSnapshot, RuntimeSkillItem, SessionDetail, SessionMessage, SessionRecord,
+    SkillFrontmatter, SkillItem, ToolPlatformInventory, ToolPlatformSummary, ToolRuntimeItem,
 };
+
+const QUICK_INSTALL_COMMAND: &str =
+    "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash";
+const UPDATE_COMMAND: &str = "hermes update";
+const UNINSTALL_COMMAND: &str = "hermes uninstall";
+const SETUP_COMMAND: &str = "hermes setup";
+const MODEL_COMMAND: &str = "hermes model";
+const TERMINAL_SETUP_COMMAND: &str = "hermes setup terminal";
+const TOOLS_SETUP_COMMAND: &str = "hermes setup tools";
+const GATEWAY_INSTALL_COMMAND: &str = "hermes gateway install";
+const GATEWAY_UNINSTALL_COMMAND: &str = "hermes gateway uninstall";
+const GATEWAY_SETUP_COMMAND: &str = "hermes gateway setup";
+const CONFIG_MIGRATE_COMMAND: &str = "hermes config migrate";
+const SKILLS_CONFIG_COMMAND: &str = "hermes skills config";
+const CLAW_MIGRATE_COMMAND: &str = "hermes claw migrate";
 
 pub fn resolve_default_hermes_root(explicit_root: Option<&Path>) -> AppResult<PathBuf> {
     explicit_root
@@ -339,27 +354,32 @@ pub fn load_recent_sessions(db_path: &Path, limit: usize) -> AppResult<Vec<Sessi
     rows.collect::<Result<Vec<_>, _>>().map_err(AppError::from)
 }
 
-pub fn find_hermes_binary() -> AppResult<PathBuf> {
-    if let Some(explicit) = std::env::var_os("HERMES_BINARY") {
-        let path = PathBuf::from(explicit);
-        if path.exists() {
-            return Ok(path);
-        }
-    }
-
+fn find_command_binary(name: &str) -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
     if let Some(paths) = std::env::var_os("PATH") {
-        candidates.extend(std::env::split_paths(&paths).map(|dir| dir.join("hermes")));
+        candidates.extend(std::env::split_paths(&paths).map(|dir| dir.join(name)));
     }
 
     if let Some(home) = dirs::home_dir() {
-        candidates.push(home.join(".local/bin/hermes"));
+        candidates.push(home.join(".local").join("bin").join(name));
     }
 
-    candidates
-        .into_iter()
-        .find(|path| path.exists())
-        .ok_or_else(|| AppError::Message("未找到 hermes 可执行文件".into()))
+    candidates.into_iter().find(|path| path.exists())
+}
+
+pub fn probe_hermes_binary() -> Option<PathBuf> {
+    if let Some(explicit) = std::env::var_os("HERMES_BINARY") {
+        let path = PathBuf::from(explicit);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    find_command_binary("hermes")
+}
+
+pub fn find_hermes_binary() -> AppResult<PathBuf> {
+    probe_hermes_binary().ok_or_else(|| AppError::Message("未找到 hermes 可执行文件".into()))
 }
 
 fn compose_hermes_command_args<S>(
@@ -437,7 +457,11 @@ pub fn read_extensions_snapshot(home: &HermesHome) -> AppResult<ExtensionsSnapsh
                 Some(&home.profile_name),
                 &["tools", "list", "--platform", &platform_key],
             )?;
-            Ok(parse_tool_inventory(&platform_key, &platform.name, &result.stdout))
+            Ok(parse_tool_inventory(
+                &platform_key,
+                &platform.name,
+                &result.stdout,
+            ))
         })
         .collect::<AppResult<Vec<_>>>()?;
 
@@ -460,7 +484,11 @@ pub fn read_extensions_snapshot(home: &HermesHome) -> AppResult<ExtensionsSnapsh
     })
 }
 
-pub fn build_tool_action_args(action: &str, platform: &str, names: &[String]) -> AppResult<Vec<String>> {
+pub fn build_tool_action_args(
+    action: &str,
+    platform: &str,
+    names: &[String],
+) -> AppResult<Vec<String>> {
     let normalized_action = action.trim();
     if normalized_action != "enable" && normalized_action != "disable" {
         return Err(AppError::Message(format!("不支持的 tools 操作: {action}")));
@@ -495,7 +523,9 @@ pub fn build_tool_action_args(action: &str, platform: &str, names: &[String]) ->
 pub fn build_plugin_action_args(action: &str, name: &str) -> AppResult<Vec<String>> {
     let normalized_action = action.trim();
     if normalized_action != "enable" && normalized_action != "disable" {
-        return Err(AppError::Message(format!("不支持的 plugins 操作: {action}")));
+        return Err(AppError::Message(format!(
+            "不支持的 plugins 操作: {action}"
+        )));
     }
 
     let normalized_name = name.trim();
@@ -1174,6 +1204,7 @@ pub fn read_dashboard_snapshot(home: &HermesHome) -> AppResult<DashboardSnapshot
     } else {
         None
     };
+    let binary = probe_hermes_binary();
     let skills = list_skills(home)?;
     let sessions = if home.state_db.exists() {
         load_recent_sessions(&home.state_db, 6)?
@@ -1181,9 +1212,13 @@ pub fn read_dashboard_snapshot(home: &HermesHome) -> AppResult<DashboardSnapshot
         Vec::new()
     };
     let memory_files = list_memory_files(home)?;
-    let version_output = run_hermes_command(Some(&home.profile_name), &["version"])
-        .map(|result| result.stdout)
-        .unwrap_or_else(|_| "无法读取 Hermes 版本信息".into());
+    let version_output = if binary.is_some() {
+        run_hermes_command(Some(&home.profile_name), &["version"])
+            .map(|result| result.stdout)
+            .unwrap_or_else(|_| "无法读取 Hermes 版本信息".into())
+    } else {
+        "尚未检测到 Hermes，可先在控制中心执行安装或升级。".into()
+    };
     let warnings = build_runtime_warnings(home, gateway.as_ref(), &config_docs.summary);
     let counts = DashboardCounts {
         configured_platforms: gateway
@@ -1197,16 +1232,100 @@ pub fn read_dashboard_snapshot(home: &HermesHome) -> AppResult<DashboardSnapshot
     };
 
     Ok(DashboardSnapshot {
+        binary_found: binary.is_some(),
         config: config_docs.summary,
         counts,
         gateway,
-        hermes_binary: find_hermes_binary()?.display().to_string(),
+        hermes_binary: binary
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "未安装 Hermes".into()),
         hermes_home: home.root.display().to_string(),
         memory_files,
         profile_name: home.profile_name.clone(),
         recent_sessions: sessions,
         version_output,
         warnings,
+    })
+}
+
+pub fn read_installation_snapshot(home: &HermesHome) -> AppResult<InstallationSnapshot> {
+    let binary = probe_hermes_binary();
+    let version_output = if binary.is_some() {
+        run_hermes_command(Some(&home.profile_name), &["version"])
+            .map(|result| result.stdout.trim().to_string())
+            .unwrap_or_else(|_| "已检测到 Hermes，但暂时无法读取版本信息。".into())
+    } else {
+        "尚未检测到 Hermes，可先执行一键安装。".into()
+    };
+
+    let dependencies = [
+        (
+            "hermes",
+            "Hermes CLI 本体；控制台、诊断和治理功能都依赖它。",
+            binary.clone(),
+        ),
+        (
+            "curl",
+            "官方安装脚本默认通过 curl 拉取。",
+            find_command_binary("curl"),
+        ),
+        (
+            "git",
+            "安装脚本与部分更新场景依赖 Git。",
+            find_command_binary("git"),
+        ),
+        (
+            "python3",
+            "Hermes 本体运行依赖 Python 环境。",
+            find_command_binary("python3"),
+        ),
+        (
+            "uv",
+            "很多 Hermes 用户会用 uv 管理 Python 工具安装。",
+            find_command_binary("uv"),
+        ),
+        (
+            "pipx",
+            "可作为独立工具安装的补充方案。",
+            find_command_binary("pipx"),
+        ),
+    ]
+    .into_iter()
+    .map(|(name, note, path)| BinaryStatus {
+        found: path.is_some(),
+        name: name.to_string(),
+        note: note.to_string(),
+        path: path.map(|value| value.display().to_string()),
+    })
+    .collect::<Vec<_>>();
+
+    Ok(InstallationSnapshot {
+        profile_name: home.profile_name.clone(),
+        hermes_home: home.root.display().to_string(),
+        hermes_home_exists: home.root.exists(),
+        config_exists: home.config_yaml.exists(),
+        env_exists: home.env_file.exists(),
+        state_db_exists: home.state_db.exists(),
+        gateway_state_exists: home.gateway_state.exists(),
+        logs_dir_exists: home.logs_dir.exists(),
+        binary_found: binary.is_some(),
+        hermes_binary: binary.map(|path| path.display().to_string()),
+        version_output,
+        dependencies,
+        quick_install_command: QUICK_INSTALL_COMMAND.to_string(),
+        update_command: UPDATE_COMMAND.to_string(),
+        uninstall_command: UNINSTALL_COMMAND.to_string(),
+        setup_command: SETUP_COMMAND.to_string(),
+        model_command: MODEL_COMMAND.to_string(),
+        terminal_setup_command: TERMINAL_SETUP_COMMAND.to_string(),
+        tools_setup_command: TOOLS_SETUP_COMMAND.to_string(),
+        gateway_install_command: GATEWAY_INSTALL_COMMAND.to_string(),
+        gateway_uninstall_command: GATEWAY_UNINSTALL_COMMAND.to_string(),
+        gateway_setup_command: GATEWAY_SETUP_COMMAND.to_string(),
+        config_migrate_command: CONFIG_MIGRATE_COMMAND.to_string(),
+        skills_config_command: SKILLS_CONFIG_COMMAND.to_string(),
+        claw_migrate_command: CLAW_MIGRATE_COMMAND.to_string(),
     })
 }
 
@@ -1401,7 +1520,11 @@ fn file_updated_at(path: &Path) -> Option<String> {
     Some(date.to_rfc3339())
 }
 
-fn command_result_from_output(hermes: &Path, command_args: &[String], output: Output) -> CommandRunResult {
+fn command_result_from_output(
+    hermes: &Path,
+    command_args: &[String],
+    output: Output,
+) -> CommandRunResult {
     let exit_code = output.status.code().unwrap_or(-1);
 
     CommandRunResult {
@@ -1468,7 +1591,12 @@ fn count_by_name<'a>(values: impl Iterator<Item = &'a str>) -> Vec<NamedCount> {
         .into_iter()
         .map(|(name, count)| NamedCount { name, count })
         .collect::<Vec<_>>();
-    items.sort_by(|left, right| right.count.cmp(&left.count).then_with(|| left.name.cmp(&right.name)));
+    items.sort_by(|left, right| {
+        right
+            .count
+            .cmp(&left.count)
+            .then_with(|| left.name.cmp(&right.name))
+    });
     items
 }
 
@@ -1593,7 +1721,8 @@ fn parse_memory_runtime(output: &str) -> MemoryRuntimeSnapshot {
 
     for line in output.lines() {
         let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with("Memory status") || trimmed.starts_with('─') {
+        if trimmed.is_empty() || trimmed.starts_with("Memory status") || trimmed.starts_with('─')
+        {
             continue;
         }
         if let Some(value) = trimmed.strip_prefix("Built-in:") {
@@ -1650,7 +1779,10 @@ fn parse_runtime_skills(output: &str) -> Vec<RuntimeSkillItem> {
 }
 
 fn parse_plugin_runtime(output: &str) -> PluginRuntimeSnapshot {
-    if output.lines().any(|line| line.contains("No plugins installed.")) {
+    if output
+        .lines()
+        .any(|line| line.contains("No plugins installed."))
+    {
         return PluginRuntimeSnapshot {
             installed_count: 0,
             items: Vec::new(),
@@ -1799,9 +1931,9 @@ mod tests {
         build_profile_export_args, build_profile_import_args, build_profile_rename_args,
         build_tool_action_args, compose_hermes_command_args, get_active_profile,
         list_profile_aliases, list_profiles, load_recent_sessions, parse_memory_runtime,
-        parse_plugin_runtime, parse_runtime_skills, parse_skill_frontmatter,
-        parse_tool_inventory, parse_tool_inventory_line, parse_tool_summary, read_cron_jobs,
-        read_gateway_state, resolve_hermes_home, set_active_profile,
+        parse_plugin_runtime, parse_runtime_skills, parse_skill_frontmatter, parse_tool_inventory,
+        parse_tool_inventory_line, parse_tool_summary, read_cron_jobs, read_gateway_state,
+        resolve_hermes_home, set_active_profile,
     };
 
     #[test]
@@ -2103,7 +2235,10 @@ toolsets:
         assert_eq!(platforms[0].name, "CLI");
         assert_eq!(platforms[0].enabled_count, 16);
         assert_eq!(platforms[0].total_count, 18);
-        assert_eq!(platforms[0].enabled_tools, vec!["Browser Automation", "Memory"]);
+        assert_eq!(
+            platforms[0].enabled_tools,
+            vec!["Browser Automation", "Memory"]
+        );
         assert_eq!(platforms[1].name, "Telegram");
     }
 

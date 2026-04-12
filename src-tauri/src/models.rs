@@ -246,12 +246,52 @@ pub struct CommandRunResult {
     pub stderr: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BinaryStatus {
+    pub name: String,
+    pub found: bool,
+    pub path: Option<String>,
+    pub note: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallationSnapshot {
+    pub profile_name: String,
+    pub hermes_home: String,
+    pub hermes_home_exists: bool,
+    pub config_exists: bool,
+    pub env_exists: bool,
+    pub state_db_exists: bool,
+    pub gateway_state_exists: bool,
+    pub logs_dir_exists: bool,
+    pub binary_found: bool,
+    pub hermes_binary: Option<String>,
+    pub version_output: String,
+    pub dependencies: Vec<BinaryStatus>,
+    pub quick_install_command: String,
+    pub update_command: String,
+    pub uninstall_command: String,
+    pub setup_command: String,
+    pub model_command: String,
+    pub terminal_setup_command: String,
+    pub tools_setup_command: String,
+    pub gateway_install_command: String,
+    pub gateway_uninstall_command: String,
+    pub gateway_setup_command: String,
+    pub config_migrate_command: String,
+    pub skills_config_command: String,
+    pub claw_migrate_command: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DashboardSnapshot {
     pub profile_name: String,
     pub hermes_home: String,
     pub hermes_binary: String,
+    pub binary_found: bool,
     pub version_output: String,
     pub config: ConfigSummary,
     pub gateway: Option<GatewayStateSnapshot>,
@@ -415,4 +455,11 @@ pub struct CronDeleteRequest {
 pub struct DesktopOpenRequest {
     pub path: String,
     pub reveal_in_finder: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTerminalRequest {
+    pub command: String,
+    pub working_directory: Option<String>,
 }

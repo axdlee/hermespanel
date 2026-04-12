@@ -2,10 +2,11 @@ use crate::error::{AppError, AppResult};
 use crate::infrastructure::hermes;
 use crate::models::{
     CommandRunResult, ConfigDocuments, CronCreateRequest, CronDeleteRequest, CronJobsSnapshot,
-    CronUpdateRequest, DashboardSnapshot, ExtensionsSnapshot, HermesHome, LogReadResult,
-    MemoryFileDetail, MemoryFileSummary, ProfileAliasCreateRequest, ProfileAliasDeleteRequest,
-    ProfileCreateRequest, ProfileDeleteRequest, ProfileExportRequest, ProfileImportRequest,
-    ProfileRenameRequest, ProfilesSnapshot, SessionDetail, SessionRecord, SkillItem,
+    CronUpdateRequest, DashboardSnapshot, ExtensionsSnapshot, HermesHome, InstallationSnapshot,
+    LogReadResult, MemoryFileDetail, MemoryFileSummary, ProfileAliasCreateRequest,
+    ProfileAliasDeleteRequest, ProfileCreateRequest, ProfileDeleteRequest, ProfileExportRequest,
+    ProfileImportRequest, ProfileRenameRequest, ProfilesSnapshot, SessionDetail, SessionRecord,
+    SkillItem,
 };
 
 pub struct HermesManager {
@@ -39,6 +40,10 @@ impl HermesManager {
 
     pub fn dashboard(&self) -> AppResult<DashboardSnapshot> {
         hermes::read_dashboard_snapshot(&self.home)
+    }
+
+    pub fn installation_snapshot(&self) -> AppResult<InstallationSnapshot> {
+        hermes::read_installation_snapshot(&self.home)
     }
 
     pub fn config_documents(&self) -> AppResult<ConfigDocuments> {
@@ -193,7 +198,9 @@ impl HermesManager {
     pub fn run_diagnostic(&self, kind: &str) -> AppResult<CommandRunResult> {
         let args = diagnostic_command_args(kind)?;
         match kind {
-            "tools-summary" => hermes::run_hermes_command_with_tty(Some(&self.home.profile_name), args),
+            "tools-summary" => {
+                hermes::run_hermes_command_with_tty(Some(&self.home.profile_name), args)
+            }
             _ => hermes::run_hermes_command(Some(&self.home.profile_name), args),
         }
     }
@@ -214,8 +221,7 @@ mod tests {
             ["tools", "--summary"]
         );
         assert_eq!(
-            diagnostic_command_args("gateway-status-deep")
-                .expect("应映射 gateway-status-deep"),
+            diagnostic_command_args("gateway-status-deep").expect("应映射 gateway-status-deep"),
             ["gateway", "status", "--deep"]
         );
         assert_eq!(

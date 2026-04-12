@@ -1,23 +1,32 @@
 import { useEffect, useMemo, useState } from 'react';
 
+import { Button, ContextBanner, EmptyState, InfoTip, KeyValueRow, LoadingState, MetricCard, Panel, Pill, Toolbar } from '../components/ui';
 import { api } from '../lib/api';
+import { handoffToTerminal, openFinderLocation } from '../lib/desktop';
 import { formatTimestamp } from '../lib/format';
-import type { ConfigDocuments, DashboardSnapshot, MemoryFileDetail, MemoryFileSummary } from '../types';
-import { Button, ContextBanner, EmptyState, KeyValueRow, LoadingState, MetricCard, Panel, Pill, Toolbar } from '../components/ui';
+import type {
+  CommandRunResult,
+  ConfigDocuments,
+  DashboardSnapshot,
+  ExtensionsSnapshot,
+  InstallationSnapshot,
+  MemoryFileDetail,
+  MemoryFileSummary,
+} from '../types';
 import { isMemoryPageIntent, type MemoryPageIntent, type PageProps } from './types';
 
 const MEMORY_BLUEPRINT = {
   soul: {
     eyebrow: 'Identity',
-    description: 'SOUL.md 是 Hermes 的主身份文件，会进入 system prompt 的最前面一层。',
+    description: '系统身份层。',
   },
   memory: {
     eyebrow: 'Persistent',
-    description: 'MEMORY.md 用来沉淀长期事实和稳定偏好，是 persistent memory 的主文件。',
+    description: '长期事实与稳定偏好。',
   },
   user: {
     eyebrow: 'User Profile',
-    description: 'USER.md 用来维护用户画像和交互偏好，受 user_profile_enabled 开关控制。',
+    description: '用户画像与交互偏好。',
   },
 } as const;
 
@@ -44,28 +53,53 @@ function memoryMeta(key: string) {
   return MEMORY_BLUEPRINT[key as keyof typeof MEMORY_BLUEPRINT] ?? MEMORY_BLUEPRINT.soul;
 }
 
+function commandOutput(result: CommandRunResult | null) {
+  if (!result) {
+    return '';
+  }
+  return [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n\n') || '命令没有返回输出。';
+}
+
 export function MemoryPage({ notify, profile, navigate, pageIntent, consumePageIntent }: PageProps) {
   const [items, setItems] = useState<MemoryFileSummary[]>([]);
   const [config, setConfig] = useState<ConfigDocuments | null>(null);
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
+  const [installation, setInstallation] = useState<InstallationSnapshot | null>(null);
+  const [extensions, setExtensions] = useState<ExtensionsSnapshot | null>(null);
   const [investigation, setInvestigation] = useState<MemoryPageIntent | null>(null);
   const [selectedKey, setSelectedKey] = useState('soul');
   const [detail, setDetail] = useState<MemoryFileDetail | null>(null);
   const [content, setContent] = useState('');
+  const [pluginInput, setPluginInput] = useState('');
+  const [runningDesktopAction, setRunningDesktopAction] = useState<string | null>(null);
+  const [lastCommandLabel, setLastCommandLabel] = useState<string | null>(null);
+  const [lastCommand, setLastCommand] = useState<CommandRunResult | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [saving, setSaving] = useState<'save' | 'verify' | null>(null);
+  const [runningDiagnostic, setRunningDiagnostic] = useState(false);
 
   async function load(nextKey?: string) {
     setLoading(true);
     try {
-      const [files, nextConfig, nextSnapshot] = await Promise.all([
+      const [files, nextConfig, nextSnapshot, nextInstallation, nextExtensions] = await Promise.all([
         api.listMemoryFiles(profile),
         api.getConfigDocuments(profile),
         api.getDashboardSnapshot(profile),
+        api.getInstallationSnapshot(profile),
+        api.getExtensionsSnapshot(profile),
       ]);
+
       setItems(files);
       setConfig(nextConfig);
       setSnapshot(nextSnapshot);
+      setInstallation(nextInstallation);
+      setExtensions(nextExtensions);
+      setPluginInput((current) =>
+        current.trim()
+        || nextExtensions.plugins.items[0]
+        || nextExtensions.memoryRuntime.installedPlugins[0]?.name
+        || '',
+      );
 
       const chosen = nextKey ?? selectedKey ?? files[0]?.key ?? 'soul';
       setSelectedKey(chosen);
@@ -90,32 +124,76 @@ export function MemoryPage({ notify, profile, navigate, pageIntent, consumePageI
     }
   }
 
-  async function save() {
-    setSaving(true);
+  async function runMemoryStatus(options?: { quiet?: boolean }) {
+    setRunningDiagnostic(true);
+    try {
+      const result = await api.runDiagnostic('memory-status', profile);
+      setLastCommandLabel('记忆状态体检');
+      setLastCommand(result);
+      if (!options?.quiet) {
+        notify(result.success ? 'success' : 'error', result.success ? '记忆状态体检已完成。' : '记忆状态体检失败，请查看输出。');
+      }
+      await load(selectedKey);
+      return result;
+    } catch (reason) {
+      notify('error', String(reason));
+      return null;
+    } finally {
+      setRunningDiagnostic(false);
+    }
+  }
+
+  async function save(verify = false) {
+    setSaving(verify ? 'verify' : 'save');
     try {
       await api.writeMemoryFile(selectedKey, content, profile);
-      notify('success', `${selectedKey} 已保存。`);
       await load(selectedKey);
+      notify('success', verify ? `${selectedKey} 已保存，开始体检记忆运行态。` : `${selectedKey} 已保存。`);
+      if (verify) {
+        await runMemoryStatus({ quiet: true });
+      }
     } catch (reason) {
       notify('error', String(reason));
     } finally {
-      setSaving(false);
+      setSaving(null);
     }
   }
 
   async function openInFinder(path: string, label: string, revealInFinder = false) {
-    try {
-      const result = await api.openInFinder({ path, revealInFinder });
-      notify(
-        result.success ? 'success' : 'error',
-        result.success ? `${label} 已在 Finder 中打开。` : `${label} 打开失败，请检查命令输出。`,
-      );
-    } catch (reason) {
-      notify('error', String(reason));
-    }
+    await openFinderLocation({
+      actionKey: `memory:finder:${label}`,
+      label,
+      notify,
+      onResult: (resultLabel, result) => {
+        setLastCommandLabel(resultLabel);
+        setLastCommand(result);
+      },
+      path,
+      revealInFinder,
+      setBusy: setRunningDesktopAction,
+    });
+  }
+
+  async function openInTerminal(actionKey: string, label: string, command: string, confirmMessage?: string) {
+    await handoffToTerminal({
+      actionKey,
+      command,
+      confirmMessage,
+      label,
+      notify,
+      onResult: (resultLabel, result) => {
+        setLastCommandLabel(resultLabel);
+        setLastCommand(result);
+      },
+      profile,
+      setBusy: setRunningDesktopAction,
+      workingDirectory: installation?.hermesHomeExists ? installation.hermesHome : null,
+    });
   }
 
   useEffect(() => {
+    setLastCommand(null);
+    setLastCommandLabel(null);
     void load();
   }, [profile]);
 
@@ -139,76 +217,91 @@ export function MemoryPage({ notify, profile, navigate, pageIntent, consumePageI
   );
   const currentMeta = memoryMeta(selectedKey);
   const providerLabel = summary?.memoryProvider || 'builtin-file';
+  const runtimeProviderLabel = extensions?.memoryRuntime.provider || providerLabel;
   const selectedLimit = limitForKey(selectedKey, summary);
   const remainingChars = selectedLimit == null ? null : selectedLimit - content.length;
   const dirty = detail ? content !== detail.content : false;
   const lineCount = content ? content.split(/\r?\n/).length : 0;
   const readyCount = items.filter((item) => item.exists).length;
+  const pluginTerminalName = pluginInput.trim();
+  const warningCountBase = summary?.memoryEnabled === false ? 1 : 0;
   const warnings: string[] = [];
 
   if (summary?.memoryEnabled === false) {
-    warnings.push('memory.memory_enabled 当前为 false，Hermes 运行时不会稳定使用文件记忆闭环。');
+    warnings.push('memory.memory_enabled 为 false，文件可编辑但运行态不会稳定使用。');
   }
   if (selectedKey === 'user' && summary?.userProfileEnabled === false) {
-    warnings.push('当前 profile 关闭了 USER 画像，USER.md 即使存在也不会完整参与用户建模。');
+    warnings.push('USER 画像当前关闭，USER.md 不会完整进入用户建模。');
   }
   if (selectedKey !== 'soul' && remainingChars != null && remainingChars < 0) {
-    warnings.push(`${detail?.label ?? selectedKey} 已超出当前配置的字符预算，建议收缩内容或提高上限。`);
+    warnings.push(`${detail?.label ?? selectedKey} 已超出字符预算。`);
   }
   if (!selectedSummary?.exists) {
-    warnings.push(`${detail?.label ?? selectedKey} 当前缺失，首次保存后才会形成稳定基线。`);
+    warnings.push(`${detail?.label ?? selectedKey} 当前缺失，首次保存后才会落盘。`);
   }
   if ((snapshot?.counts.sessions ?? 0) === 0) {
-    warnings.push('当前没有历史会话，记忆文件虽然可编辑，但还没有经过真实会话链路验证。');
+    warnings.push('当前还没有历史会话，记忆链路尚未经过真实使用验证。');
   }
   if (snapshot?.gateway?.gatewayState !== 'running') {
-    warnings.push('gateway 当前未运行，消息平台侧的记忆注入效果还没有被验证。');
+    warnings.push('Gateway 未运行，消息平台侧记忆注入尚未验证。');
+  }
+  if (
+    summary?.memoryProvider
+    && extensions
+    && !runtimeProviderLabel.toLowerCase().includes(summary.memoryProvider.toLowerCase())
+  ) {
+    warnings.push(`配置声明 provider=${summary.memoryProvider}，运行态回报为 ${runtimeProviderLabel}。`);
   }
 
-  if (loading && !detail) {
-    return <LoadingState label="正在构建 Hermes 记忆编排工作区。" />;
+  if (loading || !config || !installation || !extensions) {
+    return <LoadingState label="正在构建 Hermes 记忆工作台。" />;
   }
+
+  const actionBusy = runningDesktopAction !== null || saving !== null || runningDiagnostic;
+  const outputLabel = lastCommandLabel ?? 'memory status';
+  const outputText = lastCommand ? commandOutput(lastCommand) : extensions.memoryRuntime.rawOutput || '暂无输出';
 
   return (
     <div className="page-stack">
       <Panel
-        title="记忆编排台"
-        subtitle="参考 ClawPanel 的工作台组织方式，但这里聚焦 Hermes 自身的 persistent memory：`SOUL.md / MEMORY.md / USER.md / memory.*`。"
+        title="记忆工作台"
+        subtitle="文件、provider、插件、校验"
+        tip={(
+          <InfoTip content="这里不再用大段介绍抢位置。核心操作保留在主区，说明细节放到悬浮提示里。交互式命令仍交给 Terminal，状态核对直接回面板。"/>
+        )}
         aside={(
           <Toolbar>
-            <Button onClick={() => void load(selectedKey)}>刷新</Button>
-            <Button onClick={() => navigate('config')}>进入配置页</Button>
-            <Button onClick={() => navigate('diagnostics')}>进入诊断页</Button>
+            <Button onClick={() => void load(selectedKey)} disabled={actionBusy}>刷新</Button>
+            <Button kind="primary" onClick={() => void runMemoryStatus()} disabled={actionBusy}>
+              {runningDiagnostic ? '体检中…' : '记忆体检'}
+            </Button>
           </Toolbar>
         )}
       >
-        <div className="hero-grid">
-          <div className="hero-copy">
-            <p className="hero-title">从文件编辑升级到记忆运行态</p>
-            <p className="hero-subtitle">
-              Hermes 的记忆不只有三个 Markdown 文件，还包括 `memory.provider`、`user_profile_enabled` 和字符预算。
-              这个页面把这些配置和文件状态放到一起看，方便你判断“记忆是否真的在工作”。
-            </p>
-            <div className="detail-list">
+        <div className="compact-overview-grid">
+          <div className="shell-card">
+            <div className="shell-card-header">
+              <strong>运行摘要</strong>
+              <div className="pill-row">
+                <Pill tone={summary?.memoryEnabled ? 'good' : 'warn'}>{summary?.memoryEnabled ? 'Memory On' : 'Memory Off'}</Pill>
+                <Pill tone={snapshot?.gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
+                  {snapshot?.gateway?.gatewayState ?? 'Gateway ?'}
+                </Pill>
+              </div>
+            </div>
+            <div className="detail-list compact">
               <KeyValueRow label="当前 Profile" value={profile} />
-              <KeyValueRow label="记忆 Provider" value={providerLabel} />
-              <KeyValueRow label="终端后端" value={summary?.terminalBackend ?? '—'} />
-              <KeyValueRow
-                label="Toolsets"
-                value={summary?.toolsets.length ? summary.toolsets.join(', ') : '—'}
-              />
-              <KeyValueRow label="Gateway" value={snapshot?.gateway?.gatewayState ?? '未检测到'} />
+              <KeyValueRow label="Provider" value={runtimeProviderLabel} />
+              <KeyValueRow label="User Profile" value={summary?.userProfileEnabled ? 'On' : 'Off'} />
+              <KeyValueRow label="会话数" value={snapshot?.counts.sessions ?? 0} />
+              <KeyValueRow label="插件数" value={extensions.plugins.installedCount} />
             </div>
           </div>
-          <div className="metrics-grid">
-            <MetricCard label="记忆槽位" value={`${readyCount}/${items.length || 3}`} hint="SOUL / MEMORY / USER 是否齐备" />
-            <MetricCard label="Memory" value={summary?.memoryEnabled ? 'On' : 'Off'} hint="memory.memory_enabled" />
-            <MetricCard label="User Profile" value={summary?.userProfileEnabled ? 'On' : 'Off'} hint="user_profile_enabled" />
-            <MetricCard
-              label="字符预算"
-              value={`${summary?.memoryCharLimit ?? '—'} / ${summary?.userCharLimit ?? '—'}`}
-              hint="MEMORY / USER 上限"
-            />
+          <div className="metrics-grid metrics-grid-tight">
+            <MetricCard label="槽位" value={`${readyCount}/${items.length || 3}`} hint="SOUL / MEMORY / USER" />
+            <MetricCard label="Provider" value={runtimeProviderLabel} hint={providerLabel === runtimeProviderLabel ? '配置与运行态一致' : '配置与运行态需核对'} />
+            <MetricCard label="Plugins" value={extensions.plugins.installedCount} hint="plugins list" />
+            <MetricCard label="Warnings" value={warnings.length + warningCountBase} hint="预算、provider、gateway、会话" />
           </div>
         </div>
       </Panel>
@@ -227,17 +320,164 @@ export function MemoryPage({ notify, profile, navigate, pageIntent, consumePageI
           actions={(
             <Toolbar>
               <Button onClick={() => setInvestigation(null)}>清除上下文</Button>
-              <Button onClick={() => navigate('sessions')}>回到会话页</Button>
-              <Button onClick={() => navigate('config')}>核对配置</Button>
+              <Button onClick={() => navigate('sessions')}>返回会话</Button>
             </Toolbar>
           )}
         />
       ) : null}
 
+      <Panel
+        title="记忆接管动作"
+        subtitle="setup、off、plugins、Finder"
+        tip={(
+          <InfoTip content="参考 clawpanel 的做法，这里只保留闭环动作，不在页内重复摆满跨页导航。真正需要的说明交给悬浮提示和命令回显。"/>
+        )}
+      >
+        <div className="control-card-grid">
+          <section className="action-card action-card-compact">
+            <div className="action-card-header">
+              <div>
+                <p className="eyebrow">Provider</p>
+                <h3 className="action-card-title">记忆 Provider</h3>
+              </div>
+              <Pill tone={summary?.memoryEnabled ? 'good' : 'warn'}>
+                {summary?.memoryEnabled ? 'Enabled' : 'Disabled'}
+              </Pill>
+            </div>
+            <p className="command-line">hermes memory setup · hermes memory status · hermes memory off</p>
+            <Toolbar>
+              <Button
+                kind="primary"
+                onClick={() => void openInTerminal('memory:setup', '记忆 Provider', 'hermes memory setup')}
+                disabled={actionBusy || !installation.binaryFound}
+              >
+                {runningDesktopAction === 'memory:setup' ? 'Provider…' : 'Provider 向导'}
+              </Button>
+              <Button onClick={() => void runMemoryStatus()} disabled={actionBusy}>
+                {runningDiagnostic ? '体检中…' : '状态体检'}
+              </Button>
+              <Button
+                kind="danger"
+                onClick={() => void openInTerminal('memory:off', '关闭记忆', 'hermes memory off', '确定关闭当前 profile 的记忆功能吗？')}
+                disabled={actionBusy || !installation.binaryFound}
+              >
+                {runningDesktopAction === 'memory:off' ? '关闭中…' : '关闭记忆'}
+              </Button>
+            </Toolbar>
+          </section>
+
+          <section className="action-card action-card-compact">
+            <div className="action-card-header">
+              <div>
+                <p className="eyebrow">Plugins</p>
+                <h3 className="action-card-title">插件与扩展 Provider</h3>
+              </div>
+              <Pill tone={extensions.plugins.installedCount > 0 ? 'good' : 'neutral'}>
+                {extensions.plugins.installedCount > 0 ? `${extensions.plugins.installedCount} 个` : '未安装'}
+              </Pill>
+            </div>
+            <label className="field-stack">
+              <span>插件名</span>
+              <input
+                className="search-input"
+                value={pluginInput}
+                onChange={(event) => setPluginInput(event.target.value)}
+                placeholder="byterover / owner/repo"
+                disabled={actionBusy}
+              />
+            </label>
+            <p className="command-line">
+              {pluginTerminalName
+                ? `hermes plugins install ${pluginTerminalName} · hermes plugins update ${pluginTerminalName} · hermes plugins remove ${pluginTerminalName}`
+                : 'hermes plugins · 输入插件名后可 install / update / remove'}
+            </p>
+            <Toolbar>
+              <Button
+                onClick={() => void openInTerminal('memory:plugins-panel', '插件面板', 'hermes plugins')}
+                disabled={actionBusy || !installation.binaryFound}
+              >
+                {runningDesktopAction === 'memory:plugins-panel' ? '插件面板…' : '插件面板'}
+              </Button>
+              <Button
+                kind="primary"
+                onClick={() => void openInTerminal('memory:plugin-install', '安装插件', `hermes plugins install ${pluginTerminalName}`)}
+                disabled={actionBusy || !installation.binaryFound || !pluginTerminalName}
+              >
+                {runningDesktopAction === 'memory:plugin-install' ? '安装中…' : '安装'}
+              </Button>
+              <Button
+                onClick={() => void openInTerminal('memory:plugin-update', '更新插件', `hermes plugins update ${pluginTerminalName}`)}
+                disabled={actionBusy || !installation.binaryFound || !pluginTerminalName}
+              >
+                {runningDesktopAction === 'memory:plugin-update' ? '更新中…' : '更新'}
+              </Button>
+              <Button
+                kind="danger"
+                onClick={() => void openInTerminal('memory:plugin-remove', '移除插件', `hermes plugins remove ${pluginTerminalName}`, `确定移除插件 ${pluginTerminalName || ''} 吗？`)}
+                disabled={actionBusy || !installation.binaryFound || !pluginTerminalName}
+              >
+                {runningDesktopAction === 'memory:plugin-remove' ? '移除中…' : '移除'}
+              </Button>
+            </Toolbar>
+          </section>
+
+          <section className="action-card action-card-compact">
+            <div className="action-card-header">
+              <div>
+                <p className="eyebrow">Workspace</p>
+                <h3 className="action-card-title">记忆物料</h3>
+              </div>
+              <Pill tone={detail?.exists ? 'good' : 'warn'}>
+                {detail?.exists ? '已落盘' : '未落盘'}
+              </Pill>
+            </div>
+            <p className="command-line">{detail?.path || config.hermesHome}</p>
+            <Toolbar>
+              <Button onClick={() => void openInFinder(config.hermesHome, 'Hermes Home')} disabled={actionBusy}>
+                打开 Home
+              </Button>
+              <Button onClick={() => detail?.path && void openInFinder(detail.path, detail.label, true)} disabled={actionBusy || !detail?.path}>
+                定位当前文件
+              </Button>
+              <Button onClick={() => detail?.path && void openInFinder(directoryOf(detail.path), '记忆目录')} disabled={actionBusy || !detail?.path}>
+                打开目录
+              </Button>
+            </Toolbar>
+          </section>
+
+          <section className="action-card action-card-compact">
+            <div className="action-card-header">
+              <div>
+                <p className="eyebrow">Runtime</p>
+                <h3 className="action-card-title">运行态信号</h3>
+              </div>
+              <Pill tone={warnings.length === 0 ? 'good' : 'warn'}>
+                {warnings.length === 0 ? '稳定' : `${warnings.length} 条`}
+              </Pill>
+            </div>
+            <p className="command-line">
+              provider {runtimeProviderLabel} · sessions {snapshot?.counts.sessions ?? 0} · gateway {snapshot?.gateway?.gatewayState ?? 'unknown'}
+            </p>
+            {warnings.length > 0 ? (
+              <div className="warning-stack">
+                {warnings.slice(0, 2).map((warning) => (
+                  <div className="warning-item" key={warning}>
+                    {warning}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="helper-text">当前没有明显的记忆侧阻塞项。</p>
+            )}
+          </section>
+        </div>
+      </Panel>
+
       <div className="two-column wide-left">
         <Panel
           title="记忆槽位"
-          subtitle="左边选文件，右边看运行态。这里的三个槽位对应 Hermes 官方文档中的记忆层次。"
+          subtitle="SOUL / MEMORY / USER"
+          tip={<InfoTip content="槽位只负责文件层；是否真正生效，还要看 provider、开关、预算和会话链路。"/>}
         >
           <div className="list-stack">
             {items.map((item) => {
@@ -275,16 +515,17 @@ export function MemoryPage({ notify, profile, navigate, pageIntent, consumePageI
         </Panel>
 
         <Panel
-          title="运行态摘要"
-          subtitle="文件是否存在只是第一层，真正影响记忆闭环的是 provider、开关、预算、会话和 gateway。"
+          title="运行态与回显"
+          subtitle="provider、预算、原始输出"
+          tip={<InfoTip content="这里保留最近一次记忆命令或 memory status 的真实输出，方便你对照结构化卡片，避免再跳到别页找上下文。"/>}
         >
           <div className="health-grid">
             <section className="health-card">
               <div className="health-card-header">
                 <strong>Provider</strong>
-                <Pill tone={providerLabel === 'builtin-file' ? 'good' : 'neutral'}>{providerLabel}</Pill>
+                <Pill tone={runtimeProviderLabel === 'builtin-file' ? 'good' : 'neutral'}>{runtimeProviderLabel}</Pill>
               </div>
-              <p>空值表示 Hermes 使用内建文件记忆；非空值通常意味着还叠加了插件或外部 provider。</p>
+              <p>配置声明 {providerLabel}，运行态回报 {runtimeProviderLabel}。</p>
             </section>
             <section className="health-card">
               <div className="health-card-header">
@@ -293,7 +534,7 @@ export function MemoryPage({ notify, profile, navigate, pageIntent, consumePageI
                   {summary?.memoryEnabled ? '已开启' : '已关闭'}
                 </Pill>
               </div>
-              <p>关闭后，Markdown 文件仍可编辑，但不会稳定参与 Hermes 的运行态记忆回路。</p>
+              <p>关闭后文件仍可编辑，但不会稳定参与记忆闭环。</p>
             </section>
             <section className="health-card">
               <div className="health-card-header">
@@ -302,60 +543,50 @@ export function MemoryPage({ notify, profile, navigate, pageIntent, consumePageI
                   {summary?.userProfileEnabled ? '已开启' : '已关闭'}
                 </Pill>
               </div>
-              <p>USER.md 是否参与用户建模，直接由这个开关决定。</p>
+              <p>USER.md 是否参与建模，完全由这个开关决定。</p>
             </section>
             <section className="health-card">
               <div className="health-card-header">
-                <strong>Gateway / Sessions</strong>
-                <Pill tone={snapshot?.gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
-                  {snapshot?.gateway?.gatewayState ?? '未检测到'}
+                <strong>Budget</strong>
+                <Pill tone={remainingChars != null && remainingChars < 0 ? 'bad' : 'good'}>
+                  {selectedLimit ?? '—'}
                 </Pill>
               </div>
-              <p>{snapshot?.counts.sessions ?? 0} 条会话记录，可用来验证记忆是否已经进入真实工作流。</p>
+              <p>当前编辑对象剩余 {remainingChars ?? '—'} 字符。</p>
             </section>
           </div>
 
-          <Toolbar>
-            <Button
-              onClick={() => config && void openInFinder(config.hermesHome, 'Hermes Home')}
-              disabled={!config}
-            >
-              打开 Home
-            </Button>
-            <Button
-              onClick={() => detail?.path && void openInFinder(detail.path, detail.label, true)}
-              disabled={!detail?.exists}
-            >
-              定位当前文件
-            </Button>
-            <Button
-              onClick={() => detail?.path && void openInFinder(directoryOf(detail.path), '记忆目录')}
-              disabled={!detail?.path}
-            >
-              打开所在目录
-            </Button>
-            <Button onClick={() => navigate('skills')}>进入技能页</Button>
-          </Toolbar>
-
           {warnings.length > 0 ? (
-            <div className="warning-stack">
+            <div className="warning-stack top-gap">
               {warnings.map((warning) => (
                 <div className="warning-item" key={warning}>
                   {warning}
                 </div>
               ))}
             </div>
-          ) : (
-            <p className="helper-text">
-              当前没有明显记忆侧风险。下一步更适合回到诊断页执行 `status / doctor`，确认运行态和文件状态一致。
-            </p>
-          )}
+          ) : null}
+
+          <Panel
+            className="panel-nested top-gap"
+            title={outputLabel}
+            subtitle={lastCommand ? '最近一次命令回显' : '当前 memory status 原始输出'}
+          >
+            {lastCommand ? (
+              <div className="detail-list compact">
+                <KeyValueRow label="命令" value={lastCommand.command} />
+                <KeyValueRow label="结果" value={lastCommand.success ? 'success' : 'failed'} />
+                <KeyValueRow label="退出码" value={lastCommand.exitCode} />
+              </div>
+            ) : null}
+            <pre className="code-block compact-code">{outputText}</pre>
+          </Panel>
         </Panel>
       </div>
 
       <Panel
         title={detail?.label ?? '记忆内容'}
         subtitle={currentMeta.description}
+        tip={<InfoTip content="保存后不会直接改 Hermes 本体，只会更新当前 profile 下的记忆文件。建议优先使用“保存并校验”，确认运行态与文件态一致。"/>}
         aside={(
           <Toolbar>
             {dirty ? <Pill tone="warn">未保存</Pill> : null}
@@ -364,8 +595,11 @@ export function MemoryPage({ notify, profile, navigate, pageIntent, consumePageI
                 剩余 {remainingChars}
               </Pill>
             ) : null}
-            <Button kind="primary" onClick={() => void save()} disabled={saving}>
-              {saving ? '保存中…' : '保存文件'}
+            <Button onClick={() => void save(false)} disabled={actionBusy}>
+              {saving === 'save' ? '保存中…' : '仅保存'}
+            </Button>
+            <Button kind="primary" onClick={() => void save(true)} disabled={actionBusy}>
+              {saving === 'verify' ? '保存并校验…' : '保存并校验'}
             </Button>
           </Toolbar>
         )}
@@ -379,7 +613,7 @@ export function MemoryPage({ notify, profile, navigate, pageIntent, consumePageI
               <KeyValueRow label="字符数" value={content.length} />
               <KeyValueRow label="行数" value={lineCount} />
               <KeyValueRow label="字符预算" value={selectedLimit ?? '—'} />
-              <KeyValueRow label="记忆 Provider" value={providerLabel} />
+              <KeyValueRow label="Provider" value={runtimeProviderLabel} />
             </div>
             <textarea
               className="editor large"
@@ -389,7 +623,7 @@ export function MemoryPage({ notify, profile, navigate, pageIntent, consumePageI
             />
           </>
         ) : (
-          <EmptyState title="未选择文件" description="从上面的记忆槽位里选择一个文件开始查看或编辑。" />
+          <EmptyState title="未选择文件" description="从上面的槽位中选择一个文件开始编辑。" />
         )}
       </Panel>
     </div>

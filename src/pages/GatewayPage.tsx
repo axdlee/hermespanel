@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import { Button, ContextBanner, EmptyState, KeyValueRow, LoadingState, MetricCard, Panel, Pill, Toolbar } from '../components/ui';
 import { api } from '../lib/api';
+import { handoffToTerminal, openFinderLocation } from '../lib/desktop';
 import {
   buildConfigDrilldownIntent,
   buildDiagnosticsDrilldownIntent,
@@ -22,14 +23,16 @@ import {
   isRemoteDelivery,
   platformTone,
 } from '../lib/runtime';
-import type { CommandRunResult, CronJobsSnapshot, DashboardSnapshot } from '../types';
+import type { CommandRunResult, CronJobsSnapshot, DashboardSnapshot, InstallationSnapshot } from '../types';
 import { isGatewayPageIntent, type GatewayPageIntent, type PageProps } from './types';
 
 export function GatewayPage({ notify, profile, navigate, pageIntent, consumePageIntent }: PageProps) {
   const [data, setData] = useState<DashboardSnapshot | null>(null);
+  const [installation, setInstallation] = useState<InstallationSnapshot | null>(null);
   const [cronSnapshot, setCronSnapshot] = useState<CronJobsSnapshot | null>(null);
   const [diagnostic, setDiagnostic] = useState<CommandRunResult | null>(null);
   const [lastKind, setLastKind] = useState<DiagnosticKind | null>(null);
+  const [lastActionLabel, setLastActionLabel] = useState<string | null>(null);
   const [investigation, setInvestigation] = useState<GatewayPageIntent | null>(null);
   const [loading, setLoading] = useState(true);
   const [runningCommand, setRunningCommand] = useState<string | null>(null);
@@ -37,11 +40,13 @@ export function GatewayPage({ notify, profile, navigate, pageIntent, consumePage
   async function load() {
     setLoading(true);
     try {
-      const [snapshot, cron] = await Promise.all([
+      const [snapshot, nextInstallation, cron] = await Promise.all([
         api.getDashboardSnapshot(profile),
+        api.getInstallationSnapshot(profile),
         api.getCronJobs(profile),
       ]);
       setData(snapshot);
+      setInstallation(nextInstallation);
       setCronSnapshot(cron);
     } catch (reason) {
       notify('error', String(reason));
@@ -56,6 +61,7 @@ export function GatewayPage({ notify, profile, navigate, pageIntent, consumePage
       const result = await api.runGatewayAction(action, profile);
       setDiagnostic(result);
       setLastKind(null);
+      setLastActionLabel(action === 'start' ? '启动 Gateway' : action === 'restart' ? '重启 Gateway' : '停止 Gateway');
       notify(result.success ? 'success' : 'error', `gateway ${action} 已执行。`);
       await load();
     } catch (reason) {
@@ -75,6 +81,7 @@ export function GatewayPage({ notify, profile, navigate, pageIntent, consumePage
       const result = await api.runDiagnostic(kind, profile);
       setDiagnostic(result);
       setLastKind(kind);
+      setLastActionLabel(getDiagnosticCommand(kind)?.label ?? kind);
       if (!silent) {
         notify(result.success ? 'success' : 'error', `${kind} 已执行。`);
       }
@@ -91,20 +98,38 @@ export function GatewayPage({ notify, profile, navigate, pageIntent, consumePage
   }
 
   async function openInFinder(path: string, label: string, revealInFinder = false) {
-    try {
-      const result = await api.openInFinder({ path, revealInFinder });
-      notify(
-        result.success ? 'success' : 'error',
-        result.success ? `${label} 已在 Finder 中打开。` : `${label} 打开失败，请检查命令输出。`,
-      );
-    } catch (reason) {
-      notify('error', String(reason));
-    }
+    await openFinderLocation({
+      actionKey: `finder:${label}`,
+      label,
+      notify,
+      path,
+      revealInFinder,
+      setBusy: setRunningCommand,
+    });
+  }
+
+  async function openInTerminal(actionKey: string, label: string, command: string, confirmMessage?: string) {
+    await handoffToTerminal({
+      actionKey,
+      command,
+      confirmMessage,
+      label,
+      notify,
+      onResult: (resultLabel, result) => {
+        setDiagnostic(result);
+        setLastKind(null);
+        setLastActionLabel(resultLabel);
+      },
+      profile,
+      setBusy: setRunningCommand,
+      workingDirectory: installation?.hermesHomeExists ? installation.hermesHome : null,
+    });
   }
 
   useEffect(() => {
     setDiagnostic(null);
     setLastKind(null);
+    setLastActionLabel(null);
     void Promise.all([
       load(),
       runDiagnostic('gateway-status', { silent: true, refresh: false }),
@@ -121,7 +146,7 @@ export function GatewayPage({ notify, profile, navigate, pageIntent, consumePage
     consumePageIntent();
   }, [consumePageIntent, notify, pageIntent]);
 
-  if (loading || !data) {
+  if (loading || !data || !installation) {
     return <LoadingState label="正在加载 Hermes 网关编排视图。" />;
   }
 
@@ -176,8 +201,14 @@ export function GatewayPage({ notify, profile, navigate, pageIntent, consumePage
     suggestedCommand: 'config-check',
   });
   const warnings: string[] = [];
+  if (!installation.binaryFound) {
+    warnings.push('当前还没有检测到 Hermes CLI，先完成安装后，网关 service 和平台配置才能真正闭环。');
+  }
   if (gateway?.gatewayState !== 'running') {
     warnings.push('gateway 当前未运行，消息平台和远端 delivery 链路都还没有真正恢复。');
+  }
+  if (!installation.gatewayStateExists) {
+    warnings.push('还没有看到 gateway_state.json，说明 service 还未被完整接管或从未成功启动。');
   }
   if (remoteJobs.length > 0 && gateway?.gatewayState !== 'running') {
     warnings.push(`当前有 ${remoteJobs.length} 个远端投递作业依赖 gateway，但网关当前不可用。`);
@@ -260,6 +291,125 @@ export function GatewayPage({ notify, profile, navigate, pageIntent, consumePage
           )}
         />
       ) : null}
+
+      <Panel
+        title="服务接管与编排"
+        subtitle="把 gateway 的 install / setup / uninstall 和运行控制分开，形成更像 ClawPanel 的服务层闭环。"
+      >
+        <div className="control-card-grid">
+          <section className="action-card action-card-compact">
+            <div className="action-card-header">
+              <div>
+                <p className="eyebrow">Bootstrap</p>
+                <h3 className="action-card-title">Gateway Service 接管</h3>
+              </div>
+              <Pill tone={installation.gatewayStateExists ? 'good' : 'warn'}>
+                {installation.gatewayStateExists ? '已发现状态文件' : '尚未接管'}
+              </Pill>
+            </div>
+            <p className="action-card-copy">
+              先让 Hermes 自己完成 gateway service 安装和平台向导，面板只负责桌面级入口与状态汇总。
+            </p>
+            <p className="command-line">
+              {installation.gatewayInstallCommand} · {installation.gatewaySetupCommand} · {installation.gatewayUninstallCommand}
+            </p>
+            <Toolbar>
+              <Button
+                kind="primary"
+                onClick={() => void openInTerminal('gateway:install-service', '安装 Gateway Service', installation.gatewayInstallCommand)}
+                disabled={runningCommand !== null || !installation.binaryFound}
+              >
+                {runningCommand === 'gateway:install-service' ? '安装 Service…' : '安装 Service'}
+              </Button>
+              <Button
+                onClick={() => void openInTerminal('gateway:setup-service', 'Gateway Setup', installation.gatewaySetupCommand)}
+                disabled={runningCommand !== null || !installation.binaryFound}
+              >
+                {runningCommand === 'gateway:setup-service' ? 'Gateway Setup…' : 'Gateway Setup'}
+              </Button>
+              <Button
+                kind="danger"
+                onClick={() => void openInTerminal('gateway:uninstall-service', '卸载 Gateway Service', installation.gatewayUninstallCommand, '确定卸载当前 profile 的 gateway service 吗？')}
+                disabled={runningCommand !== null || !installation.binaryFound}
+              >
+                {runningCommand === 'gateway:uninstall-service' ? '卸载 Service…' : '卸载 Service'}
+              </Button>
+            </Toolbar>
+          </section>
+
+          <section className="action-card action-card-compact">
+            <div className="action-card-header">
+              <div>
+                <p className="eyebrow">Runtime</p>
+                <h3 className="action-card-title">Service 运行控制</h3>
+              </div>
+              <Pill tone={gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
+                {gateway?.gatewayState ?? 'idle'}
+              </Pill>
+            </div>
+            <p className="action-card-copy">
+              日常控制仍然直接走 `hermes gateway start / restart / stop`，不在 HermesPanel 内重造服务守护逻辑。
+            </p>
+            <p className="command-line">hermes gateway start · hermes gateway restart · hermes gateway stop</p>
+            <Toolbar>
+              <Button kind="primary" onClick={() => void runAction('start')} disabled={runningCommand !== null || !installation.binaryFound}>
+                {runningCommand === 'gateway:start' ? '启动中…' : '启动'}
+              </Button>
+              <Button onClick={() => void runAction('restart')} disabled={runningCommand !== null || !installation.binaryFound}>
+                {runningCommand === 'gateway:restart' ? '重启中…' : '重启'}
+              </Button>
+              <Button kind="danger" onClick={() => void runAction('stop')} disabled={runningCommand !== null || !installation.binaryFound}>
+                {runningCommand === 'gateway:stop' ? '停止中…' : '停止'}
+              </Button>
+            </Toolbar>
+          </section>
+
+          <section className="action-card action-card-compact">
+            <div className="action-card-header">
+              <div>
+                <p className="eyebrow">Topology</p>
+                <h3 className="action-card-title">链路与文件入口</h3>
+              </div>
+              <Pill tone={platforms.length > 0 ? 'good' : 'warn'}>
+                {platforms.length > 0 ? `${platforms.length} 个平台` : '暂无平台'}
+              </Pill>
+            </div>
+            <p className="action-card-copy">
+              先看状态文件和日志，再判断是 service、平台接入还是远端 delivery 本身的问题。
+            </p>
+            <p className="command-line">{gatewayStatePath} · {logsDir}</p>
+            <Toolbar>
+              <Button onClick={() => void openInFinder(gatewayStatePath, 'gateway_state.json', true)} disabled={runningCommand !== null}>定位状态文件</Button>
+              <Button onClick={() => void openInFinder(logsDir, 'logs 目录')} disabled={runningCommand !== null}>打开日志目录</Button>
+              <Button onClick={() => navigate('logs', logsIntent)}>进入日志页</Button>
+              <Button onClick={() => navigate('cron')}>进入 Cron 页</Button>
+            </Toolbar>
+          </section>
+
+          <section className="action-card action-card-compact">
+            <div className="action-card-header">
+              <div>
+                <p className="eyebrow">Validation</p>
+                <h3 className="action-card-title">上下游依赖核对</h3>
+              </div>
+              <Pill tone={remoteJobs.length === 0 || gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
+                {remoteJobs.length > 0 ? `${remoteJobs.length} 个远端作业` : '本地优先'}
+              </Pill>
+            </div>
+            <p className="action-card-copy">
+              gateway 不只是一个进程，还要看 provider、context engine 和远端作业是否一并对上。
+            </p>
+            <p className="command-line">
+              {data.config.modelProvider || 'provider 未配置'} / {data.config.modelDefault || 'model 未配置'} · context {data.config.contextEngine || '未配置'}
+            </p>
+            <Toolbar>
+              <Button onClick={() => navigate('config', configIntent)}>核对配置</Button>
+              <Button onClick={() => navigate('extensions', extensionsIntent)}>核对扩展</Button>
+              <Button onClick={() => navigate('diagnostics', diagnosticsIntent)}>进入诊断页</Button>
+            </Toolbar>
+          </section>
+        </div>
+      </Panel>
 
       <div className="two-column wide-left">
         <Panel
@@ -488,11 +638,11 @@ export function GatewayPage({ notify, profile, navigate, pageIntent, consumePage
       >
         {diagnostic ? (
           <div className="result-stack">
-            <div className="detail-list compact">
-              <KeyValueRow label="命令类型" value={lastCommand?.label ?? '网关动作'} />
-              <KeyValueRow label="命令" value={diagnostic.command} />
-              <KeyValueRow label="退出码" value={diagnostic.exitCode} />
-              <KeyValueRow
+              <div className="detail-list compact">
+                <KeyValueRow label="命令类型" value={lastActionLabel ?? lastCommand?.label ?? '网关动作'} />
+                <KeyValueRow label="命令" value={diagnostic.command} />
+                <KeyValueRow label="退出码" value={diagnostic.exitCode} />
+                <KeyValueRow
                 label="结果"
                 value={<Pill tone={diagnostic.success ? 'good' : 'bad'}>{diagnostic.success ? '成功' : '失败'}</Pill>}
               />
