@@ -588,6 +588,61 @@ pre {
   line-height: 1.7;
 }
 
+.context-banner {
+  border-radius: 22px;
+  border: 1px solid rgba(199, 168, 105, 0.18);
+  background:
+    radial-gradient(circle at top left, rgba(199, 168, 105, 0.1), transparent 42%),
+    rgba(255, 255, 255, 0.03);
+  padding: 18px;
+}
+
+.context-banner-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.context-banner-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.context-banner-label {
+  color: var(--gold);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 11px;
+}
+
+.context-banner-title,
+.context-banner-description {
+  margin: 0;
+}
+
+.context-banner-title {
+  font-size: 18px;
+  font-family: "Iowan Old Style", "Palatino Linotype", serif;
+}
+
+.context-banner-description {
+  color: var(--text-soft);
+  line-height: 1.7;
+}
+
+.context-banner-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.context-banner-actions {
+  margin-top: 14px;
+}
+
 .list-card-title {
   display: flex;
   justify-content: space-between;
@@ -795,6 +850,62 @@ pre {
   line-height: 1.7;
 }
 
+.workbench-grid,
+.health-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.workbench-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.health-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.action-card,
+.health-card {
+  border-radius: 22px;
+  border: 1px solid var(--border);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 30%),
+    rgba(7, 10, 10, 0.5);
+  padding: 18px;
+}
+
+.action-card-header,
+.health-card-header,
+.result-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.action-card-title {
+  margin: 0;
+  font-size: 20px;
+  font-family: "Iowan Old Style", "Palatino Linotype", serif;
+}
+
+.action-card-copy,
+.health-card p {
+  margin: 12px 0 16px;
+  color: var(--text-soft);
+  line-height: 1.7;
+}
+
+.health-card p {
+  margin-bottom: 0;
+}
+
+.result-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
 .warning-item {
   color: #ffe2a8;
 }
@@ -843,6 +954,8 @@ pre {
   .hero-grid,
   .two-column,
   .two-column.wide-left,
+  .workbench-grid,
+  .health-grid,
   .skill-grid,
   .form-grid {
     grid-template-columns: 1fr;

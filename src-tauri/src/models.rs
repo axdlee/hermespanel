@@ -66,9 +66,14 @@ pub struct ConfigSummary {
     pub model_base_url: Option<String>,
     pub terminal_backend: Option<String>,
     pub terminal_cwd: Option<String>,
+    pub context_engine: Option<String>,
     pub toolsets: Vec<String>,
     pub personality: Option<String>,
     pub memory_enabled: Option<bool>,
+    pub user_profile_enabled: Option<bool>,
+    pub memory_provider: Option<String>,
+    pub memory_char_limit: Option<i64>,
+    pub user_char_limit: Option<i64>,
     pub streaming_enabled: Option<bool>,
 }
 
@@ -81,6 +86,88 @@ pub struct ConfigDocuments {
     pub config_yaml: String,
     pub env_file: String,
     pub summary: ConfigSummary,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NamedCount {
+    pub name: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolPlatformSummary {
+    pub name: String,
+    pub enabled_count: usize,
+    pub total_count: usize,
+    pub enabled_tools: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolRuntimeItem {
+    pub name: String,
+    pub enabled: bool,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolPlatformInventory {
+    pub platform_key: String,
+    pub display_name: String,
+    pub items: Vec<ToolRuntimeItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryProviderOption {
+    pub name: String,
+    pub availability: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryRuntimeSnapshot {
+    pub built_in_status: String,
+    pub provider: String,
+    pub installed_plugins: Vec<MemoryProviderOption>,
+    pub raw_output: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeSkillItem {
+    pub name: String,
+    pub category: String,
+    pub source: String,
+    pub trust: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginRuntimeSnapshot {
+    pub installed_count: usize,
+    pub items: Vec<String>,
+    pub install_hint: Option<String>,
+    pub raw_output: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtensionsSnapshot {
+    pub profile_name: String,
+    pub hermes_home: String,
+    pub tool_platforms: Vec<ToolPlatformSummary>,
+    pub tool_inventory: Vec<ToolPlatformInventory>,
+    pub tools_raw_output: String,
+    pub memory_runtime: MemoryRuntimeSnapshot,
+    pub runtime_skills: Vec<RuntimeSkillItem>,
+    pub skills_raw_output: String,
+    pub skill_source_counts: Vec<NamedCount>,
+    pub skill_trust_counts: Vec<NamedCount>,
+    pub plugins: PluginRuntimeSnapshot,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -176,6 +263,14 @@ pub struct DashboardSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct ProfileAliasItem {
+    pub name: String,
+    pub path: String,
+    pub is_primary: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ProfileSummary {
     pub name: String,
     pub home_path: String,
@@ -188,6 +283,7 @@ pub struct ProfileSummary {
     pub env_exists: bool,
     pub soul_exists: bool,
     pub alias_path: Option<String>,
+    pub aliases: Vec<ProfileAliasItem>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -232,6 +328,21 @@ pub struct ProfileImportRequest {
 #[serde(rename_all = "camelCase")]
 pub struct ProfileDeleteRequest {
     pub profile_name: String,
+    pub confirm_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileAliasCreateRequest {
+    pub profile_name: String,
+    pub alias_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileAliasDeleteRequest {
+    pub profile_name: String,
+    pub alias_name: String,
     pub confirm_name: String,
 }
 

@@ -21,9 +21,14 @@ export interface ConfigSummary {
   modelBaseUrl?: string | null;
   terminalBackend?: string | null;
   terminalCwd?: string | null;
+  contextEngine?: string | null;
   toolsets: string[];
   personality?: string | null;
   memoryEnabled?: boolean | null;
+  userProfileEnabled?: boolean | null;
+  memoryProvider?: string | null;
+  memoryCharLimit?: number | null;
+  userCharLimit?: number | null;
   streamingEnabled?: boolean | null;
 }
 
@@ -34,6 +39,70 @@ export interface ConfigDocuments {
   configYaml: string;
   envFile: string;
   summary: ConfigSummary;
+}
+
+export interface NamedCount {
+  name: string;
+  count: number;
+}
+
+export interface ToolPlatformSummary {
+  name: string;
+  enabledCount: number;
+  totalCount: number;
+  enabledTools: string[];
+}
+
+export interface ToolRuntimeItem {
+  name: string;
+  enabled: boolean;
+  description: string;
+}
+
+export interface ToolPlatformInventory {
+  platformKey: string;
+  displayName: string;
+  items: ToolRuntimeItem[];
+}
+
+export interface MemoryProviderOption {
+  name: string;
+  availability: string;
+}
+
+export interface MemoryRuntimeSnapshot {
+  builtInStatus: string;
+  provider: string;
+  installedPlugins: MemoryProviderOption[];
+  rawOutput: string;
+}
+
+export interface RuntimeSkillItem {
+  name: string;
+  category: string;
+  source: string;
+  trust: string;
+}
+
+export interface PluginRuntimeSnapshot {
+  installedCount: number;
+  items: string[];
+  installHint?: string | null;
+  rawOutput: string;
+}
+
+export interface ExtensionsSnapshot {
+  profileName: string;
+  hermesHome: string;
+  toolPlatforms: ToolPlatformSummary[];
+  toolInventory: ToolPlatformInventory[];
+  toolsRawOutput: string;
+  memoryRuntime: MemoryRuntimeSnapshot;
+  runtimeSkills: RuntimeSkillItem[];
+  skillsRawOutput: string;
+  skillSourceCounts: NamedCount[];
+  skillTrustCounts: NamedCount[];
+  plugins: PluginRuntimeSnapshot;
 }
 
 export interface DashboardCounts {
@@ -133,6 +202,13 @@ export interface ProfileSummary {
   envExists: boolean;
   soulExists: boolean;
   aliasPath?: string | null;
+  aliases: ProfileAliasItem[];
+}
+
+export interface ProfileAliasItem {
+  name: string;
+  path: string;
+  isPrimary: boolean;
 }
 
 export interface ProfilesSnapshot {
@@ -165,6 +241,17 @@ export interface ProfileImportRequest {
 
 export interface ProfileDeleteRequest {
   profileName: string;
+  confirmName: string;
+}
+
+export interface ProfileAliasCreateRequest {
+  profileName: string;
+  aliasName?: string | null;
+}
+
+export interface ProfileAliasDeleteRequest {
+  profileName: string;
+  aliasName: string;
   confirmName: string;
 }
 

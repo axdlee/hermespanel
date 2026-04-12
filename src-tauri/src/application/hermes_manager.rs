@@ -1,15 +1,33 @@
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::infrastructure::hermes;
 use crate::models::{
     CommandRunResult, ConfigDocuments, CronCreateRequest, CronDeleteRequest, CronJobsSnapshot,
-    CronUpdateRequest, DashboardSnapshot, HermesHome, LogReadResult, MemoryFileDetail,
-    MemoryFileSummary, ProfileCreateRequest, ProfileDeleteRequest, ProfileExportRequest,
-    ProfileImportRequest, ProfileRenameRequest, ProfilesSnapshot, SessionDetail, SessionRecord,
-    SkillItem,
+    CronUpdateRequest, DashboardSnapshot, ExtensionsSnapshot, HermesHome, LogReadResult,
+    MemoryFileDetail, MemoryFileSummary, ProfileAliasCreateRequest, ProfileAliasDeleteRequest,
+    ProfileCreateRequest, ProfileDeleteRequest, ProfileExportRequest, ProfileImportRequest,
+    ProfileRenameRequest, ProfilesSnapshot, SessionDetail, SessionRecord, SkillItem,
 };
 
 pub struct HermesManager {
     home: HermesHome,
+}
+
+fn diagnostic_command_args(kind: &str) -> AppResult<&'static [&'static str]> {
+    match kind {
+        "version" => Ok(&["version"]),
+        "status" => Ok(&["status", "--all"]),
+        "status-deep" => Ok(&["status", "--deep"]),
+        "gateway-status" => Ok(&["gateway", "status"]),
+        "gateway-status-deep" => Ok(&["gateway", "status", "--deep"]),
+        "dump" => Ok(&["dump"]),
+        "doctor" => Ok(&["doctor"]),
+        "config-check" => Ok(&["config", "check"]),
+        "tools-summary" => Ok(&["tools", "--summary"]),
+        "plugins-list" => Ok(&["plugins", "list"]),
+        "memory-status" => Ok(&["memory", "status"]),
+        "skills-list" => Ok(&["skills", "list"]),
+        other => Err(AppError::Message(format!("不支持的诊断命令: {other}"))),
+    }
 }
 
 impl HermesManager {
@@ -25,6 +43,25 @@ impl HermesManager {
 
     pub fn config_documents(&self) -> AppResult<ConfigDocuments> {
         hermes::read_config_documents(&self.home)
+    }
+
+    pub fn extensions_snapshot(&self) -> AppResult<ExtensionsSnapshot> {
+        hermes::read_extensions_snapshot(&self.home)
+    }
+
+    pub fn run_tool_action(
+        &self,
+        action: &str,
+        platform: &str,
+        names: &[String],
+    ) -> AppResult<CommandRunResult> {
+        let args = hermes::build_tool_action_args(action, platform, names)?;
+        hermes::run_hermes_command_owned(Some(&self.home.profile_name), &args)
+    }
+
+    pub fn run_plugin_action(&self, action: &str, name: &str) -> AppResult<CommandRunResult> {
+        let args = hermes::build_plugin_action_args(action, name)?;
+        hermes::run_hermes_command_owned(Some(&self.home.profile_name), &args)
     }
 
     pub fn save_config_yaml(&self, content: &str) -> AppResult<()> {
@@ -83,6 +120,14 @@ impl HermesManager {
         hermes::run_hermes_command_owned(None, &args)
     }
 
+    pub fn create_profile_alias(
+        &self,
+        request: &ProfileAliasCreateRequest,
+    ) -> AppResult<CommandRunResult> {
+        let args = hermes::build_profile_alias_create_args(request)?;
+        hermes::run_hermes_command_owned(None, &args)
+    }
+
     pub fn rename_profile(&self, request: &ProfileRenameRequest) -> AppResult<CommandRunResult> {
         let args = hermes::build_profile_rename_args(request)?;
         hermes::run_hermes_command_owned(None, &args)
@@ -103,16 +148,23 @@ impl HermesManager {
         hermes::run_hermes_command_owned(None, &args)
     }
 
+    pub fn delete_profile_alias(
+        &self,
+        request: &ProfileAliasDeleteRequest,
+    ) -> AppResult<CommandRunResult> {
+        let args = hermes::build_profile_alias_delete_args(request)?;
+        hermes::run_hermes_command_owned(None, &args)
+    }
+
     pub fn cron_jobs(&self) -> AppResult<CronJobsSnapshot> {
         hermes::read_cron_jobs(&self.home)
     }
 
     pub fn run_cron_action(&self, action: &str, job_id: &str) -> AppResult<CommandRunResult> {
         match action {
-            "pause" | "resume" | "run" => hermes::run_hermes_command(
-                Some(&self.home.profile_name),
-                &["cron", action, job_id],
-            ),
+            "pause" | "resume" | "run" => {
+                hermes::run_hermes_command(Some(&self.home.profile_name), &["cron", action, job_id])
+            }
             other => Err(crate::error::AppError::Message(format!(
                 "不支持的 cron 操作: {other}"
             ))),
@@ -139,17 +191,41 @@ impl HermesManager {
     }
 
     pub fn run_diagnostic(&self, kind: &str) -> AppResult<CommandRunResult> {
+        let args = diagnostic_command_args(kind)?;
         match kind {
-            "version" => hermes::run_hermes_command(Some(&self.home.profile_name), &["version"]),
-            "status" => {
-                hermes::run_hermes_command(Some(&self.home.profile_name), &["status", "--all"])
-            }
-            "gateway-status" => {
-                hermes::run_hermes_command(Some(&self.home.profile_name), &["gateway", "status"])
-            }
-            "dump" => hermes::run_hermes_command(Some(&self.home.profile_name), &["dump"]),
-            "doctor" => hermes::run_hermes_command(Some(&self.home.profile_name), &["doctor"]),
-            other => hermes::run_hermes_command(Some(&self.home.profile_name), &[other]),
+            "tools-summary" => hermes::run_hermes_command_with_tty(Some(&self.home.profile_name), args),
+            _ => hermes::run_hermes_command(Some(&self.home.profile_name), args),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::diagnostic_command_args;
+
+    #[test]
+    fn maps_supported_diagnostic_commands() {
+        assert_eq!(
+            diagnostic_command_args("config-check").expect("应映射 config-check"),
+            ["config", "check"]
+        );
+        assert_eq!(
+            diagnostic_command_args("tools-summary").expect("应映射 tools-summary"),
+            ["tools", "--summary"]
+        );
+        assert_eq!(
+            diagnostic_command_args("gateway-status-deep")
+                .expect("应映射 gateway-status-deep"),
+            ["gateway", "status", "--deep"]
+        );
+        assert_eq!(
+            diagnostic_command_args("skills-list").expect("应映射 skills-list"),
+            ["skills", "list"]
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_diagnostic_commands() {
+        assert!(diagnostic_command_args("plugins").is_err());
     }
 }

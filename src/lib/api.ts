@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 
+import type { DiagnosticKind } from './diagnostics';
 import type {
   CommandRunResult,
   ConfigDocuments,
@@ -9,9 +10,12 @@ import type {
   CronUpdateRequest,
   DashboardSnapshot,
   DesktopOpenRequest,
+  ExtensionsSnapshot,
   LogReadResult,
   MemoryFileDetail,
   MemoryFileSummary,
+  ProfileAliasCreateRequest,
+  ProfileAliasDeleteRequest,
   ProfileCreateRequest,
   ProfileDeleteRequest,
   ProfileExportRequest,
@@ -40,6 +44,8 @@ export const api = {
     call<ProfilesSnapshot>('set_active_profile', { profileName }),
   createProfile: (request: ProfileCreateRequest) =>
     call<CommandRunResult>('create_profile', { request }),
+  createProfileAlias: (request: ProfileAliasCreateRequest) =>
+    call<CommandRunResult>('create_profile_alias', { request }),
   renameProfile: (request: ProfileRenameRequest) =>
     call<CommandRunResult>('rename_profile', { request }),
   exportProfile: (request: ProfileExportRequest) =>
@@ -48,10 +54,18 @@ export const api = {
     call<CommandRunResult>('import_profile', { request }),
   deleteProfile: (request: ProfileDeleteRequest) =>
     call<CommandRunResult>('delete_profile', { request }),
+  deleteProfileAlias: (request: ProfileAliasDeleteRequest) =>
+    call<CommandRunResult>('delete_profile_alias', { request }),
   getDashboardSnapshot: (profile?: string) =>
     call<DashboardSnapshot>('get_dashboard_snapshot', withProfile(profile)),
   getConfigDocuments: (profile?: string) =>
     call<ConfigDocuments>('get_config_documents', withProfile(profile)),
+  getExtensionsSnapshot: (profile?: string) =>
+    call<ExtensionsSnapshot>('get_extensions_snapshot', withProfile(profile)),
+  runToolAction: (action: 'enable' | 'disable', platform: string, names: string[], profile?: string) =>
+    call<CommandRunResult>('run_tool_action', withProfile(profile, { action, platform, names })),
+  runPluginAction: (action: 'enable' | 'disable', name: string, profile?: string) =>
+    call<CommandRunResult>('run_plugin_action', withProfile(profile, { action, name })),
   saveConfigYaml: (content: string, profile?: string) =>
     call<void>('save_config_yaml', withProfile(profile, { content })),
   saveEnvFile: (content: string, profile?: string) =>
@@ -94,6 +108,6 @@ export const api = {
     call<void>('write_memory_file', withProfile(profile, { key, content })),
   runGatewayAction: (action: string, profile?: string) =>
     call<CommandRunResult>('run_gateway_action', withProfile(profile, { action })),
-  runDiagnostic: (kind: string, profile?: string) =>
+  runDiagnostic: (kind: DiagnosticKind, profile?: string) =>
     call<CommandRunResult>('run_diagnostic', withProfile(profile, { kind })),
 };

@@ -12,10 +12,7 @@ pub fn run_gateway_action(
 }
 
 #[tauri::command]
-pub fn run_diagnostic(
-    kind: String,
-    profile: Option<String>,
-) -> Result<CommandRunResult, String> {
+pub fn run_diagnostic(kind: String, profile: Option<String>) -> Result<CommandRunResult, String> {
     HermesManager::new(profile.as_deref())
         .and_then(|manager| manager.run_diagnostic(&kind))
         .map_err(|error| error.to_string())

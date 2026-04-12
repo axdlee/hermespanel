@@ -6,86 +6,84 @@ import { CronPage } from './pages/CronPage';
 import { ConfigPage } from './pages/ConfigPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { DiagnosticsPage } from './pages/DiagnosticsPage';
+import { ExtensionsPage } from './pages/ExtensionsPage';
 import { GatewayPage } from './pages/GatewayPage';
 import { LogsPage } from './pages/LogsPage';
 import { MemoryPage } from './pages/MemoryPage';
 import { ProfilesPage } from './pages/ProfilesPage';
 import { SessionsPage } from './pages/SessionsPage';
 import { SkillsPage } from './pages/SkillsPage';
+import type { AppPageKey, PageIntent } from './pages/types';
 import type { NoticeState, NoticeTone, ProfilesSnapshot } from './types';
 
-type PageKey =
-  | 'dashboard'
-  | 'profiles'
-  | 'gateway'
-  | 'config'
-  | 'sessions'
-  | 'skills'
-  | 'cron'
-  | 'logs'
-  | 'memory'
-  | 'diagnostics';
-
-const NAV_ITEMS: Array<{ key: PageKey; label: string; eyebrow: string }> = [
+const NAV_ITEMS: Array<{ key: AppPageKey; label: string; eyebrow: string }> = [
   { key: 'dashboard', label: '仪表盘', eyebrow: 'Overview' },
   { key: 'profiles', label: 'Profile 管理', eyebrow: 'Instances' },
   { key: 'gateway', label: '网关控制', eyebrow: 'Gateway' },
   { key: 'config', label: '配置中心', eyebrow: 'Config' },
   { key: 'sessions', label: '会话浏览', eyebrow: 'Sessions' },
   { key: 'skills', label: '技能目录', eyebrow: 'Skills' },
+  { key: 'extensions', label: '扩展能力', eyebrow: 'Extensions' },
   { key: 'cron', label: 'Cron 作业', eyebrow: 'Scheduler' },
   { key: 'logs', label: '日志查看', eyebrow: 'Logs' },
-  { key: 'memory', label: '记忆文件', eyebrow: 'Memory' },
+  { key: 'memory', label: '记忆编排', eyebrow: 'Memory' },
   { key: 'diagnostics', label: '诊断面板', eyebrow: 'Doctor' },
 ];
 
-const PAGE_TITLES: Record<PageKey, string> = {
+const PAGE_TITLES: Record<AppPageKey, string> = {
   config: '配置中心',
   cron: 'Cron 作业',
   dashboard: 'HermesPanel',
   diagnostics: '诊断面板',
+  extensions: '扩展能力台',
   gateway: '消息网关控制',
   logs: '日志查看',
-  memory: '记忆文件',
+  memory: '记忆编排台',
   profiles: 'Profile 管理',
   sessions: '会话浏览',
   skills: '技能目录',
 };
 
 function renderPage(
-  key: PageKey,
+  key: AppPageKey,
   profile: string,
   profiles: ProfilesSnapshot | null,
   refreshProfiles: (preferredProfile?: string) => Promise<void>,
   notify: (tone: NoticeTone, message: string) => void,
+  navigate: (page: AppPageKey, intent?: PageIntent | null) => void,
+  pageIntent: PageIntent | null,
+  consumePageIntent: () => void,
 ) {
   switch (key) {
     case 'profiles':
-      return <ProfilesPage notify={notify} profile={profile} profiles={profiles} refreshProfiles={refreshProfiles} />;
+      return <ProfilesPage notify={notify} profile={profile} profiles={profiles} refreshProfiles={refreshProfiles} navigate={navigate} pageIntent={pageIntent} consumePageIntent={consumePageIntent} />;
     case 'gateway':
-      return <GatewayPage notify={notify} profile={profile} profiles={profiles} refreshProfiles={refreshProfiles} />;
+      return <GatewayPage notify={notify} profile={profile} profiles={profiles} refreshProfiles={refreshProfiles} navigate={navigate} pageIntent={pageIntent} consumePageIntent={consumePageIntent} />;
     case 'config':
-      return <ConfigPage notify={notify} profile={profile} profiles={profiles} refreshProfiles={refreshProfiles} />;
+      return <ConfigPage notify={notify} profile={profile} profiles={profiles} refreshProfiles={refreshProfiles} navigate={navigate} pageIntent={pageIntent} consumePageIntent={consumePageIntent} />;
     case 'sessions':
-      return <SessionsPage notify={notify} profile={profile} profiles={profiles} refreshProfiles={refreshProfiles} />;
+      return <SessionsPage notify={notify} profile={profile} profiles={profiles} refreshProfiles={refreshProfiles} navigate={navigate} pageIntent={pageIntent} consumePageIntent={consumePageIntent} />;
     case 'skills':
-      return <SkillsPage notify={notify} profile={profile} profiles={profiles} refreshProfiles={refreshProfiles} />;
+      return <SkillsPage notify={notify} profile={profile} profiles={profiles} refreshProfiles={refreshProfiles} navigate={navigate} pageIntent={pageIntent} consumePageIntent={consumePageIntent} />;
+    case 'extensions':
+      return <ExtensionsPage notify={notify} profile={profile} profiles={profiles} refreshProfiles={refreshProfiles} navigate={navigate} pageIntent={pageIntent} consumePageIntent={consumePageIntent} />;
     case 'cron':
-      return <CronPage notify={notify} profile={profile} profiles={profiles} refreshProfiles={refreshProfiles} />;
+      return <CronPage notify={notify} profile={profile} profiles={profiles} refreshProfiles={refreshProfiles} navigate={navigate} pageIntent={pageIntent} consumePageIntent={consumePageIntent} />;
     case 'logs':
-      return <LogsPage notify={notify} profile={profile} profiles={profiles} refreshProfiles={refreshProfiles} />;
+      return <LogsPage notify={notify} profile={profile} profiles={profiles} refreshProfiles={refreshProfiles} navigate={navigate} pageIntent={pageIntent} consumePageIntent={consumePageIntent} />;
     case 'memory':
-      return <MemoryPage notify={notify} profile={profile} profiles={profiles} refreshProfiles={refreshProfiles} />;
+      return <MemoryPage notify={notify} profile={profile} profiles={profiles} refreshProfiles={refreshProfiles} navigate={navigate} pageIntent={pageIntent} consumePageIntent={consumePageIntent} />;
     case 'diagnostics':
-      return <DiagnosticsPage notify={notify} profile={profile} profiles={profiles} refreshProfiles={refreshProfiles} />;
+      return <DiagnosticsPage notify={notify} profile={profile} profiles={profiles} refreshProfiles={refreshProfiles} navigate={navigate} pageIntent={pageIntent} consumePageIntent={consumePageIntent} />;
     case 'dashboard':
     default:
-      return <DashboardPage notify={notify} profile={profile} profiles={profiles} refreshProfiles={refreshProfiles} />;
+      return <DashboardPage notify={notify} profile={profile} profiles={profiles} refreshProfiles={refreshProfiles} navigate={navigate} pageIntent={pageIntent} consumePageIntent={consumePageIntent} />;
   }
 }
 
 export default function App() {
-  const [activePage, setActivePage] = useState<PageKey>('dashboard');
+  const [activePage, setActivePage] = useState<AppPageKey>('dashboard');
+  const [pageIntent, setPageIntent] = useState<{ target: AppPageKey; payload: PageIntent } | null>(null);
   const [notice, setNotice] = useState<NoticeState | null>(null);
   const [profiles, setProfiles] = useState<ProfilesSnapshot | null>(null);
   const [selectedProfile, setSelectedProfile] = useState('default');
@@ -94,6 +92,15 @@ export default function App() {
 
   function notify(tone: NoticeTone, message: string) {
     setNotice({ tone, message });
+  }
+
+  function navigate(page: AppPageKey, intent?: PageIntent | null) {
+    setActivePage(page);
+    setPageIntent(intent ? { target: page, payload: intent } : null);
+  }
+
+  function consumePageIntent() {
+    setPageIntent(null);
   }
 
   async function loadProfiles(preferredProfile?: string) {
@@ -157,7 +164,7 @@ export default function App() {
               key={item.key}
               type="button"
               className={`nav-item ${activePage === item.key ? 'active' : ''}`}
-              onClick={() => setActivePage(item.key)}
+              onClick={() => navigate(item.key)}
             >
               <span>{item.eyebrow}</span>
               <strong>{item.label}</strong>
@@ -224,7 +231,16 @@ export default function App() {
             <LoadingState label="正在同步 Hermes profile 列表。" />
           ) : (
             <div key={`${activePage}:${selectedProfile}`}>
-              {renderPage(activePage, selectedProfile, profiles, loadProfiles, notify)}
+              {renderPage(
+                activePage,
+                selectedProfile,
+                profiles,
+                loadProfiles,
+                notify,
+                navigate,
+                pageIntent?.target === activePage ? pageIntent.payload : null,
+                consumePageIntent,
+              )}
             </div>
           )}
         </main>

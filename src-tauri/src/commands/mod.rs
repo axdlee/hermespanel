@@ -2,6 +2,7 @@ pub mod config;
 pub mod cron;
 pub mod dashboard;
 pub mod desktop;
+pub mod extensions;
 pub mod gateway;
 pub mod logs;
 pub mod memory;

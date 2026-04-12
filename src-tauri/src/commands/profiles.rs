@@ -1,7 +1,8 @@
 use crate::application::hermes_manager::HermesManager;
 use crate::models::{
-    CommandRunResult, ProfileCreateRequest, ProfileDeleteRequest, ProfileExportRequest,
-    ProfileImportRequest, ProfileRenameRequest, ProfilesSnapshot,
+    CommandRunResult, ProfileAliasCreateRequest, ProfileAliasDeleteRequest, ProfileCreateRequest,
+    ProfileDeleteRequest, ProfileExportRequest, ProfileImportRequest, ProfileRenameRequest,
+    ProfilesSnapshot,
 };
 
 #[tauri::command]
@@ -22,6 +23,15 @@ pub fn set_active_profile(profile_name: String) -> Result<ProfilesSnapshot, Stri
 pub fn create_profile(request: ProfileCreateRequest) -> Result<CommandRunResult, String> {
     HermesManager::new(None)
         .and_then(|manager| manager.create_profile(&request))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn create_profile_alias(
+    request: ProfileAliasCreateRequest,
+) -> Result<CommandRunResult, String> {
+    HermesManager::new(None)
+        .and_then(|manager| manager.create_profile_alias(&request))
         .map_err(|error| error.to_string())
 }
 
@@ -50,5 +60,14 @@ pub fn import_profile(request: ProfileImportRequest) -> Result<CommandRunResult,
 pub fn delete_profile(request: ProfileDeleteRequest) -> Result<CommandRunResult, String> {
     HermesManager::new(None)
         .and_then(|manager| manager.delete_profile(&request))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn delete_profile_alias(
+    request: ProfileAliasDeleteRequest,
+) -> Result<CommandRunResult, String> {
+    HermesManager::new(None)
+        .and_then(|manager| manager.delete_profile_alias(&request))
         .map_err(|error| error.to_string())
 }

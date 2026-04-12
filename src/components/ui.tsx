@@ -73,6 +73,28 @@ export function Toolbar(props: PropsWithChildren<{ className?: string }>) {
   return <div className={`toolbar ${props.className ?? ''}`.trim()}>{props.children}</div>;
 }
 
+export function ContextBanner(props: {
+  label?: string;
+  title: string;
+  description: string;
+  meta?: ReactNode;
+  actions?: ReactNode;
+}) {
+  return (
+    <div className="context-banner">
+      <div className="context-banner-header">
+        <div className="context-banner-copy">
+          <span className="context-banner-label">{props.label ?? 'Context'}</span>
+          <strong className="context-banner-title">{props.title}</strong>
+          <p className="context-banner-description">{props.description}</p>
+        </div>
+        {props.meta ? <div className="context-banner-meta">{props.meta}</div> : null}
+      </div>
+      {props.actions ? <div className="context-banner-actions">{props.actions}</div> : null}
+    </div>
+  );
+}
+
 export function Button(props: PropsWithChildren<{
   onClick?: () => void;
   kind?: 'primary' | 'secondary' | 'danger';

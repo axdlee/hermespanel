@@ -32,7 +32,10 @@ pub fn open_in_finder(request: &DesktopOpenRequest) -> AppResult<CommandRunResul
 }
 
 #[cfg(target_os = "macos")]
-fn build_open_in_finder_command(path: &Path, reveal_in_finder: bool) -> AppResult<(String, Vec<String>)> {
+fn build_open_in_finder_command(
+    path: &Path,
+    reveal_in_finder: bool,
+) -> AppResult<(String, Vec<String>)> {
     let mut args = Vec::new();
     if reveal_in_finder {
         args.push("-R".to_string());
@@ -42,7 +45,10 @@ fn build_open_in_finder_command(path: &Path, reveal_in_finder: bool) -> AppResul
 }
 
 #[cfg(not(target_os = "macos"))]
-fn build_open_in_finder_command(_path: &Path, _reveal_in_finder: bool) -> AppResult<(String, Vec<String>)> {
+fn build_open_in_finder_command(
+    _path: &Path,
+    _reveal_in_finder: bool,
+) -> AppResult<(String, Vec<String>)> {
     Err(AppError::Message(
         "当前实现仅支持 macOS Finder 打开能力".into(),
     ))

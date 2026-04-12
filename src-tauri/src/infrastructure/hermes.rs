@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
 
 use chrono::{DateTime, Local};
 use regex::Regex;
@@ -15,10 +15,13 @@ use crate::error::{AppError, AppResult};
 use crate::models::{
     CommandRunResult, ConfigDocuments, ConfigSummary, CronCreateRequest, CronDeleteRequest,
     CronJobItem, CronJobsSnapshot, CronUpdateRequest, DashboardCounts, DashboardSnapshot,
-    GatewayPlatformState, GatewayStateSnapshot, HermesHome, LogReadResult, MemoryFileDetail,
-    MemoryFileSummary, ProfileCreateRequest, ProfileDeleteRequest, ProfileExportRequest,
-    ProfileImportRequest, ProfileRenameRequest, ProfileSummary, ProfilesSnapshot, SessionDetail,
-    SessionMessage, SessionRecord, SkillFrontmatter, SkillItem,
+    ExtensionsSnapshot, GatewayPlatformState, GatewayStateSnapshot, HermesHome, LogReadResult,
+    MemoryFileDetail, MemoryFileSummary, MemoryProviderOption, MemoryRuntimeSnapshot, NamedCount,
+    PluginRuntimeSnapshot, ProfileAliasCreateRequest, ProfileAliasDeleteRequest, ProfileAliasItem,
+    ProfileCreateRequest, ProfileDeleteRequest, ProfileExportRequest, ProfileImportRequest,
+    ProfileRenameRequest, ProfileSummary, ProfilesSnapshot, RuntimeSkillItem, SessionDetail,
+    SessionMessage, SessionRecord, SkillFrontmatter, SkillItem, ToolPlatformInventory,
+    ToolPlatformSummary, ToolRuntimeItem,
 };
 
 pub fn resolve_default_hermes_root(explicit_root: Option<&Path>) -> AppResult<PathBuf> {
@@ -175,14 +178,12 @@ fn build_profile_summary(
     } else {
         None
     };
-    let alias_path = if profile_name == "default" {
-        None
-    } else {
-        wrapper_dir()
-            .ok()
-            .map(|dir| dir.join(profile_name))
-            .and_then(|wrapper_path| wrapper_path.exists().then(|| wrapper_path.display().to_string()))
-    };
+    let aliases = list_profile_aliases(profile_name, None).unwrap_or_default();
+    let alias_path = aliases
+        .iter()
+        .find(|alias| alias.is_primary)
+        .or_else(|| aliases.first())
+        .map(|alias| alias.path.clone());
 
     Ok(ProfileSummary {
         name: profile_name.to_string(),
@@ -196,6 +197,7 @@ fn build_profile_summary(
         env_exists: home.env_file.exists(),
         soul_exists: home.root.join("SOUL.md").exists(),
         alias_path,
+        aliases,
     })
 }
 
@@ -383,15 +385,17 @@ pub fn run_hermes_command(
     let hermes = find_hermes_binary()?;
     let command_args = compose_hermes_command_args(profile_name, args);
     let output = Command::new(&hermes).args(&command_args).output()?;
-    let exit_code = output.status.code().unwrap_or(-1);
+    Ok(command_result_from_output(&hermes, &command_args, output))
+}
 
-    Ok(CommandRunResult {
-        command: format!("{} {}", hermes.display(), command_args.join(" ")).trim().to_string(),
-        exit_code,
-        stderr: strip_ansi(&String::from_utf8_lossy(&output.stderr)),
-        stdout: strip_ansi(&String::from_utf8_lossy(&output.stdout)),
-        success: output.status.success(),
-    })
+pub fn run_hermes_command_with_tty(
+    profile_name: Option<&str>,
+    args: &[&str],
+) -> AppResult<CommandRunResult> {
+    let hermes = find_hermes_binary()?;
+    let command_args = compose_hermes_command_args(profile_name, args);
+    let output = run_process_with_tty(&hermes, &command_args)?;
+    Ok(command_result_from_output(&hermes, &command_args, output))
 }
 
 pub fn run_hermes_command_owned(
@@ -401,15 +405,7 @@ pub fn run_hermes_command_owned(
     let hermes = find_hermes_binary()?;
     let command_args = compose_hermes_command_args(profile_name, args.iter().map(String::as_str));
     let output = Command::new(&hermes).args(&command_args).output()?;
-    let exit_code = output.status.code().unwrap_or(-1);
-
-    Ok(CommandRunResult {
-        command: format!("{} {}", hermes.display(), command_args.join(" ")).trim().to_string(),
-        exit_code,
-        stderr: strip_ansi(&String::from_utf8_lossy(&output.stderr)),
-        stdout: strip_ansi(&String::from_utf8_lossy(&output.stdout)),
-        success: output.status.success(),
-    })
+    Ok(command_result_from_output(&hermes, &command_args, output))
 }
 
 pub fn read_config_documents(home: &HermesHome) -> AppResult<ConfigDocuments> {
@@ -427,6 +423,93 @@ pub fn read_config_documents(home: &HermesHome) -> AppResult<ConfigDocuments> {
     })
 }
 
+pub fn read_extensions_snapshot(home: &HermesHome) -> AppResult<ExtensionsSnapshot> {
+    let tools = run_hermes_command_with_tty(Some(&home.profile_name), &["tools", "--summary"])?;
+    let memory = run_hermes_command(Some(&home.profile_name), &["memory", "status"])?;
+    let skills = run_hermes_command(Some(&home.profile_name), &["skills", "list"])?;
+    let plugins = run_hermes_command(Some(&home.profile_name), &["plugins", "list"])?;
+    let tool_platforms = parse_tool_summary(&tools.stdout);
+    let tool_inventory = tool_platforms
+        .iter()
+        .map(|platform| {
+            let platform_key = platform.name.to_lowercase();
+            let result = run_hermes_command_with_tty(
+                Some(&home.profile_name),
+                &["tools", "list", "--platform", &platform_key],
+            )?;
+            Ok(parse_tool_inventory(&platform_key, &platform.name, &result.stdout))
+        })
+        .collect::<AppResult<Vec<_>>>()?;
+
+    let runtime_skills = parse_runtime_skills(&skills.stdout);
+    let skill_source_counts = count_by_name(runtime_skills.iter().map(|item| item.source.as_str()));
+    let skill_trust_counts = count_by_name(runtime_skills.iter().map(|item| item.trust.as_str()));
+
+    Ok(ExtensionsSnapshot {
+        profile_name: home.profile_name.clone(),
+        hermes_home: home.root.display().to_string(),
+        tool_platforms,
+        tool_inventory,
+        tools_raw_output: tools.stdout,
+        memory_runtime: parse_memory_runtime(&memory.stdout),
+        runtime_skills,
+        skills_raw_output: skills.stdout,
+        skill_source_counts,
+        skill_trust_counts,
+        plugins: parse_plugin_runtime(&plugins.stdout),
+    })
+}
+
+pub fn build_tool_action_args(action: &str, platform: &str, names: &[String]) -> AppResult<Vec<String>> {
+    let normalized_action = action.trim();
+    if normalized_action != "enable" && normalized_action != "disable" {
+        return Err(AppError::Message(format!("不支持的 tools 操作: {action}")));
+    }
+
+    let normalized_platform = platform.trim();
+    if normalized_platform.is_empty() {
+        return Err(AppError::Message("tools platform 不能为空".into()));
+    }
+
+    let normalized_names = names
+        .iter()
+        .map(|name| name.trim())
+        .filter(|name| !name.is_empty())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+
+    if normalized_names.is_empty() {
+        return Err(AppError::Message("至少要提供一个 tool 名称".into()));
+    }
+
+    let mut args = vec![
+        "tools".to_string(),
+        normalized_action.to_string(),
+        "--platform".to_string(),
+        normalized_platform.to_string(),
+    ];
+    args.extend(normalized_names);
+    Ok(args)
+}
+
+pub fn build_plugin_action_args(action: &str, name: &str) -> AppResult<Vec<String>> {
+    let normalized_action = action.trim();
+    if normalized_action != "enable" && normalized_action != "disable" {
+        return Err(AppError::Message(format!("不支持的 plugins 操作: {action}")));
+    }
+
+    let normalized_name = name.trim();
+    if normalized_name.is_empty() {
+        return Err(AppError::Message("plugin 名称不能为空".into()));
+    }
+
+    Ok(vec![
+        "plugins".to_string(),
+        normalized_action.to_string(),
+        normalized_name.to_string(),
+    ])
+}
+
 pub fn write_config_yaml(home: &HermesHome, content: &str) -> AppResult<()> {
     serde_yaml::from_str::<Value>(content)?;
     fs::write(&home.config_yaml, content)?;
@@ -441,7 +524,10 @@ pub fn write_env_file(home: &HermesHome, content: &str) -> AppResult<()> {
 pub fn build_config_summary(config_yaml: &str) -> AppResult<ConfigSummary> {
     let value = serde_yaml::from_str::<Value>(config_yaml)?;
     Ok(ConfigSummary {
+        context_engine: lookup_yaml_string(&value, &["context", "engine"]),
         memory_enabled: lookup_yaml_bool(&value, &["memory", "memory_enabled"]),
+        memory_char_limit: lookup_yaml_i64(&value, &["memory", "memory_char_limit"]),
+        memory_provider: lookup_yaml_string(&value, &["memory", "provider"]),
         model_base_url: lookup_yaml_string(&value, &["model", "base_url"]),
         model_default: lookup_yaml_string(&value, &["model", "default"])
             .or_else(|| lookup_yaml_string(&value, &["model"])),
@@ -451,6 +537,8 @@ pub fn build_config_summary(config_yaml: &str) -> AppResult<ConfigSummary> {
         terminal_backend: lookup_yaml_string(&value, &["terminal", "backend"]),
         terminal_cwd: lookup_yaml_string(&value, &["terminal", "cwd"]),
         toolsets: lookup_yaml_array(&value, &["toolsets"]),
+        user_char_limit: lookup_yaml_i64(&value, &["memory", "user_char_limit"]),
+        user_profile_enabled: lookup_yaml_bool(&value, &["memory", "user_profile_enabled"]),
     })
 }
 
@@ -463,7 +551,9 @@ pub fn list_skills(home: &HermesHome) -> AppResult<Vec<SkillItem>> {
     for entry in WalkDir::new(&home.skills_dir)
         .into_iter()
         .filter_map(Result::ok)
-        .filter(|entry| entry.file_type().is_file() && entry.file_name() == OsString::from("SKILL.md"))
+        .filter(|entry| {
+            entry.file_type().is_file() && entry.file_name() == OsString::from("SKILL.md")
+        })
     {
         let full_path = entry.path().to_path_buf();
         let relative = full_path
@@ -616,8 +706,16 @@ pub fn read_log_tail(
 pub fn list_memory_files(home: &HermesHome) -> AppResult<Vec<MemoryFileSummary>> {
     let entries = [
         ("soul", "SOUL.md", home.root.join("SOUL.md")),
-        ("memory", "MEMORY.md", home.root.join("memories").join("MEMORY.md")),
-        ("user", "USER.md", home.root.join("memories").join("USER.md")),
+        (
+            "memory",
+            "MEMORY.md",
+            home.root.join("memories").join("MEMORY.md"),
+        ),
+        (
+            "user",
+            "USER.md",
+            home.root.join("memories").join("USER.md"),
+        ),
     ];
 
     Ok(entries
@@ -814,11 +912,7 @@ pub fn build_cron_update_args(request: &CronUpdateRequest) -> AppResult<Vec<Stri
         return Err(AppError::Message("cron job_id 不能为空".into()));
     }
 
-    let mut args = vec![
-        "cron".to_string(),
-        "edit".to_string(),
-        job_id.to_string(),
-    ];
+    let mut args = vec!["cron".to_string(), "edit".to_string(), job_id.to_string()];
 
     if let Some(schedule) = request.schedule.as_deref() {
         let normalized = schedule.trim();
@@ -948,7 +1042,9 @@ pub fn build_profile_rename_args(request: &ProfileRenameRequest) -> AppResult<Ve
 pub fn build_profile_export_args(request: &ProfileExportRequest) -> AppResult<Vec<String>> {
     let profile_name = request.profile_name.trim();
     if profile_name.is_empty() {
-        return Err(AppError::Message("profile export 的 profile_name 不能为空".into()));
+        return Err(AppError::Message(
+            "profile export 的 profile_name 不能为空".into(),
+        ));
     }
 
     let mut args = vec![
@@ -966,7 +1062,9 @@ pub fn build_profile_export_args(request: &ProfileExportRequest) -> AppResult<Ve
 pub fn build_profile_import_args(request: &ProfileImportRequest) -> AppResult<Vec<String>> {
     let archive = request.archive.trim();
     if archive.is_empty() {
-        return Err(AppError::Message("profile import 的 archive 不能为空".into()));
+        return Err(AppError::Message(
+            "profile import 的 archive 不能为空".into(),
+        ));
     }
 
     let mut args = vec![
@@ -985,7 +1083,9 @@ pub fn build_profile_delete_args(request: &ProfileDeleteRequest) -> AppResult<Ve
     let profile_name = request.profile_name.trim();
     let confirm_name = request.confirm_name.trim();
     if profile_name.is_empty() {
-        return Err(AppError::Message("profile delete 的 profile_name 不能为空".into()));
+        return Err(AppError::Message(
+            "profile delete 的 profile_name 不能为空".into(),
+        ));
     }
     if profile_name == "default" {
         return Err(AppError::Message("default profile 不支持删除".into()));
@@ -1002,6 +1102,69 @@ pub fn build_profile_delete_args(request: &ProfileDeleteRequest) -> AppResult<Ve
         "--yes".to_string(),
         profile_name.to_string(),
     ])
+}
+
+pub fn build_profile_alias_create_args(
+    request: &ProfileAliasCreateRequest,
+) -> AppResult<Vec<String>> {
+    let profile_name = request.profile_name.trim();
+    if profile_name.is_empty() {
+        return Err(AppError::Message(
+            "profile alias 的 profile_name 不能为空".into(),
+        ));
+    }
+
+    let alias_name = normalize_optional_cli_value(request.alias_name.as_deref());
+
+    let mut args = vec![
+        "profile".to_string(),
+        "alias".to_string(),
+        profile_name.to_string(),
+    ];
+    if let Some(alias_name) = alias_name {
+        if alias_name != profile_name {
+            args.push("--name".to_string());
+            args.push(alias_name);
+        }
+    }
+
+    Ok(args)
+}
+
+pub fn build_profile_alias_delete_args(
+    request: &ProfileAliasDeleteRequest,
+) -> AppResult<Vec<String>> {
+    let profile_name = request.profile_name.trim();
+    let alias_name = request.alias_name.trim();
+    let confirm_name = request.confirm_name.trim();
+    if profile_name.is_empty() {
+        return Err(AppError::Message(
+            "profile alias 删除时 profile_name 不能为空".into(),
+        ));
+    }
+    if alias_name.is_empty() {
+        return Err(AppError::Message(
+            "profile alias 删除时 alias_name 不能为空".into(),
+        ));
+    }
+    if confirm_name != alias_name {
+        return Err(AppError::Message(
+            "删除 alias 前，确认输入必须与目标 alias 名称完全一致".into(),
+        ));
+    }
+
+    let mut args = vec![
+        "profile".to_string(),
+        "alias".to_string(),
+        profile_name.to_string(),
+        "--remove".to_string(),
+    ];
+    if alias_name != profile_name {
+        args.push("--name".to_string());
+        args.push(alias_name.to_string());
+    }
+
+    Ok(args)
 }
 
 pub fn read_dashboard_snapshot(home: &HermesHome) -> AppResult<DashboardSnapshot> {
@@ -1069,6 +1232,45 @@ fn wrapper_dir() -> AppResult<PathBuf> {
         .ok_or_else(|| AppError::Message("无法定位 ~/.local/bin".into()))
 }
 
+fn list_profile_aliases(
+    profile_name: &str,
+    explicit_wrapper_dir: Option<&Path>,
+) -> AppResult<Vec<ProfileAliasItem>> {
+    let wrapper_root = explicit_wrapper_dir
+        .map(Path::to_path_buf)
+        .map(Ok)
+        .unwrap_or_else(wrapper_dir)?;
+    if !wrapper_root.is_dir() {
+        return Ok(Vec::new());
+    }
+
+    let expected_exec = format!("exec hermes -p {profile_name} \"$@\"");
+    let mut aliases = fs::read_dir(&wrapper_root)?
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let file_name = entry.file_name().into_string().ok()?;
+            let path = entry.path();
+            if !path.is_file() {
+                return None;
+            }
+            let content = fs::read_to_string(&path).ok()?;
+            content.contains(&expected_exec).then(|| ProfileAliasItem {
+                is_primary: file_name == profile_name,
+                name: file_name,
+                path: path.display().to_string(),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    aliases.sort_by(|left, right| {
+        right
+            .is_primary
+            .cmp(&left.is_primary)
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    Ok(aliases)
+}
+
 fn cron_schedule_input<T>(schedule: Option<&T>) -> Option<String>
 where
     T: CronScheduleLike,
@@ -1076,7 +1278,9 @@ where
     let schedule = schedule?;
     match schedule.kind() {
         Some("once") => schedule.run_at().map(ToString::to_string),
-        Some("interval") => schedule.minutes().map(|minutes| format!("every {minutes}m")),
+        Some("interval") => schedule
+            .minutes()
+            .map(|minutes| format!("every {minutes}m")),
         Some("cron") => schedule.expr().map(ToString::to_string),
         _ => None,
     }
@@ -1130,6 +1334,15 @@ fn lookup_yaml_bool(root: &Value, path: &[&str]) -> Option<bool> {
     current.as_bool()
 }
 
+fn lookup_yaml_i64(root: &Value, path: &[&str]) -> Option<i64> {
+    let mut current = root;
+    for segment in path {
+        current = current.get(*segment)?;
+    }
+
+    current.as_i64()
+}
+
 fn lookup_yaml_array(root: &Value, path: &[&str]) -> Vec<String> {
     let mut current = root;
     for segment in path {
@@ -1153,7 +1366,11 @@ fn extract_markdown_preview(markdown: &str) -> String {
         .lines()
         .filter_map(|line| {
             let trimmed = line.trim();
-            if trimmed.is_empty() || trimmed == "---" || trimmed.starts_with("name:") || trimmed.starts_with("description:") {
+            if trimmed.is_empty()
+                || trimmed == "---"
+                || trimmed.starts_with("name:")
+                || trimmed.starts_with("description:")
+            {
                 None
             } else if trimmed.starts_with('#') {
                 Some(trimmed.trim_start_matches('#').trim().to_string())
@@ -1169,7 +1386,10 @@ fn extract_markdown_preview(markdown: &str) -> String {
 fn memory_path_for_key(home: &HermesHome, key: &str) -> AppResult<(String, PathBuf)> {
     match key {
         "soul" => Ok(("SOUL.md".into(), home.root.join("SOUL.md"))),
-        "memory" => Ok(("MEMORY.md".into(), home.root.join("memories").join("MEMORY.md"))),
+        "memory" => Ok((
+            "MEMORY.md".into(),
+            home.root.join("memories").join("MEMORY.md"),
+        )),
         "user" => Ok(("USER.md".into(), home.root.join("memories").join("USER.md"))),
         other => Err(AppError::Message(format!("不支持的记忆文件键: {other}"))),
     }
@@ -1181,9 +1401,301 @@ fn file_updated_at(path: &Path) -> Option<String> {
     Some(date.to_rfc3339())
 }
 
+fn command_result_from_output(hermes: &Path, command_args: &[String], output: Output) -> CommandRunResult {
+    let exit_code = output.status.code().unwrap_or(-1);
+
+    CommandRunResult {
+        command: format!("{} {}", hermes.display(), command_args.join(" "))
+            .trim()
+            .to_string(),
+        exit_code,
+        stderr: normalize_command_text(&String::from_utf8_lossy(&output.stderr)),
+        stdout: normalize_command_text(&String::from_utf8_lossy(&output.stdout)),
+        success: output.status.success(),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn run_process_with_tty(hermes: &Path, command_args: &[String]) -> AppResult<Output> {
+    Command::new("script")
+        .arg("-q")
+        .arg("/dev/null")
+        .arg(hermes)
+        .args(command_args)
+        .output()
+        .map_err(AppError::from)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn run_process_with_tty(hermes: &Path, command_args: &[String]) -> AppResult<Output> {
+    let command_line = std::iter::once(hermes.display().to_string())
+        .chain(command_args.iter().cloned())
+        .map(|arg| shell_quote(&arg))
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    Command::new("script")
+        .args(["-qec", &command_line, "/dev/null"])
+        .output()
+        .map_err(AppError::from)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', r"'\''"))
+}
+
+fn normalize_command_text(text: &str) -> String {
+    strip_ansi(text)
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .trim_matches('\n')
+        .to_string()
+}
+
 fn strip_ansi(text: &str) -> String {
     let regex = Regex::new(r"\x1b\[[0-9;]*[A-Za-z]").expect("ANSI 正则应可编译");
     regex.replace_all(text, "").to_string()
+}
+
+fn count_by_name<'a>(values: impl Iterator<Item = &'a str>) -> Vec<NamedCount> {
+    let mut counts = BTreeMap::<String, usize>::new();
+    for value in values.filter(|value| !value.trim().is_empty()) {
+        *counts.entry(value.trim().to_string()).or_default() += 1;
+    }
+
+    let mut items = counts
+        .into_iter()
+        .map(|(name, count)| NamedCount { name, count })
+        .collect::<Vec<_>>();
+    items.sort_by(|left, right| right.count.cmp(&left.count).then_with(|| left.name.cmp(&right.name)));
+    items
+}
+
+fn parse_tool_summary(output: &str) -> Vec<ToolPlatformSummary> {
+    let mut platforms = Vec::new();
+    let mut current: Option<ToolPlatformSummary> = None;
+
+    for line in output.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("⚕") {
+            continue;
+        }
+
+        if let Some((name, enabled_count, total_count)) = parse_tool_platform_header(trimmed) {
+            if let Some(platform) = current.take() {
+                platforms.push(platform);
+            }
+            current = Some(ToolPlatformSummary {
+                name,
+                enabled_count,
+                total_count,
+                enabled_tools: Vec::new(),
+            });
+            continue;
+        }
+
+        if trimmed.starts_with('✓') {
+            if let Some(platform) = current.as_mut() {
+                platform.enabled_tools.push(strip_leading_marks(trimmed));
+            }
+        }
+    }
+
+    if let Some(platform) = current {
+        platforms.push(platform);
+    }
+
+    platforms
+}
+
+fn parse_tool_platform_header(line: &str) -> Option<(String, usize, usize)> {
+    let open = line.rfind('(')?;
+    let close = line.rfind(')')?;
+    if close <= open {
+        return None;
+    }
+
+    let counts = &line[open + 1..close];
+    let mut parts = counts.split('/');
+    let enabled_count = parts.next()?.trim().parse::<usize>().ok()?;
+    let total_count = parts.next()?.trim().parse::<usize>().ok()?;
+    let raw_name = line[..open].trim();
+    let name = strip_leading_marks(raw_name);
+
+    if name.is_empty() {
+        return None;
+    }
+
+    Some((name, enabled_count, total_count))
+}
+
+fn parse_tool_inventory(
+    platform_key: &str,
+    display_name: &str,
+    output: &str,
+) -> ToolPlatformInventory {
+    let items = output
+        .lines()
+        .map(str::trim)
+        .filter_map(parse_tool_inventory_line)
+        .collect::<Vec<_>>();
+
+    ToolPlatformInventory {
+        platform_key: platform_key.to_string(),
+        display_name: display_name.to_string(),
+        items,
+    }
+}
+
+fn parse_tool_inventory_line(line: &str) -> Option<ToolRuntimeItem> {
+    let trimmed = line.trim();
+    if !(trimmed.starts_with('✓') || trimmed.starts_with('✗')) {
+        return None;
+    }
+
+    let regex = Regex::new(r"^(?P<mark>[✓✗])\s+(?P<state>enabled|disabled)\s+(?P<name>[A-Za-z0-9:_-]+)\s+(?P<desc>.+)$")
+        .expect("tools list 正则应可编译");
+    let captures = regex.captures(trimmed)?;
+
+    Some(ToolRuntimeItem {
+        name: captures.name("name")?.as_str().to_string(),
+        enabled: captures.name("state")?.as_str() == "enabled",
+        description: strip_leading_marks(captures.name("desc")?.as_str()),
+    })
+}
+
+fn strip_leading_marks(value: &str) -> String {
+    let trimmed = value.trim();
+    let mut started = false;
+    trimmed
+        .chars()
+        .filter(|ch| {
+            if started {
+                true
+            } else if ch.is_ascii_alphanumeric() {
+                started = true;
+                true
+            } else {
+                false
+            }
+        })
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
+fn parse_memory_runtime(output: &str) -> MemoryRuntimeSnapshot {
+    let mut built_in_status = "unknown".to_string();
+    let mut provider = "unknown".to_string();
+    let mut installed_plugins = Vec::new();
+    let mut in_plugins = false;
+
+    for line in output.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("Memory status") || trimmed.starts_with('─') {
+            continue;
+        }
+        if let Some(value) = trimmed.strip_prefix("Built-in:") {
+            built_in_status = value.trim().to_string();
+            continue;
+        }
+        if let Some(value) = trimmed.strip_prefix("Provider:") {
+            provider = value.trim().to_string();
+            continue;
+        }
+        if trimmed.starts_with("Installed plugins:") {
+            in_plugins = true;
+            continue;
+        }
+        if in_plugins && trimmed.starts_with('•') {
+            let detail = trimmed.trim_start_matches('•').trim();
+            if let Some(open) = detail.rfind('(') {
+                let close = detail.rfind(')').unwrap_or(detail.len());
+                let name = detail[..open].trim().to_string();
+                let availability = detail[open + 1..close].trim().to_string();
+                installed_plugins.push(MemoryProviderOption { name, availability });
+            } else {
+                installed_plugins.push(MemoryProviderOption {
+                    name: detail.to_string(),
+                    availability: String::new(),
+                });
+            }
+        }
+    }
+
+    MemoryRuntimeSnapshot {
+        built_in_status,
+        provider,
+        installed_plugins,
+        raw_output: output.to_string(),
+    }
+}
+
+fn parse_runtime_skills(output: &str) -> Vec<RuntimeSkillItem> {
+    parse_box_table_rows(output)
+        .into_iter()
+        .filter_map(|columns| {
+            if columns.len() < 4 {
+                return None;
+            }
+            Some(RuntimeSkillItem {
+                name: columns[0].clone(),
+                category: columns[1].clone(),
+                source: columns[2].clone(),
+                trust: columns[3].clone(),
+            })
+        })
+        .collect()
+}
+
+fn parse_plugin_runtime(output: &str) -> PluginRuntimeSnapshot {
+    if output.lines().any(|line| line.contains("No plugins installed.")) {
+        return PluginRuntimeSnapshot {
+            installed_count: 0,
+            items: Vec::new(),
+            install_hint: output
+                .lines()
+                .find(|line| line.contains("Install with:"))
+                .map(|line| line.trim().to_string()),
+            raw_output: output.to_string(),
+        };
+    }
+
+    let mut items = parse_box_table_rows(output)
+        .into_iter()
+        .filter_map(|columns| columns.first().cloned())
+        .collect::<Vec<_>>();
+
+    if items.is_empty() {
+        items = output
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.contains("Installed Plugins"))
+            .map(ToString::to_string)
+            .collect();
+    }
+
+    PluginRuntimeSnapshot {
+        installed_count: items.len(),
+        items,
+        install_hint: None,
+        raw_output: output.to_string(),
+    }
+}
+
+fn parse_box_table_rows(output: &str) -> Vec<Vec<String>> {
+    output
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with('│'))
+        .map(|line| {
+            line.trim_matches('│')
+                .split('│')
+                .map(|part| part.trim().to_string())
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 fn count_sessions(db_path: &Path) -> Option<usize> {
@@ -1191,9 +1703,11 @@ fn count_sessions(db_path: &Path) -> Option<usize> {
         return Some(0);
     }
     let conn = Connection::open(db_path).ok()?;
-    conn.query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get::<_, i64>(0))
-        .ok()
-        .map(|value| value.max(0) as usize)
+    conn.query_row("SELECT COUNT(*) FROM sessions", [], |row| {
+        row.get::<_, i64>(0)
+    })
+    .ok()
+    .map(|value| value.max(0) as usize)
 }
 
 fn count_log_files(logs_dir: &Path) -> usize {
@@ -1202,7 +1716,12 @@ fn count_log_files(logs_dir: &Path) -> usize {
         .into_iter()
         .flatten()
         .filter_map(Result::ok)
-        .filter(|entry| entry.file_type().map(|kind| kind.is_file()).unwrap_or(false))
+        .filter(|entry| {
+            entry
+                .file_type()
+                .map(|kind| kind.is_file())
+                .unwrap_or(false)
+        })
         .count()
 }
 
@@ -1231,7 +1750,12 @@ fn build_runtime_warnings(
     config: &ConfigSummary,
 ) -> Vec<String> {
     let mut warnings = Vec::new();
-    if config.model_default.as_deref().unwrap_or_default().is_empty() {
+    if config
+        .model_default
+        .as_deref()
+        .unwrap_or_default()
+        .is_empty()
+    {
         warnings.push("尚未配置默认模型。".into());
     }
     if !home.state_db.exists() {
@@ -1263,16 +1787,21 @@ mod tests {
     use tempfile::tempdir;
 
     use crate::models::{
-        CronCreateRequest, CronDeleteRequest, CronUpdateRequest, ProfileCreateRequest,
-        ProfileDeleteRequest, ProfileExportRequest, ProfileImportRequest, ProfileRenameRequest,
+        CronCreateRequest, CronDeleteRequest, CronUpdateRequest, ProfileAliasCreateRequest,
+        ProfileAliasDeleteRequest, ProfileCreateRequest, ProfileDeleteRequest,
+        ProfileExportRequest, ProfileImportRequest, ProfileRenameRequest,
     };
 
     use super::{
-        build_cron_create_args, build_cron_delete_args, build_cron_update_args,
-        build_profile_create_args, build_profile_delete_args, build_profile_export_args,
-        build_profile_import_args, build_profile_rename_args, compose_hermes_command_args,
-        get_active_profile, list_profiles, load_recent_sessions, parse_skill_frontmatter,
-        read_cron_jobs, read_gateway_state, resolve_hermes_home, set_active_profile,
+        build_config_summary, build_cron_create_args, build_cron_delete_args,
+        build_cron_update_args, build_plugin_action_args, build_profile_alias_create_args,
+        build_profile_alias_delete_args, build_profile_create_args, build_profile_delete_args,
+        build_profile_export_args, build_profile_import_args, build_profile_rename_args,
+        build_tool_action_args, compose_hermes_command_args, get_active_profile,
+        list_profile_aliases, list_profiles, load_recent_sessions, parse_memory_runtime,
+        parse_plugin_runtime, parse_runtime_skills, parse_skill_frontmatter,
+        parse_tool_inventory, parse_tool_inventory_line, parse_tool_summary, read_cron_jobs,
+        read_gateway_state, resolve_hermes_home, set_active_profile,
     };
 
     #[test]
@@ -1281,7 +1810,8 @@ mod tests {
         let root = temp.path().join(".hermes");
         seed_profile_root(&root, "gpt-5.4");
 
-        let home = resolve_hermes_home(Some("default"), Some(&root)).expect("解析 Hermes Home 失败");
+        let home =
+            resolve_hermes_home(Some("default"), Some(&root)).expect("解析 Hermes Home 失败");
 
         assert_eq!(home.root, root);
         assert_eq!(home.profile_name, "default");
@@ -1307,7 +1837,10 @@ mod tests {
         assert_eq!(active, "ops");
         assert_eq!(home.profile_name, "ops");
         assert_eq!(home.root, named_root);
-        assert_eq!(home.config_yaml, root.join("profiles").join("ops").join("config.yaml"));
+        assert_eq!(
+            home.config_yaml,
+            root.join("profiles").join("ops").join("config.yaml")
+        );
     }
 
     #[test]
@@ -1373,11 +1906,15 @@ mod tests {
         assert_eq!(snapshot.gateway_state, "running");
         assert_eq!(snapshot.active_agents, 2);
         assert_eq!(snapshot.platforms.len(), 2);
-        assert!(snapshot.platforms.iter().any(|item| item.name == "telegram"));
         assert!(snapshot
             .platforms
             .iter()
-            .any(|item| item.name == "discord" && item.error_message.as_deref() == Some("token missing")));
+            .any(|item| item.name == "telegram"));
+        assert!(snapshot
+            .platforms
+            .iter()
+            .any(|item| item.name == "discord"
+                && item.error_message.as_deref() == Some("token missing")));
     }
 
     #[test]
@@ -1395,7 +1932,10 @@ description: 管理 GitHub 认证
         assert_eq!(meta.name, "github-auth");
         assert_eq!(meta.description, "管理 GitHub 认证");
         assert_eq!(meta.category, "software-development");
-        assert_eq!(meta.relative_path, "software-development/github-auth/SKILL.md");
+        assert_eq!(
+            meta.relative_path,
+            "software-development/github-auth/SKILL.md"
+        );
     }
 
     #[test]
@@ -1472,13 +2012,23 @@ description: 管理 GitHub 认证
 
         conn.execute(
             "INSERT INTO messages (session_id, role, content, timestamp) VALUES (?1, ?2, ?3, ?4)",
-            ("20260411_133009_5c349d", "user", "你好，帮我看看 Hermes 状态", 1775885441.973544_f64),
+            (
+                "20260411_133009_5c349d",
+                "user",
+                "你好，帮我看看 Hermes 状态",
+                1775885441.973544_f64,
+            ),
         )
         .expect("插入用户消息失败");
 
         conn.execute(
             "INSERT INTO messages (session_id, role, content, timestamp) VALUES (?1, ?2, ?3, ?4)",
-            ("20260411_133009_5c349d", "assistant", "当然可以", 1775885442.973544_f64),
+            (
+                "20260411_133009_5c349d",
+                "assistant",
+                "当然可以",
+                1775885442.973544_f64,
+            ),
         )
         .expect("插入助手消息失败");
 
@@ -1500,6 +2050,181 @@ description: 管理 GitHub 认证
         assert_eq!(default_args, vec!["-p", "default", "status", "--all"]);
         assert_eq!(named_args, vec!["-p", "coder", "gateway", "status"]);
         assert_eq!(active_args, vec!["version"]);
+    }
+
+    #[test]
+    fn parses_memory_fields_from_config_summary() {
+        let yaml = r#"
+memory:
+  memory_enabled: true
+  user_profile_enabled: false
+  memory_char_limit: 2200
+  user_char_limit: 1375
+  provider: plugin-memory
+context:
+  engine: semantic-router
+display:
+  streaming: true
+terminal:
+  backend: docker
+toolsets:
+  - hermes-cli
+"#;
+
+        let summary = build_config_summary(yaml).expect("解析配置摘要失败");
+
+        assert_eq!(summary.memory_enabled, Some(true));
+        assert_eq!(summary.user_profile_enabled, Some(false));
+        assert_eq!(summary.memory_char_limit, Some(2200));
+        assert_eq!(summary.user_char_limit, Some(1375));
+        assert_eq!(summary.memory_provider.as_deref(), Some("plugin-memory"));
+        assert_eq!(summary.context_engine.as_deref(), Some("semantic-router"));
+        assert_eq!(summary.streaming_enabled, Some(true));
+        assert_eq!(summary.terminal_backend.as_deref(), Some("docker"));
+        assert_eq!(summary.toolsets, vec!["hermes-cli"]);
+    }
+
+    #[test]
+    fn parses_tool_summary_output() {
+        let output = r#"
+⚕ Tool Summary
+
+  🖥️  CLI  (16/18)
+    ✓ 🌐 Browser Automation
+    ✓ 💾 Memory
+  📱 Telegram  (2/18)
+    ✓ 💾 Memory
+    ✓ 📚 Skills
+"#;
+
+        let platforms = parse_tool_summary(output);
+
+        assert_eq!(platforms.len(), 2);
+        assert_eq!(platforms[0].name, "CLI");
+        assert_eq!(platforms[0].enabled_count, 16);
+        assert_eq!(platforms[0].total_count, 18);
+        assert_eq!(platforms[0].enabled_tools, vec!["Browser Automation", "Memory"]);
+        assert_eq!(platforms[1].name, "Telegram");
+    }
+
+    #[test]
+    fn parses_memory_runtime_output() {
+        let output = r#"
+Memory status
+────────────────────────────────────────
+  Built-in:  always active
+  Provider:  (none — built-in only)
+
+  Installed plugins:
+    • byterover  (requires API key)
+    • holographic  (local)
+"#;
+
+        let snapshot = parse_memory_runtime(output);
+
+        assert_eq!(snapshot.built_in_status, "always active");
+        assert_eq!(snapshot.provider, "(none — built-in only)");
+        assert_eq!(snapshot.installed_plugins.len(), 2);
+        assert_eq!(snapshot.installed_plugins[0].name, "byterover");
+        assert_eq!(snapshot.installed_plugins[1].availability, "local");
+    }
+
+    #[test]
+    fn parses_runtime_skills_table() {
+        let output = r#"
+                                Installed Skills
+┏━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┓
+┃ Name         ┃ Category ┃ Source  ┃ Trust   ┃
+┡━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━┩
+│ codex        │ agents   │ builtin │ builtin │
+│ browser-use  │ tools    │ local   │ local   │
+└──────────────┴──────────┴─────────┴─────────┘
+"#;
+
+        let items = parse_runtime_skills(output);
+
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].name, "codex");
+        assert_eq!(items[1].source, "local");
+    }
+
+    #[test]
+    fn parses_empty_plugins_output() {
+        let output = "No plugins installed.\nInstall with: hermes plugins install owner/repo\n";
+
+        let snapshot = parse_plugin_runtime(output);
+
+        assert_eq!(snapshot.installed_count, 0);
+        assert!(snapshot.items.is_empty());
+        assert_eq!(
+            snapshot.install_hint.as_deref(),
+            Some("Install with: hermes plugins install owner/repo")
+        );
+    }
+
+    #[test]
+    fn builds_tool_action_args_for_platform_and_names() {
+        let args = build_tool_action_args(
+            "enable",
+            "cli",
+            &["web ".to_string(), " browser".to_string(), String::new()],
+        )
+        .expect("构建 tools action 参数失败");
+
+        assert_eq!(
+            args,
+            vec![
+                "tools".to_string(),
+                "enable".to_string(),
+                "--platform".to_string(),
+                "cli".to_string(),
+                "web".to_string(),
+                "browser".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn builds_plugin_action_args_for_plugin_name() {
+        let args = build_plugin_action_args("disable", " local/memory-plugin ")
+            .expect("构建 plugins action 参数失败");
+
+        assert_eq!(
+            args,
+            vec![
+                "plugins".to_string(),
+                "disable".to_string(),
+                "local/memory-plugin".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_tool_inventory_line_with_status_and_description() {
+        let line = "✓ enabled  web  🔍 Web Search & Scraping";
+
+        let item = parse_tool_inventory_line(line).expect("应解析出 tool inventory 行");
+
+        assert_eq!(item.name, "web");
+        assert!(item.enabled);
+        assert_eq!(item.description, "Web Search & Scraping");
+    }
+
+    #[test]
+    fn parses_tool_inventory_for_platform() {
+        let output = r#"
+Built-in toolsets (cli):
+  ✓ enabled  web  🔍 Web Search & Scraping
+  ✗ disabled  moa  🧠 Mixture of Agents
+"#;
+
+        let inventory = parse_tool_inventory("cli", "CLI", output);
+
+        assert_eq!(inventory.platform_key, "cli");
+        assert_eq!(inventory.display_name, "CLI");
+        assert_eq!(inventory.items.len(), 2);
+        assert_eq!(inventory.items[0].name, "web");
+        assert!(!inventory.items[1].enabled);
     }
 
     #[test]
@@ -1547,10 +2272,14 @@ description: 管理 GitHub 认证
         )
         .expect("写入 jobs.json 失败");
 
-        let home = resolve_hermes_home(Some("default"), Some(&root)).expect("解析 Hermes Home 失败");
+        let home =
+            resolve_hermes_home(Some("default"), Some(&root)).expect("解析 Hermes Home 失败");
         let snapshot = read_cron_jobs(&home).expect("读取 cron jobs 失败");
 
-        assert_eq!(snapshot.updated_at.as_deref(), Some("2026-04-11T12:30:00+08:00"));
+        assert_eq!(
+            snapshot.updated_at.as_deref(),
+            Some("2026-04-11T12:30:00+08:00")
+        );
         assert_eq!(snapshot.jobs.len(), 2);
         assert_eq!(snapshot.jobs[0].id, "job_1");
         assert_eq!(snapshot.jobs[0].skills, vec!["reporting", "notion"]);
@@ -1716,9 +2445,97 @@ description: 管理 GitHub 认证
         .expect("构建 delete args 失败");
 
         assert_eq!(rename, vec!["profile", "rename", "ops", "ops-next"]);
-        assert_eq!(export, vec!["profile", "export", "ops", "--output", "/tmp/ops.tar.gz"]);
-        assert_eq!(import, vec!["profile", "import", "/tmp/ops.tar.gz", "--name", "ops-restored"]);
+        assert_eq!(
+            export,
+            vec!["profile", "export", "ops", "--output", "/tmp/ops.tar.gz"]
+        );
+        assert_eq!(
+            import,
+            vec![
+                "profile",
+                "import",
+                "/tmp/ops.tar.gz",
+                "--name",
+                "ops-restored"
+            ]
+        );
         assert_eq!(delete, vec!["profile", "delete", "--yes", "ops"]);
+    }
+
+    #[test]
+    fn builds_profile_alias_create_and_delete_args() {
+        let create_primary = build_profile_alias_create_args(&ProfileAliasCreateRequest {
+            profile_name: "ops".into(),
+            alias_name: Some("ops".into()),
+        })
+        .expect("构建同名 alias args 失败");
+        let create_custom = build_profile_alias_create_args(&ProfileAliasCreateRequest {
+            profile_name: "ops".into(),
+            alias_name: Some("ops-prod".into()),
+        })
+        .expect("构建自定义 alias args 失败");
+        let delete_custom = build_profile_alias_delete_args(&ProfileAliasDeleteRequest {
+            profile_name: "ops".into(),
+            alias_name: "ops-prod".into(),
+            confirm_name: "ops-prod".into(),
+        })
+        .expect("构建删除 alias args 失败");
+
+        assert_eq!(create_primary, vec!["profile", "alias", "ops"]);
+        assert_eq!(
+            create_custom,
+            vec!["profile", "alias", "ops", "--name", "ops-prod"]
+        );
+        assert_eq!(
+            delete_custom,
+            vec!["profile", "alias", "ops", "--remove", "--name", "ops-prod"]
+        );
+    }
+
+    #[test]
+    fn rejects_profile_alias_delete_when_confirmation_mismatches() {
+        let result = build_profile_alias_delete_args(&ProfileAliasDeleteRequest {
+            profile_name: "ops".into(),
+            alias_name: "ops-prod".into(),
+            confirm_name: "wrong".into(),
+        });
+
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "删除 alias 前，确认输入必须与目标 alias 名称完全一致"
+        );
+    }
+
+    #[test]
+    fn lists_profile_aliases_from_wrapper_scripts() {
+        let temp = tempdir().expect("创建临时目录失败");
+        let wrapper_root = temp.path().join("bin");
+        fs::create_dir_all(&wrapper_root).expect("创建 wrapper 目录失败");
+        fs::write(
+            wrapper_root.join("research"),
+            "#!/bin/sh\nexec hermes -p research \"$@\"\n",
+        )
+        .expect("写入 research wrapper 失败");
+        fs::write(
+            wrapper_root.join("rs"),
+            "#!/bin/sh\nexec hermes -p research \"$@\"\n",
+        )
+        .expect("写入 rs wrapper 失败");
+        fs::write(
+            wrapper_root.join("ops"),
+            "#!/bin/sh\nexec hermes -p ops \"$@\"\n",
+        )
+        .expect("写入 ops wrapper 失败");
+
+        let aliases = list_profile_aliases("research", Some(&wrapper_root))
+            .expect("读取 profile aliases 失败");
+
+        assert_eq!(aliases.len(), 2);
+        assert_eq!(aliases[0].name, "research");
+        assert!(aliases[0].is_primary);
+        assert_eq!(aliases[1].name, "rs");
+        assert!(!aliases[1].is_primary);
     }
 
     #[test]
@@ -1740,12 +2557,18 @@ description: 管理 GitHub 认证
         fs::create_dir_all(root.join("skills")).expect("创建 skills 目录失败");
         fs::create_dir_all(root.join("logs")).expect("创建 logs 目录失败");
         fs::create_dir_all(root.join("memories")).expect("创建 memories 目录失败");
-        fs::write(root.join("config.yaml"), format!("model:\n  default: {model}\n"))
-            .expect("写入 config.yaml 失败");
+        fs::write(
+            root.join("config.yaml"),
+            format!("model:\n  default: {model}\n"),
+        )
+        .expect("写入 config.yaml 失败");
         fs::write(root.join(".env"), "OPENAI_API_KEY=test\n").expect("写入 .env 失败");
         fs::write(root.join("SOUL.md"), "# persona\n").expect("写入 SOUL.md 失败");
-        fs::write(root.join("gateway_state.json"), "{\"gateway_state\":\"running\"}")
-            .expect("写入 gateway_state.json 失败");
+        fs::write(
+            root.join("gateway_state.json"),
+            "{\"gateway_state\":\"running\"}",
+        )
+        .expect("写入 gateway_state.json 失败");
         fs::write(root.join("state.db"), "").expect("写入 state.db 失败");
     }
 }

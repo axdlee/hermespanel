@@ -1,5 +1,5 @@
-mod commands;
 mod application;
+mod commands;
 mod error;
 mod infrastructure;
 mod models;
@@ -10,14 +10,19 @@ pub fn run() {
             commands::profiles::get_profiles_snapshot,
             commands::profiles::set_active_profile,
             commands::profiles::create_profile,
+            commands::profiles::create_profile_alias,
             commands::profiles::rename_profile,
             commands::profiles::export_profile,
             commands::profiles::import_profile,
             commands::profiles::delete_profile,
+            commands::profiles::delete_profile_alias,
             commands::dashboard::get_dashboard_snapshot,
             commands::config::get_config_documents,
             commands::config::save_config_yaml,
             commands::config::save_env_file,
+            commands::extensions::get_extensions_snapshot,
+            commands::extensions::run_tool_action,
+            commands::extensions::run_plugin_action,
             commands::sessions::list_sessions,
             commands::sessions::get_session_detail,
             commands::skills::list_skills,
