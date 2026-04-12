@@ -579,7 +579,17 @@ export function ConfigPage({ notify, profile, navigate, pageIntent, consumePageI
       </div>
 
       <div className="two-column wide-left">
-        <Panel title="配置闭环信号" subtitle="看配置与运行态是否一致。">
+        <Panel
+          title="配置闭环信号"
+          subtitle="看配置与运行态是否一致。"
+          aside={(
+            <Toolbar>
+              <Button onClick={() => void openInFinder(data.hermesHome, 'Hermes Home')}>打开 Home</Button>
+              <Button onClick={() => void openInFinder(data.configPath, 'config.yaml', true)}>定位 config.yaml</Button>
+              <Button onClick={() => void openInFinder(data.envPath, '.env', true)}>定位 .env</Button>
+            </Toolbar>
+          )}
+        >
           <div className="health-grid">
             <section className="health-card">
               <div className="health-card-header">
@@ -619,18 +629,9 @@ export function ConfigPage({ notify, profile, navigate, pageIntent, consumePageI
             </section>
           </div>
         </Panel>
-
-        <Panel title="文件定位" subtitle="Home、config、env">
-          <Toolbar>
-            <Button onClick={() => void openInFinder(data.hermesHome, 'Hermes Home')}>打开 Home</Button>
-            <Button onClick={() => void openInFinder(data.configPath, 'config.yaml', true)}>定位 config.yaml</Button>
-            <Button onClick={() => void openInFinder(data.envPath, '.env', true)}>定位 .env</Button>
-          </Toolbar>
-        </Panel>
       </div>
 
-      <div className="two-column wide-left">
-        <Panel title="最近校验输出" subtitle="保留 Hermes 原生命令回显，避免把配置页做成另一个解释器。">
+      <Panel title="最近校验输出" subtitle="保留 Hermes 原生命令回显，避免把配置页做成另一个解释器。">
           {lastResult ? (
             <div className="result-stack">
               <div className="detail-list compact">
@@ -654,27 +655,13 @@ export function ConfigPage({ notify, profile, navigate, pageIntent, consumePageI
           ) : (
             <EmptyState title="尚未执行校验" description="保存后执行 `config-check`，或者直接从上面的工作台触发任一校验动作。" />
           )}
-        </Panel>
-
-        <Panel title="运行时摘要">
-          <div className="detail-list">
-            <KeyValueRow label="默认模型" value={data.summary.modelDefault} />
-            <KeyValueRow label="提供商" value={data.summary.modelProvider} />
-            <KeyValueRow label="Base URL" value={data.summary.modelBaseUrl || '—'} />
-            <KeyValueRow label="终端后端" value={data.summary.terminalBackend} />
-            <KeyValueRow label="工作目录" value={data.summary.terminalCwd || '—'} />
+          <div className="detail-list compact top-gap">
+            <KeyValueRow label="默认模型" value={data.summary.modelDefault || '—'} />
+            <KeyValueRow label="提供商" value={data.summary.modelProvider || '—'} />
             <KeyValueRow label="Context Engine" value={data.summary.contextEngine || '—'} />
-            <KeyValueRow label="人格" value={data.summary.personality || '—'} />
             <KeyValueRow label="Toolsets" value={data.summary.toolsets.length ? data.summary.toolsets.join(', ') : '—'} />
-            <KeyValueRow label="记忆功能" value={String(data.summary.memoryEnabled ?? false)} />
-            <KeyValueRow label="记忆 Provider" value={data.summary.memoryProvider || 'builtin-file'} />
-            <KeyValueRow label="用户画像" value={String(data.summary.userProfileEnabled ?? false)} />
-            <KeyValueRow label="MEMORY 上限" value={data.summary.memoryCharLimit ?? '—'} />
-            <KeyValueRow label="USER 上限" value={data.summary.userCharLimit ?? '—'} />
-            <KeyValueRow label="流式输出" value={String(data.summary.streamingEnabled ?? false)} />
           </div>
-        </Panel>
-      </div>
+      </Panel>
 
       <div className="two-column">
         <Panel

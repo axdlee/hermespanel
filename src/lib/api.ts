@@ -29,8 +29,29 @@ import type {
   SkillItem,
 } from '../types';
 
+const desktopOnlyMessage = '当前页面运行在浏览器预览环境，HermesPanel 的控制能力仅在 Tauri 桌面端可用。请使用 npm run tauri:dev 打开桌面客户端。';
+
+function resolveTauriInvoke() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const runtime = (window as Window & {
+    __TAURI_INTERNALS__?: {
+      invoke?: typeof invoke;
+    };
+  }).__TAURI_INTERNALS__;
+
+  return typeof runtime?.invoke === 'function' ? invoke : null;
+}
+
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-  return invoke<T>(command, args);
+  const tauriInvoke = resolveTauriInvoke();
+  if (!tauriInvoke) {
+    throw new Error(desktopOnlyMessage);
+  }
+
+  return tauriInvoke<T>(command, args);
 }
 
 function withProfile(profile?: string, args?: Record<string, unknown>) {

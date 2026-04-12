@@ -83,29 +83,6 @@ export function OverviewCard(props: {
   );
 }
 
-export function ServiceStrip(props: PropsWithChildren<{
-  title: string;
-  description?: ReactNode;
-  badge?: ReactNode;
-  actions?: ReactNode;
-}>) {
-  return (
-    <section className="service-card">
-      <div className="service-info">
-        <div>
-          <div className="service-name">{props.title}</div>
-          {props.description ? <div className="service-desc">{props.description}</div> : null}
-          {props.children}
-        </div>
-      </div>
-      <div className="service-actions">
-        {props.badge}
-        {props.actions}
-      </div>
-    </section>
-  );
-}
-
 export function Pill(props: { tone?: 'neutral' | 'good' | 'warn' | 'bad'; children: ReactNode }) {
   return <span className={`pill pill-${props.tone ?? 'neutral'}`}>{props.children}</span>;
 }

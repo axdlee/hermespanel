@@ -658,6 +658,16 @@ export function ExtensionsPage({ notify, profile, navigate, pageIntent, consumeP
             <Button onClick={() => void openInFinder(extensions.hermesHome, 'Hermes Home')}>打开 Home</Button>
             <Button onClick={() => navigate('logs', extensionLogsIntent)}>查看日志</Button>
           </Toolbar>
+          {extensions.memoryRuntime.installedPlugins.length > 0 || extensions.plugins.items.length > 0 ? (
+            <div className="pill-row top-gap">
+              {extensions.memoryRuntime.installedPlugins.map((item) => (
+                <Pill key={`${item.name}:${item.availability}`}>{item.name} · {item.availability}</Pill>
+              ))}
+              {extensions.plugins.items.map((item) => (
+                <Pill key={item}>{item}</Pill>
+              ))}
+            </div>
+          ) : null}
           {warnings.length > 0 ? (
             <div className="warning-stack">
               {warnings.map((warning) => (
@@ -669,41 +679,6 @@ export function ExtensionsPage({ notify, profile, navigate, pageIntent, consumeP
           ) : (
             <EmptyState title="扩展层状态清晰" description="当前没有发现明显的扩展层结构性问题，可以继续按平台或技能来源看细节。" />
           )}
-        </Panel>
-
-        <Panel title="记忆与插件目录" subtitle="这里更偏 Hermes 自身的扩展生态，不是本地记忆文件编辑。">
-          <div className="list-stack">
-            <div className="list-card">
-              <div className="list-card-title">
-                <strong>Memory Runtime</strong>
-                <Pill tone={extensions.memoryRuntime.provider.includes('none') ? 'warn' : 'good'}>
-                  {extensions.memoryRuntime.provider}
-                </Pill>
-              </div>
-              <p>Built-in: {extensions.memoryRuntime.builtInStatus}</p>
-              <div className="pill-row">
-                {extensions.memoryRuntime.installedPlugins.map((item) => (
-                  <Pill key={`${item.name}:${item.availability}`}>{item.name} · {item.availability}</Pill>
-                ))}
-              </div>
-            </div>
-            <div className="list-card">
-              <div className="list-card-title">
-                <strong>Plugin Manager</strong>
-                <Pill tone={extensions.plugins.installedCount > 0 ? 'good' : 'neutral'}>
-                  {extensions.plugins.installedCount > 0 ? `${extensions.plugins.installedCount} installed` : 'none'}
-                </Pill>
-              </div>
-              <p>{extensions.plugins.installHint || '当前没有通过 plugins manager 安装额外插件。'}</p>
-              {extensions.plugins.items.length > 0 ? (
-                <div className="pill-row">
-                  {extensions.plugins.items.map((item) => (
-                    <Pill key={item}>{item}</Pill>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          </div>
         </Panel>
       </div>
 

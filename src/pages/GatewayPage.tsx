@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-import { Button, ContextBanner, EmptyState, KeyValueRow, LoadingState, MetricCard, Panel, Pill, Toolbar } from '../components/ui';
+import { Button, ContextBanner, EmptyState, KeyValueRow, LoadingState, OverviewCard, Panel, Pill, StatCard, Toolbar } from '../components/ui';
 import { api } from '../lib/api';
 import { handoffToTerminal, openFinderLocation } from '../lib/desktop';
 import {
@@ -201,6 +201,7 @@ export function GatewayPage({ notify, profile, navigate, pageIntent, consumePage
     suggestedCommand: 'config-check',
   });
   const warnings: string[] = [];
+  const gatewayRunning = gateway?.gatewayState === 'running';
   if (!installation.binaryFound) {
     warnings.push('当前还没有检测到 Hermes CLI，先完成安装后，网关 service 和平台配置才能真正闭环。');
   }
@@ -225,47 +226,132 @@ export function GatewayPage({ notify, profile, navigate, pageIntent, consumePage
 
   return (
     <div className="page-stack">
-      <Panel
-        title="网关编排台"
-        subtitle="参考 ClawPanel 的 service / gateway 管理思路，但这里只做 Hermes gateway 的原生封装，不接管任何内部运行逻辑。"
-        aside={(
-          <Toolbar>
-            <Button onClick={() => void load()}>刷新状态</Button>
-            <Button onClick={() => void runDiagnostic('gateway-status')}>刷新诊断</Button>
-            <Button onClick={() => navigate('diagnostics')}>进入诊断页</Button>
-          </Toolbar>
-        )}
-      >
-        <div className="hero-grid">
-          <div className="hero-copy">
-            <p className="hero-title">Gateway Runtime & Delivery</p>
-            <p className="hero-subtitle">
-              网关页关注的不只是服务本身有没有起来，还包括平台连接、远端投递作业、上下文引擎和记忆链路有没有一起对上。
-            </p>
-            <div className="detail-list">
-              <KeyValueRow label="当前 Profile" value={profile} />
-              <KeyValueRow
-                label="Gateway"
-                value={(
-                  <Pill tone={gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
-                    {gateway?.gatewayState ?? '未检测到'}
-                  </Pill>
-                )}
-              />
-              <KeyValueRow label="PID" value={gateway?.pid ?? '—'} />
-              <KeyValueRow label="活跃 Agent" value={gateway?.activeAgents ?? 0} />
-              <KeyValueRow label="更新时间" value={formatTimestamp(gateway?.updatedAt)} />
-              <KeyValueRow label="Context Engine" value={data.config.contextEngine ?? '—'} />
-            </div>
-          </div>
-          <div className="metrics-grid">
-            <MetricCard label="平台总数" value={platforms.length} hint="gateway_state.json 中的平台对象数" />
-            <MetricCard label="已连接" value={connectedPlatforms} hint="当前状态为 connected / running 的平台数" />
-            <MetricCard label="远端作业" value={remoteJobs.length} hint="依赖 gateway 投递结果的 cron 作业" />
-            <MetricCard label="交付异常" value={failingRemoteJobs.length} hint="远端作业里的错误或投递失败数" />
-          </div>
-        </div>
-      </Panel>
+      <div className="stat-cards">
+        <StatCard
+          label="Gateway"
+          value={gatewayRunning ? '运行中' : '待启动'}
+          meta={gatewayRunning ? `PID ${gateway?.pid ?? '—'} · ${gateway?.activeAgents ?? 0} 个活跃 Agent` : '当前还没有看到运行中的 gateway 状态。'}
+          tone={gatewayRunning ? 'running' : 'warning'}
+        />
+        <StatCard
+          label="Platforms"
+          value={platforms.length > 0 ? `${connectedPlatforms}/${platforms.length}` : '暂无平台'}
+          meta={unhealthyPlatforms.length === 0 ? '当前没有明显的平台连接异常。' : `异常平台 ${unhealthyPlatforms.length} 个`}
+          tone={unhealthyPlatforms.length === 0 ? 'running' : 'warning'}
+        />
+        <StatCard
+          label="Delivery"
+          value={remoteJobs.length > 0 ? `${remoteJobs.length} 个远端作业` : '本地优先'}
+          meta={failingRemoteJobs.length > 0 ? `${failingRemoteJobs.length} 个作业已有交付异常。` : '暂未发现远端投递失败。'}
+          tone={failingRemoteJobs.length > 0 ? 'warning' : 'running'}
+        />
+        <StatCard
+          label="Context"
+          value={data.config.contextEngine || '未配置'}
+          meta={`${data.config.modelProvider || 'provider 未配置'} / ${data.config.modelDefault || 'model 未配置'}`}
+          tone={data.config.contextEngine ? 'running' : 'warning'}
+        />
+        <StatCard
+          label="State File"
+          value={installation.gatewayStateExists ? 'gateway_state.json 已就绪' : '状态文件缺失'}
+          meta={gatewayStatePath}
+          tone={installation.gatewayStateExists ? 'running' : 'warning'}
+        />
+        <StatCard
+          label="Runtime"
+          value={gateway?.updatedAt ? formatTimestamp(gateway.updatedAt) : '尚无更新时间'}
+          meta={`restart_requested ${String(gateway?.restartRequested ?? false)} · logs ${logsDir}`}
+        />
+      </div>
+
+      <div className="quick-actions">
+        <Button kind="primary" onClick={() => void runAction(gatewayRunning ? 'restart' : 'start')} disabled={runningCommand !== null || !installation.binaryFound}>
+          {gatewayRunning ? '重启 Gateway' : '启动 Gateway'}
+        </Button>
+        <Button kind="danger" onClick={() => void runAction('stop')} disabled={runningCommand !== null || !installation.binaryFound}>
+          停止 Gateway
+        </Button>
+        <Button onClick={() => void runDiagnostic('gateway-status')} disabled={runningCommand !== null || !installation.binaryFound}>
+          网关状态
+        </Button>
+        <Button onClick={() => navigate('logs', logsIntent)}>查看日志</Button>
+        <Button onClick={() => void load()}>刷新状态</Button>
+      </div>
+
+      <div className="overview-grid">
+        <OverviewCard
+          title="Service 接管"
+          value={installation.gatewayStateExists ? '已接入 service 工作流' : '等待 service 接管'}
+          meta="把 gateway install / setup / uninstall 收成第一层入口，客户端只做封装不接管内部逻辑。"
+          actions={(
+            <Toolbar>
+              <Button
+                kind="primary"
+                onClick={() => void openInTerminal('gateway:install-service', '安装 Gateway Service', installation.gatewayInstallCommand)}
+                disabled={runningCommand !== null || !installation.binaryFound}
+              >
+                {runningCommand === 'gateway:install-service' ? '安装 Service…' : '安装 Service'}
+              </Button>
+              <Button
+                onClick={() => void openInTerminal('gateway:setup-service', 'Gateway Setup', installation.gatewaySetupCommand)}
+                disabled={runningCommand !== null || !installation.binaryFound}
+              >
+                {runningCommand === 'gateway:setup-service' ? 'Gateway Setup…' : 'Gateway Setup'}
+              </Button>
+              <Button
+                kind="danger"
+                onClick={() => void openInTerminal('gateway:uninstall-service', '卸载 Gateway Service', installation.gatewayUninstallCommand, '确定卸载当前 profile 的 gateway service 吗？')}
+                disabled={runningCommand !== null || !installation.binaryFound}
+              >
+                {runningCommand === 'gateway:uninstall-service' ? '卸载 Service…' : '卸载 Service'}
+              </Button>
+            </Toolbar>
+          )}
+        />
+        <OverviewCard
+          title="运行控制"
+          value={gatewayRunning ? '服务已运行' : '服务未运行'}
+          meta="日常启停仍直接走 hermes gateway start / restart / stop，不在客户端里另造守护层。"
+          actions={(
+            <Toolbar>
+              <Button kind="primary" onClick={() => void runAction('start')} disabled={runningCommand !== null || !installation.binaryFound}>
+                {runningCommand === 'gateway:start' ? '启动中…' : '启动'}
+              </Button>
+              <Button onClick={() => void runAction('restart')} disabled={runningCommand !== null || !installation.binaryFound}>
+                {runningCommand === 'gateway:restart' ? '重启中…' : '重启'}
+              </Button>
+              <Button kind="danger" onClick={() => void runAction('stop')} disabled={runningCommand !== null || !installation.binaryFound}>
+                {runningCommand === 'gateway:stop' ? '停止中…' : '停止'}
+              </Button>
+            </Toolbar>
+          )}
+        />
+        <OverviewCard
+          title="链路材料"
+          value="状态文件 / 日志 / Cron"
+          meta="先看 gateway_state.json 和 logs，再判断是 service、平台接入还是远端 delivery 本身出了问题。"
+          actions={(
+            <Toolbar>
+              <Button onClick={() => void openInFinder(gatewayStatePath, 'gateway_state.json', true)} disabled={runningCommand !== null}>定位状态文件</Button>
+              <Button onClick={() => void openInFinder(logsDir, 'logs 目录')} disabled={runningCommand !== null}>打开日志目录</Button>
+              <Button onClick={() => navigate('logs', logsIntent)}>进入日志页</Button>
+              <Button onClick={() => navigate('cron')}>进入 Cron 页</Button>
+            </Toolbar>
+          )}
+        />
+        <OverviewCard
+          title="上下游核对"
+          value={remoteJobs.length > 0 ? `${remoteJobs.length} 个远端依赖` : '当前主要是本地链路'}
+          meta="gateway 不只是一个进程，还要看 provider、context engine、tools 与作业投递是不是一起对上。"
+          actions={(
+            <Toolbar>
+              <Button onClick={() => navigate('config', configIntent)}>核对配置</Button>
+              <Button onClick={() => navigate('extensions', extensionsIntent)}>核对扩展</Button>
+              <Button onClick={() => navigate('diagnostics', diagnosticsIntent)}>进入诊断页</Button>
+            </Toolbar>
+          )}
+        />
+      </div>
 
       {investigation ? (
         <ContextBanner
@@ -291,125 +377,6 @@ export function GatewayPage({ notify, profile, navigate, pageIntent, consumePage
           )}
         />
       ) : null}
-
-      <Panel
-        title="服务接管与编排"
-        subtitle="把 gateway 的 install / setup / uninstall 和运行控制分开，形成更像 ClawPanel 的服务层闭环。"
-      >
-        <div className="control-card-grid">
-          <section className="action-card action-card-compact">
-            <div className="action-card-header">
-              <div>
-                <p className="eyebrow">Bootstrap</p>
-                <h3 className="action-card-title">Gateway Service 接管</h3>
-              </div>
-              <Pill tone={installation.gatewayStateExists ? 'good' : 'warn'}>
-                {installation.gatewayStateExists ? '已发现状态文件' : '尚未接管'}
-              </Pill>
-            </div>
-            <p className="action-card-copy">
-              先让 Hermes 自己完成 gateway service 安装和平台向导，面板只负责桌面级入口与状态汇总。
-            </p>
-            <p className="command-line">
-              {installation.gatewayInstallCommand} · {installation.gatewaySetupCommand} · {installation.gatewayUninstallCommand}
-            </p>
-            <Toolbar>
-              <Button
-                kind="primary"
-                onClick={() => void openInTerminal('gateway:install-service', '安装 Gateway Service', installation.gatewayInstallCommand)}
-                disabled={runningCommand !== null || !installation.binaryFound}
-              >
-                {runningCommand === 'gateway:install-service' ? '安装 Service…' : '安装 Service'}
-              </Button>
-              <Button
-                onClick={() => void openInTerminal('gateway:setup-service', 'Gateway Setup', installation.gatewaySetupCommand)}
-                disabled={runningCommand !== null || !installation.binaryFound}
-              >
-                {runningCommand === 'gateway:setup-service' ? 'Gateway Setup…' : 'Gateway Setup'}
-              </Button>
-              <Button
-                kind="danger"
-                onClick={() => void openInTerminal('gateway:uninstall-service', '卸载 Gateway Service', installation.gatewayUninstallCommand, '确定卸载当前 profile 的 gateway service 吗？')}
-                disabled={runningCommand !== null || !installation.binaryFound}
-              >
-                {runningCommand === 'gateway:uninstall-service' ? '卸载 Service…' : '卸载 Service'}
-              </Button>
-            </Toolbar>
-          </section>
-
-          <section className="action-card action-card-compact">
-            <div className="action-card-header">
-              <div>
-                <p className="eyebrow">Runtime</p>
-                <h3 className="action-card-title">Service 运行控制</h3>
-              </div>
-              <Pill tone={gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
-                {gateway?.gatewayState ?? 'idle'}
-              </Pill>
-            </div>
-            <p className="action-card-copy">
-              日常控制仍然直接走 `hermes gateway start / restart / stop`，不在 HermesPanel 内重造服务守护逻辑。
-            </p>
-            <p className="command-line">hermes gateway start · hermes gateway restart · hermes gateway stop</p>
-            <Toolbar>
-              <Button kind="primary" onClick={() => void runAction('start')} disabled={runningCommand !== null || !installation.binaryFound}>
-                {runningCommand === 'gateway:start' ? '启动中…' : '启动'}
-              </Button>
-              <Button onClick={() => void runAction('restart')} disabled={runningCommand !== null || !installation.binaryFound}>
-                {runningCommand === 'gateway:restart' ? '重启中…' : '重启'}
-              </Button>
-              <Button kind="danger" onClick={() => void runAction('stop')} disabled={runningCommand !== null || !installation.binaryFound}>
-                {runningCommand === 'gateway:stop' ? '停止中…' : '停止'}
-              </Button>
-            </Toolbar>
-          </section>
-
-          <section className="action-card action-card-compact">
-            <div className="action-card-header">
-              <div>
-                <p className="eyebrow">Topology</p>
-                <h3 className="action-card-title">链路与文件入口</h3>
-              </div>
-              <Pill tone={platforms.length > 0 ? 'good' : 'warn'}>
-                {platforms.length > 0 ? `${platforms.length} 个平台` : '暂无平台'}
-              </Pill>
-            </div>
-            <p className="action-card-copy">
-              先看状态文件和日志，再判断是 service、平台接入还是远端 delivery 本身的问题。
-            </p>
-            <p className="command-line">{gatewayStatePath} · {logsDir}</p>
-            <Toolbar>
-              <Button onClick={() => void openInFinder(gatewayStatePath, 'gateway_state.json', true)} disabled={runningCommand !== null}>定位状态文件</Button>
-              <Button onClick={() => void openInFinder(logsDir, 'logs 目录')} disabled={runningCommand !== null}>打开日志目录</Button>
-              <Button onClick={() => navigate('logs', logsIntent)}>进入日志页</Button>
-              <Button onClick={() => navigate('cron')}>进入 Cron 页</Button>
-            </Toolbar>
-          </section>
-
-          <section className="action-card action-card-compact">
-            <div className="action-card-header">
-              <div>
-                <p className="eyebrow">Validation</p>
-                <h3 className="action-card-title">上下游依赖核对</h3>
-              </div>
-              <Pill tone={remoteJobs.length === 0 || gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
-                {remoteJobs.length > 0 ? `${remoteJobs.length} 个远端作业` : '本地优先'}
-              </Pill>
-            </div>
-            <p className="action-card-copy">
-              gateway 不只是一个进程，还要看 provider、context engine 和远端作业是否一并对上。
-            </p>
-            <p className="command-line">
-              {data.config.modelProvider || 'provider 未配置'} / {data.config.modelDefault || 'model 未配置'} · context {data.config.contextEngine || '未配置'}
-            </p>
-            <Toolbar>
-              <Button onClick={() => navigate('config', configIntent)}>核对配置</Button>
-              <Button onClick={() => navigate('extensions', extensionsIntent)}>核对扩展</Button>
-              <Button onClick={() => navigate('diagnostics', diagnosticsIntent)}>进入诊断页</Button>
-            </Toolbar>
-          </section>
-        </div>
-      </Panel>
 
       <div className="two-column wide-left">
         <Panel
@@ -454,14 +421,6 @@ export function GatewayPage({ notify, profile, navigate, pageIntent, consumePage
               <p>{data.config.modelProvider || '未配置 provider'} / {data.config.modelDefault || '未配置 model'} · Memory {data.config.memoryProvider || 'builtin-file'}</p>
             </section>
           </div>
-          <Toolbar>
-            <Button onClick={() => void openInFinder(gatewayStatePath, 'gateway_state.json', true)}>定位 gateway_state.json</Button>
-            <Button onClick={() => void openInFinder(logsDir, 'logs 目录')}>打开 logs</Button>
-            <Button onClick={() => navigate('cron')}>进入 Cron 页</Button>
-            <Button onClick={() => navigate('config', configIntent)}>进入配置页</Button>
-            <Button onClick={() => navigate('logs', logsIntent)}>进入日志页</Button>
-            <Button onClick={() => navigate('diagnostics', diagnosticsIntent)}>进入诊断页</Button>
-          </Toolbar>
           {warnings.length > 0 ? (
             <div className="warning-stack">
               {warnings.map((warning) => (
@@ -476,42 +435,10 @@ export function GatewayPage({ notify, profile, navigate, pageIntent, consumePage
         </Panel>
 
         <Panel
-          title="网关动作与诊断"
-          subtitle="所有动作都直接复用 Hermes CLI，客户端只负责给你一个更顺手的桌面工作流。"
+          title="网关诊断工作台"
+          subtitle="只保留 CLI 诊断链路。服务启停和材料入口已经收敛到页面顶部，不再在这里重复露出。"
         >
           <div className="workbench-grid">
-            <section className="action-card">
-              <div className="action-card-header">
-                <div>
-                  <p className="eyebrow">Control</p>
-                  <h3 className="action-card-title">网关控制</h3>
-                </div>
-                <Pill tone={gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
-                  service
-                </Pill>
-              </div>
-              <p className="action-card-copy">直接调用 `hermes gateway start / restart / stop`，不在客户端里重造控制逻辑。</p>
-              <Toolbar>
-                <Button
-                  kind="primary"
-                  onClick={() => void runAction('start')}
-                  disabled={runningCommand !== null}
-                >
-                  {runningCommand === 'gateway:start' ? '启动中…' : '启动'}
-                </Button>
-                <Button onClick={() => void runAction('restart')} disabled={runningCommand !== null}>
-                  {runningCommand === 'gateway:restart' ? '重启中…' : '重启'}
-                </Button>
-                <Button
-                  kind="danger"
-                  onClick={() => void runAction('stop')}
-                  disabled={runningCommand !== null}
-                >
-                  {runningCommand === 'gateway:stop' ? '停止中…' : '停止'}
-                </Button>
-              </Toolbar>
-            </section>
-
             {GATEWAY_DIAGNOSTIC_COMMANDS.map((item) => (
               <section className="action-card" key={item.key}>
                 <div className="action-card-header">
