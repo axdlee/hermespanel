@@ -1,6 +1,13 @@
 import { api } from '../lib/api';
-import { handoffToTerminal, openFinderLocation } from '../lib/desktop';
-import { getPanelState, loadProfiles, navigate, notify, subscribePanelState } from '../lib/panel-state';
+import { openFinderLocation } from '../lib/desktop';
+import {
+  buildConfigDrilldownIntent,
+  buildDiagnosticsDrilldownIntent,
+  buildExtensionsDrilldownIntent,
+  buildGatewayDrilldownIntent,
+  buildLogsDrilldownIntent,
+} from '../lib/drilldown';
+import { getPanelState, loadProfiles, navigate, notify, setSelectedProfile, subscribePanelState } from '../lib/panel-state';
 import {
   enabledToolCount,
   isRemoteDelivery,
@@ -117,6 +124,15 @@ function runtimeHealthWarnings(profile, bundle) {
   }
 
   return warnings;
+}
+
+function relaySeed(view, profileName) {
+  return {
+    sourcePage: 'profiles',
+    headline: `从 Profile 管理继续治理 ${profileName}`,
+    description: '继续围绕当前实例的配置、扩展、日志、诊断和 Gateway 做闭环。',
+    context: undefined,
+  };
 }
 
 function profileDrifts(leftProfile, leftBundle, rightProfile, rightBundle) {
@@ -370,7 +386,7 @@ function renderWorkbench(view) {
       <div class="config-section-header">
         <div>
           <h2 class="config-section-title">当前实例工作台</h2>
-          <p class="config-section-desc">把 Finder、Terminal、官方向导和实例恢复点集中在一处，不再分散到多个页头说明里。</p>
+          <p class="config-section-desc">当前实例的主控制面，优先跳到结构化工作台，不再把常用治理动作丢给 Terminal。</p>
         </div>
         <div class="toolbar">
           ${buttonHtml({ action: 'goto-config', label: '配置中心', disabled: !selected })}
@@ -443,17 +459,17 @@ function renderWorkbench(view) {
                       <section class="action-card action-card-compact">
                         <div class="action-card-header">
                           <div>
-                            <p class="eyebrow">Bootstrap</p>
-                            <h3 class="action-card-title">官方向导</h3>
+                            <p class="eyebrow">Config</p>
+                            <h3 class="action-card-title">配置 / 模型 / Gateway</h3>
                           </div>
                           ${pillHtml(installation?.binaryFound ? 'CLI ready' : 'CLI missing', installation?.binaryFound ? 'good' : 'bad')}
                         </div>
-                        <p class="action-card-copy">继续使用 Hermes 官方 setup、model 与 gateway setup，客户端只做入口编排。</p>
-                        <p class="command-line">${escapeHtml(installation ? `${installation.setupCommand} · ${installation.modelCommand} · ${installation.gatewaySetupCommand}` : '等待安装快照。')}</p>
+                        <p class="action-card-copy">围绕模型、凭证和消息平台，优先回配置中心与 Gateway 工作台直接完成修正。</p>
+                        <p class="command-line">${escapeHtml(bundle ? `${bundle.config.summary.modelProvider || 'provider 未配置'} / ${bundle.config.summary.modelDefault || 'model 未配置'} · gateway ${bundle.dashboard.gateway?.gatewayState || 'unknown'}` : '等待运行态摘要。')}</p>
                         <div class="toolbar">
-                          ${buttonHtml({ action: 'terminal-setup', label: '全量 Setup', kind: 'primary', disabled: Boolean(view.runningAction) || !installation?.binaryFound })}
-                          ${buttonHtml({ action: 'terminal-model', label: '模型 / Provider', disabled: Boolean(view.runningAction) || !installation?.binaryFound })}
-                          ${buttonHtml({ action: 'terminal-gateway-setup', label: 'Gateway Setup', disabled: Boolean(view.runningAction) || !installation?.binaryFound })}
+                          ${buttonHtml({ action: 'goto-config-model', label: '模型配置', kind: 'primary', disabled: Boolean(view.runningAction) || !installation?.binaryFound })}
+                          ${buttonHtml({ action: 'goto-config-credentials', label: '凭证 / 通道', disabled: Boolean(view.runningAction) || !installation?.binaryFound })}
+                          ${buttonHtml({ action: 'goto-gateway', label: 'Gateway 工作台', disabled: Boolean(view.runningAction) || !installation?.binaryFound })}
                         </div>
                       </section>
                       <section class="action-card action-card-compact">
@@ -464,13 +480,13 @@ function renderWorkbench(view) {
                           </div>
                           ${pillHtml(bundle ? `${enabledToolCount(bundle.extensions)} tools` : '等待读取', bundle && enabledToolCount(bundle.extensions) > 0 ? 'good' : 'warn')}
                         </div>
-                        <p class="action-card-copy">围绕 tools、skills、memory 和 plugins 做 profile 级治理，不改 Hermes 本身。</p>
-                        <p class="command-line">${escapeHtml(installation ? `${installation.toolsSetupCommand} · ${installation.skillsConfigCommand} · hermes memory setup · hermes plugins` : '等待安装快照。')}</p>
+                        <p class="action-card-copy">当前实例的 toolsets、技能、记忆和插件统一回各自工作台闭环。</p>
+                        <p class="command-line">${escapeHtml(bundle ? `${toolsetLabel(bundle)} · memory ${bundle.config.summary.memoryProvider || 'builtin-file'} · plugins ${bundle.extensions.plugins.installedCount}` : '等待运行态摘要。')}</p>
                         <div class="toolbar">
-                          ${buttonHtml({ action: 'terminal-tools', label: '工具选择', kind: 'primary', disabled: Boolean(view.runningAction) || !installation?.binaryFound })}
-                          ${buttonHtml({ action: 'terminal-skills', label: '技能开关', disabled: Boolean(view.runningAction) || !installation?.binaryFound })}
-                          ${buttonHtml({ action: 'terminal-memory', label: '记忆 Provider', disabled: Boolean(view.runningAction) || !installation?.binaryFound })}
-                          ${buttonHtml({ action: 'terminal-plugins', label: '插件面板', disabled: Boolean(view.runningAction) || !installation?.binaryFound })}
+                          ${buttonHtml({ action: 'goto-config-toolsets', label: 'Toolsets', kind: 'primary', disabled: Boolean(view.runningAction) || !installation?.binaryFound })}
+                          ${buttonHtml({ action: 'goto-skills', label: '技能工作台', disabled: Boolean(view.runningAction) || !installation?.binaryFound })}
+                          ${buttonHtml({ action: 'goto-memory', label: '记忆工作台', disabled: Boolean(view.runningAction) || !installation?.binaryFound })}
+                          ${buttonHtml({ action: 'goto-extensions', label: '扩展插件', disabled: Boolean(view.runningAction) || !installation?.binaryFound })}
                         </div>
                       </section>
                       <section class="action-card action-card-compact">
@@ -493,7 +509,7 @@ function renderWorkbench(view) {
                           ${buttonHtml({ action: 'open-state-db', label: '定位 state.db', disabled: Boolean(view.runningAction) || !installation?.stateDbExists })}
                           ${buttonHtml({ action: 'open-gateway-state', label: '定位网关状态', disabled: Boolean(view.runningAction) || !installation?.gatewayStateExists })}
                           ${buttonHtml({ action: 'open-logs-dir', label: '打开 logs', disabled: Boolean(view.runningAction) || !installation?.logsDirExists })}
-                          ${buttonHtml({ action: 'terminal-status', label: '查看实例状态', disabled: Boolean(view.runningAction) || !installation?.binaryFound })}
+                          ${buttonHtml({ action: 'goto-diagnostics', label: '诊断面板', disabled: Boolean(view.runningAction) || !installation?.binaryFound })}
                         </div>
                       </section>
                       <section class="action-card action-card-compact">
@@ -1171,33 +1187,14 @@ async function openFinderAction(view, path, label, revealInFinder = false) {
   }
 }
 
-async function openTerminalAction(view, profileName, actionKey, label, command, options = {}) {
-  const bundle = profileName ? view.runtimeBundles[profileName] ?? null : null;
-
-  view.runningAction = actionKey;
-  renderPage(view);
-  try {
-    await handoffToTerminal({
-      actionKey,
-      command,
-      confirmMessage: options.confirmMessage,
-      label,
-      notify,
-      onResult: (nextLabel, result) => {
-        storeResult(view, nextLabel, result);
-      },
-      profile: profileName,
-      scope: options.scope,
-      setBusy: (value) => {
-        view.runningAction = value;
-        renderPage(view);
-      },
-      workingDirectory: options.workingDirectory ?? (bundle?.installation.hermesHomeExists ? bundle.installation.hermesHome : null),
-    });
-  } finally {
-    view.runningAction = null;
-    renderPage(view);
+async function navigateProfileWorkspace(view, page, options = {}) {
+  const current = selectedProfile(view);
+  if (!current) {
+    return;
   }
+
+  await setSelectedProfile(current.name);
+  navigate(page, options.intent ?? null);
 }
 
 async function createProfileAction(view) {
@@ -1640,44 +1637,37 @@ function bindEvents(view) {
             true,
           );
           return;
-        case 'terminal-setup':
-          if (current && installation) {
-            await openTerminalAction(view, current.name, 'profile:setup', '全量 Setup', installation.setupCommand);
-          }
-          return;
-        case 'terminal-model':
-          if (current && installation) {
-            await openTerminalAction(view, current.name, 'profile:model', '模型 / Provider', installation.modelCommand);
-          }
-          return;
-        case 'terminal-gateway-setup':
-          if (current && installation) {
-            await openTerminalAction(view, current.name, 'profile:gateway-setup', 'Gateway Setup', installation.gatewaySetupCommand);
-          }
-          return;
-        case 'terminal-tools':
-          if (current && installation) {
-            await openTerminalAction(view, current.name, 'profile:tools-setup', '工具选择', installation.toolsSetupCommand);
-          }
-          return;
-        case 'terminal-skills':
-          if (current && installation) {
-            await openTerminalAction(view, current.name, 'profile:skills-config', '技能开关', installation.skillsConfigCommand);
-          }
-          return;
-        case 'terminal-memory':
+        case 'goto-config-model':
           if (current) {
-            await openTerminalAction(view, current.name, 'profile:memory-setup', '记忆 Provider', 'hermes memory setup');
+            await navigateProfileWorkspace(view, 'config', {
+              intent: buildConfigDrilldownIntent(relaySeed(view, current.name), {
+                description: `继续在 ${current.name} 的配置中心直接调整模型、provider 和默认链路。`,
+                focus: 'model',
+                suggestedCommand: 'config-check',
+              }),
+            });
           }
           return;
-        case 'terminal-plugins':
+        case 'goto-config-credentials':
           if (current) {
-            await openTerminalAction(view, current.name, 'profile:plugins', '插件面板', 'hermes plugins');
+            await navigateProfileWorkspace(view, 'config', {
+              intent: buildConfigDrilldownIntent(relaySeed(view, current.name), {
+                description: `继续在 ${current.name} 的配置中心直接调整密钥、消息通道和凭证。`,
+                focus: 'credentials',
+                suggestedCommand: 'config-check',
+              }),
+            });
           }
           return;
-        case 'terminal-status':
+        case 'goto-config-toolsets':
           if (current) {
-            await openTerminalAction(view, current.name, 'profile:status', '查看实例状态', 'hermes status --all');
+            await navigateProfileWorkspace(view, 'config', {
+              intent: buildConfigDrilldownIntent(relaySeed(view, current.name), {
+                description: `继续在 ${current.name} 的配置中心直接核对 toolsets 与 platform toolsets。`,
+                focus: 'toolsets',
+                suggestedCommand: 'tools-summary',
+              }),
+            });
           }
           return;
         case 'create-profile':
@@ -1702,19 +1692,69 @@ function bindEvents(view) {
           await deleteProfileAction(view);
           return;
         case 'goto-config':
-          navigate('config');
+          if (current) {
+            await navigateProfileWorkspace(view, 'config', {
+              intent: buildConfigDrilldownIntent(relaySeed(view, current.name), {
+                description: `继续在 ${current.name} 的配置中心做结构化治理。`,
+                focus: 'model',
+              }),
+            });
+          }
           return;
         case 'goto-extensions':
-          navigate('extensions');
+          if (current) {
+            await navigateProfileWorkspace(view, 'extensions', {
+              intent: buildExtensionsDrilldownIntent(relaySeed(view, current.name), {
+                description: `继续在 ${current.name} 的扩展工作台核对 tools、plugins 和 runtime 能力面。`,
+                rawKind: 'tools',
+              }),
+            });
+          }
           return;
         case 'goto-logs':
-          navigate('logs');
+          if (current) {
+            await navigateProfileWorkspace(view, 'logs', {
+              intent: buildLogsDrilldownIntent(relaySeed(view, current.name), {
+                description: `继续查看 ${current.name} 的运行日志和最近变更。`,
+                logName: 'agent',
+                limit: '160',
+              }),
+            });
+          }
           return;
         case 'goto-diagnostics':
-          navigate('diagnostics');
+          if (current) {
+            await navigateProfileWorkspace(view, 'diagnostics', {
+              intent: buildDiagnosticsDrilldownIntent(relaySeed(view, current.name), {
+                description: `继续围绕 ${current.name} 的安装、配置、能力面和 Gateway 做诊断。`,
+                suggestedCommand: installation?.binaryFound ? 'doctor' : 'dump',
+              }),
+            });
+          }
+          return;
+        case 'goto-gateway':
+          if (current) {
+            await navigateProfileWorkspace(view, 'gateway', {
+              intent: buildGatewayDrilldownIntent(relaySeed(view, current.name), {
+                description: `继续在 ${current.name} 的 Gateway 工作台处理 service、平台和投递链路。`,
+              }),
+            });
+          }
           return;
         case 'goto-sessions':
-          navigate('sessions');
+          if (current) {
+            await navigateProfileWorkspace(view, 'sessions');
+          }
+          return;
+        case 'goto-skills':
+          if (current) {
+            await navigateProfileWorkspace(view, 'skills');
+          }
+          return;
+        case 'goto-memory':
+          if (current) {
+            await navigateProfileWorkspace(view, 'memory');
+          }
           return;
         default:
           return;

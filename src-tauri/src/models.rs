@@ -79,6 +79,84 @@ pub struct ConfigSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct PlatformToolsetBinding {
+    pub platform: String,
+    pub toolsets: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigWorkspace {
+    pub model_default: String,
+    pub model_provider: String,
+    pub model_base_url: String,
+    pub context_engine: String,
+    pub terminal_backend: String,
+    pub terminal_cwd: String,
+    pub personality: String,
+    pub streaming_enabled: bool,
+    pub memory_enabled: bool,
+    pub user_profile_enabled: bool,
+    pub memory_provider: String,
+    pub memory_char_limit: Option<i64>,
+    pub user_char_limit: Option<i64>,
+    pub toolsets: Vec<String>,
+    pub platform_toolsets: Vec<PlatformToolsetBinding>,
+    pub skills_external_dirs: Vec<String>,
+    pub discord_require_mention: bool,
+    pub discord_free_response_channels: String,
+    pub discord_allowed_channels: String,
+    pub discord_auto_thread: bool,
+    pub discord_reactions: bool,
+    pub approvals_mode: String,
+    pub approvals_timeout: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GatewayWorkspace {
+    pub hermes_gateway_token: String,
+    pub always_log_local: bool,
+    pub stt_enabled: bool,
+    pub group_sessions_per_user: bool,
+    pub thread_sessions_per_user: bool,
+    pub unauthorized_dm_behavior: String,
+    pub reset_triggers: Vec<String>,
+    pub session_reset_mode: String,
+    pub session_reset_at_hour: Option<i64>,
+    pub session_reset_idle_minutes: Option<i64>,
+    pub session_reset_notify: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvWorkspace {
+    pub openai_api_key: String,
+    pub openrouter_api_key: String,
+    pub anthropic_api_key: String,
+    pub google_api_key: String,
+    pub hf_token: String,
+    pub anyrouter_2_api_key: String,
+    pub crs_api_key: String,
+    pub siliconflow_api_key: String,
+    pub hermes_gateway_token: String,
+    pub telegram_bot_token: String,
+    pub telegram_home_channel: String,
+    pub telegram_reply_to_mode: String,
+    pub discord_bot_token: String,
+    pub discord_home_channel: String,
+    pub discord_reply_to_mode: String,
+    pub slack_bot_token: String,
+    pub whatsapp_enabled: bool,
+    pub terminal_modal_image: String,
+    pub terminal_timeout: Option<i64>,
+    pub terminal_lifetime_seconds: Option<i64>,
+    pub browser_session_timeout: Option<i64>,
+    pub browser_inactivity_timeout: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ConfigDocuments {
     pub hermes_home: String,
     pub config_path: String,
@@ -86,6 +164,9 @@ pub struct ConfigDocuments {
     pub config_yaml: String,
     pub env_file: String,
     pub summary: ConfigSummary,
+    pub workspace: ConfigWorkspace,
+    pub gateway_workspace: GatewayWorkspace,
+    pub env_workspace: EnvWorkspace,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -156,6 +237,28 @@ pub struct PluginRuntimeSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct PluginExternalDependency {
+    pub name: String,
+    pub install: String,
+    pub check: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginCatalogItem {
+    pub name: String,
+    pub category: String,
+    pub relative_path: String,
+    pub directory_path: String,
+    pub description: String,
+    pub requires_env: Vec<String>,
+    pub pip_dependencies: Vec<String>,
+    pub external_dependencies: Vec<PluginExternalDependency>,
+    pub installed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ExtensionsSnapshot {
     pub profile_name: String,
     pub hermes_home: String,
@@ -168,6 +271,7 @@ pub struct ExtensionsSnapshot {
     pub skill_source_counts: Vec<NamedCount>,
     pub skill_trust_counts: Vec<NamedCount>,
     pub plugins: PluginRuntimeSnapshot,
+    pub plugin_catalog: Vec<PluginCatalogItem>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -209,6 +313,33 @@ pub struct SkillItem {
     pub relative_path: String,
     pub file_path: String,
     pub preview: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillFileDetail {
+    pub name: String,
+    pub category: String,
+    pub relative_path: String,
+    pub file_path: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillSaveRequest {
+    pub file_path: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillCreateRequest {
+    pub name: String,
+    pub category: String,
+    pub description: String,
+    pub content: String,
+    pub overwrite: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

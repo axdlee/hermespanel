@@ -1,4 +1,4 @@
-import { NAV_GROUPS, PAGE_HINTS, PAGE_TITLES } from '../lib/panel-config';
+import { NAV_GROUPS, PAGE_TITLES } from '../lib/panel-config';
 import { getPanelState, loadProfiles, loadShell, setSelectedProfile } from '../lib/panel-state';
 
 function activeGroupLabel(activePage) {
@@ -8,26 +8,42 @@ function activeGroupLabel(activePage) {
 export function renderTopbar(el) {
   const state = getPanelState();
   const activeProfile = state.profiles?.activeProfile ?? 'default';
-  const viewedProfile = state.profiles?.profiles.find((item) => item.name === state.selectedProfile) ?? null;
   const shellBusy = state.loadingProfiles || state.loadingShell || state.refreshingShell;
-  const gatewayTone = state.shellDashboard?.gateway?.gatewayState === 'running' ? 'good' : 'warn';
-  const cliTone = state.shellInstallation?.binaryFound ? 'good' : 'bad';
-  const memoryTone = state.shellDashboard?.config.memoryEnabled ? 'good' : 'warn';
+  const statuses = [
+    {
+      label: state.shellInstallation?.binaryFound ? 'CLI Ready' : 'CLI Missing',
+      tone: state.shellInstallation?.binaryFound ? 'good' : 'bad',
+    },
+    {
+      label: `Gateway ${state.shellDashboard?.gateway?.gatewayState ?? 'unknown'}`,
+      tone: state.shellDashboard?.gateway?.gatewayState === 'running' ? 'good' : 'warn',
+    },
+    {
+      label: state.shellDashboard?.config.memoryEnabled ? 'Memory On' : 'Memory Off',
+      tone: state.shellDashboard?.config.memoryEnabled ? 'good' : 'warn',
+    },
+  ];
 
   el.innerHTML = `
-    <div class="topbar-copy">
-      <span class="topbar-kicker">${activeGroupLabel(state.activePage)} / ${PAGE_TITLES[state.activePage]}</span>
-      <div class="topbar-profile-brief">
+    <div class="topbar-presence">
+      <span class="topbar-kicker">${activeGroupLabel(state.activePage)}</span>
+      <div class="topbar-route-line">
         <strong>${state.selectedProfile}</strong>
         <span>${state.selectedProfile === activeProfile ? '当前默认实例' : `默认实例 ${activeProfile}`}</span>
+        <span class="info-tip" tabindex="0" aria-label="更多信息">
+          <span class="info-tip-trigger">?</span>
+          <span class="info-tip-bubble">当前页是 ${PAGE_TITLES[state.activePage]}。顶栏只保留实例切换和全局健康信号，把主要操作位让给工作区。</span>
+        </span>
       </div>
     </div>
     <div class="topbar-actions">
-      <div class="topbar-status-pills">
-        <span class="pill pill-${cliTone}">CLI ${state.shellInstallation?.binaryFound ? 'Ready' : 'Missing'}</span>
-        <span class="pill pill-${gatewayTone}">Gateway ${state.shellDashboard?.gateway?.gatewayState ?? 'unknown'}</span>
-        <span class="pill pill-${memoryTone}">Memory ${state.shellDashboard?.config.memoryEnabled ? 'On' : 'Off'}</span>
-        <span class="pill pill-${viewedProfile?.envExists ? 'good' : 'warn'}">Env ${viewedProfile?.envExists ? 'Ready' : 'Missing'}</span>
+      <div class="topbar-health-strip">
+        ${statuses.map((item) => `
+          <span class="topbar-health-item topbar-health-${item.tone}">
+            <span class="topbar-health-dot"></span>
+            ${item.label}
+          </span>
+        `).join('')}
       </div>
       <div class="profile-switcher">
         <span>实例</span>
@@ -46,10 +62,6 @@ export function renderTopbar(el) {
         <button type="button" class="button button-secondary" id="topbar-refresh-shell" ${shellBusy ? 'disabled' : ''}>
           ${shellBusy ? '同步中…' : '刷新状态'}
         </button>
-        <span class="info-tip" tabindex="0" aria-label="更多信息">
-          <span class="info-tip-trigger">?</span>
-          <span class="info-tip-bubble">当前页聚焦：${PAGE_HINTS[state.activePage]}。这条顶部栏只保留实例切换和全局健康信号，避免重复占用主工作区。</span>
-        </span>
       </div>
     </div>
   `;

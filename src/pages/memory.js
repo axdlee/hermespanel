@@ -1,6 +1,10 @@
 import { api } from '../lib/api';
-import { handoffToTerminal, openFinderLocation } from '../lib/desktop';
-import { buildConfigDrilldownIntent, buildDiagnosticsDrilldownIntent } from '../lib/drilldown';
+import { openFinderLocation } from '../lib/desktop';
+import {
+  buildConfigDrilldownIntent,
+  buildDiagnosticsDrilldownIntent,
+  buildExtensionsDrilldownIntent,
+} from '../lib/drilldown';
 import { formatTimestamp } from '../lib/format';
 import {
   consumePageIntent,
@@ -49,6 +53,18 @@ function directoryOf(path) {
   const normalized = String(path ?? '').trim();
   const index = normalized.lastIndexOf('/');
   return index > 0 ? normalized.slice(0, index) : normalized;
+}
+
+function cloneWorkspace(workspace = {}) {
+  return {
+    ...workspace,
+    toolsets: [...(workspace.toolsets ?? [])],
+    platformToolsets: (workspace.platformToolsets ?? []).map((item) => ({
+      ...item,
+      toolsets: [...(item.toolsets ?? [])],
+    })),
+    skillsExternalDirs: [...(workspace.skillsExternalDirs ?? [])],
+  };
 }
 
 function memoryMeta(key) {
@@ -399,8 +415,8 @@ function renderPage(view) {
     <section class="config-section">
       <div class="config-section-header">
         <div>
-          <h2 class="config-section-title">接管动作</h2>
-          <p class="config-section-desc">继续使用 Hermes 官方 provider / plugins 命令，桌面端只做封装和回显。</p>
+          <h2 class="config-section-title">闭环动作</h2>
+          <p class="config-section-desc">Provider、插件和文件编辑直接回到结构化工作台，不再停留在只读摘要。</p>
         </div>
       </div>
       <div class="control-card-grid">
@@ -412,11 +428,11 @@ function renderPage(view) {
             </div>
             ${pillHtml(summary?.memoryEnabled ? 'Enabled' : 'Disabled', summary?.memoryEnabled ? 'good' : 'warn')}
           </div>
-          <p class="command-line">hermes memory setup · hermes memory status · hermes memory off</p>
+          <p class="command-line">${escapeHtml(`memory ${summary?.memoryEnabled ? 'on' : 'off'} · provider ${providerLabel(view)} · runtime ${runtimeProvider}`)}</p>
           <div class="toolbar">
-            ${buttonHtml({ action: 'memory-setup', label: view.runningAction === 'memory:setup' ? 'Provider…' : 'Provider 向导', kind: 'primary', disabled: actionBusy || !view.installation.binaryFound })}
+            ${buttonHtml({ action: 'memory-setup', label: '进入记忆配置', kind: 'primary', disabled: actionBusy })}
             ${buttonHtml({ action: 'memory-status', label: view.runningDiagnostic ? '体检中…' : '状态体检', disabled: actionBusy })}
-            ${buttonHtml({ action: 'memory-off', label: view.runningAction === 'memory:off' ? '关闭中…' : '关闭记忆', kind: 'danger', disabled: actionBusy || !view.installation.binaryFound })}
+            ${buttonHtml({ action: 'memory-off', label: view.runningAction === 'memory:off' ? '关闭中…' : '关闭记忆', kind: 'danger', disabled: actionBusy })}
           </div>
         </section>
 
@@ -432,13 +448,9 @@ function renderPage(view) {
             <span>插件名</span>
             <input class="search-input" id="memory-plugin-input" placeholder="byterover / owner/repo">
           </label>
-          <p class="command-line">
-            ${escapeHtml(view.pluginInput.trim()
-              ? `hermes plugins install ${view.pluginInput.trim()} · hermes plugins update ${view.pluginInput.trim()} · hermes plugins remove ${view.pluginInput.trim()}`
-              : '先输入插件名后再 install / update / remove')}
-          </p>
+          <p class="command-line">${escapeHtml(view.pluginInput.trim() || '先输入插件名，再直接安装 / 更新 / 移除或跳到扩展页继续治理。')}</p>
           <div class="toolbar">
-            ${buttonHtml({ action: 'plugins-panel', label: view.runningAction === 'memory:plugins-panel' ? '插件面板…' : '插件面板', disabled: actionBusy || !view.installation.binaryFound })}
+            ${buttonHtml({ action: 'plugins-panel', label: '扩展工作台', disabled: actionBusy })}
             ${buttonHtml({ action: 'plugin-install', label: view.runningAction === 'memory:plugin-install' ? '安装中…' : '安装', kind: 'primary', disabled: actionBusy || !view.installation.binaryFound || !view.pluginInput.trim() })}
             ${buttonHtml({ action: 'plugin-update', label: view.runningAction === 'memory:plugin-update' ? '更新中…' : '更新', disabled: actionBusy || !view.installation.binaryFound || !view.pluginInput.trim() })}
             ${buttonHtml({ action: 'plugin-remove', label: view.runningAction === 'memory:plugin-remove' ? '移除中…' : '移除', kind: 'danger', disabled: actionBusy || !view.installation.binaryFound || !view.pluginInput.trim() })}
@@ -589,14 +601,14 @@ function renderPage(view) {
             <div class="workspace-main-header">
               <div>
                 <h2 class="config-section-title">最近动作与原始输出</h2>
-                <p class="config-section-desc">保留最近一次命令回显，并同时露出 memory status 的原始输出。</p>
+                <p class="config-section-desc">保留最近一次保存、插件动作或状态体检结果。</p>
               </div>
               <div class="toolbar">
                 ${buttonHtml({ action: 'goto-config', label: '回到配置页' })}
                 ${buttonHtml({ action: 'goto-diagnostics', label: '进入诊断页' })}
               </div>
             </div>
-            ${commandResultHtml(view.lastResult, '尚未执行命令', '执行 provider / plugins / memory status 后，这里会保留最近一次结果。')}
+            ${commandResultHtml(view.lastResult, '尚未执行动作', '保存记忆、插件治理或状态体检后，这里会保留最近一次结果。')}
             <div class="top-gap">
               <div class="detail-list compact">
                 <div class="key-value-row"><span>当前显示</span><strong>${escapeHtml(outputLabel)}</strong></div>
@@ -742,26 +754,49 @@ async function saveCurrent(view, verify = false) {
   }
 }
 
-async function openInTerminal(view, actionKey, label, command, options = {}) {
+async function saveMemoryWorkspace(view, mutate, successMessage) {
+  view.runningAction = 'memory:save-workspace';
+  renderPage(view);
+  try {
+    const request = cloneWorkspace(view.config?.workspace ?? {});
+    mutate(request);
+    const nextConfig = await api.saveStructuredConfig(request, view.profile);
+    if (view.destroyed) {
+      return;
+    }
+    view.config = nextConfig;
+    storeResult(view, successMessage, {
+      command: 'save_structured_config',
+      exitCode: 0,
+      success: true,
+      stdout: successMessage,
+      stderr: '',
+    });
+    notify('success', successMessage);
+    await loadData(view, { silent: true });
+  } catch (reason) {
+    notify('error', String(reason));
+  } finally {
+    view.runningAction = null;
+    renderPage(view);
+  }
+}
+
+async function executePluginAction(view, action, name) {
+  const normalized = String(name ?? '').trim();
+  if (!normalized) {
+    notify('error', '请先输入插件名。');
+    return;
+  }
+
+  const actionKey = `memory:plugin-${action}`;
   view.runningAction = actionKey;
   renderPage(view);
   try {
-    await handoffToTerminal({
-      actionKey,
-      command,
-      confirmMessage: options.confirmMessage,
-      label,
-      notify,
-      onResult: (nextLabel, result) => {
-        storeResult(view, nextLabel, result);
-      },
-      profile: view.profile,
-      setBusy: (value) => {
-        view.runningAction = value;
-        renderPage(view);
-      },
-      workingDirectory: view.installation?.hermesHomeExists ? view.installation.hermesHome : null,
-    });
+    const result = await api.runPluginAction(action, normalized, view.profile);
+    storeResult(view, `${action} ${normalized}`, result);
+    notify(result.success ? 'success' : 'error', `${normalized} ${action} 已执行。`);
+    await loadData(view, { silent: true });
   } finally {
     view.runningAction = null;
     renderPage(view);
@@ -831,7 +866,7 @@ function bindEvents(view, intents) {
     pluginInput.onkeydown = (event) => {
       if (event.key === 'Enter' && view.pluginInput.trim()) {
         event.preventDefault();
-        void openInTerminal(view, 'memory:plugin-install', '安装插件', `hermes plugins install ${view.pluginInput.trim()}`);
+        void executePluginAction(view, 'install', view.pluginInput);
       }
     };
   }
@@ -865,26 +900,45 @@ function bindEvents(view, intents) {
           await loadDetail(view, element.getAttribute('data-key'));
           return;
         case 'memory-setup':
-          await openInTerminal(view, 'memory:setup', '记忆 Provider', 'hermes memory setup');
+          navigate('config', buildConfigDrilldownIntent(relaySeed(view), {
+            description: '继续在配置中心直接调整 memory provider、记忆开关与用户画像，不再回终端跑 provider 向导。',
+            focus: 'memory',
+            suggestedCommand: 'memory-status',
+          }));
           return;
         case 'memory-off':
-          await openInTerminal(view, 'memory:off', '关闭记忆', 'hermes memory off', {
-            confirmMessage: '确定关闭当前 profile 的记忆功能吗？',
-          });
+          if (!window.confirm('确定关闭当前 profile 的记忆功能吗？')) {
+            return;
+          }
+          await saveMemoryWorkspace(view, (request) => {
+            request.memoryEnabled = false;
+            request.userProfileEnabled = false;
+            request.memoryProvider = '';
+            request.toolsets = request.toolsets.filter((item) => item !== 'memory');
+            request.platformToolsets = request.platformToolsets.map((item) => ({
+              ...item,
+              toolsets: item.toolsets.filter((toolset) => toolset !== 'memory'),
+            }));
+          }, '记忆功能已关闭，配置已直接写回。');
           return;
         case 'plugins-panel':
-          await openInTerminal(view, 'memory:plugins-panel', '插件面板', 'hermes plugins');
+          navigate('extensions', buildExtensionsDrilldownIntent(relaySeed(view), {
+            description: '继续在扩展工作台直接管理插件、memory runtime 和相关依赖。',
+            pluginName: view.pluginInput.trim() || undefined,
+            rawKind: 'plugins',
+          }));
           return;
         case 'plugin-install':
-          await openInTerminal(view, 'memory:plugin-install', '安装插件', `hermes plugins install ${view.pluginInput.trim()}`);
+          await executePluginAction(view, 'install', view.pluginInput);
           return;
         case 'plugin-update':
-          await openInTerminal(view, 'memory:plugin-update', '更新插件', `hermes plugins update ${view.pluginInput.trim()}`);
+          await executePluginAction(view, 'update', view.pluginInput);
           return;
         case 'plugin-remove':
-          await openInTerminal(view, 'memory:plugin-remove', '移除插件', `hermes plugins remove ${view.pluginInput.trim()}`, {
-            confirmMessage: `确定移除插件 ${view.pluginInput.trim()} 吗？`,
-          });
+          if (!window.confirm(`确定移除插件 ${view.pluginInput.trim()} 吗？`)) {
+            return;
+          }
+          await executePluginAction(view, 'remove', view.pluginInput);
           return;
         case 'open-home':
           await openInFinder(view, view.config.hermesHome, 'Hermes Home');

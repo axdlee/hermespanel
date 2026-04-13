@@ -4,6 +4,11 @@ import {
   getDiagnosticCommand,
 } from '../lib/diagnostics';
 import { handoffToTerminal, openFinderLocation } from '../lib/desktop';
+import {
+  buildConfigDrilldownIntent,
+  buildExtensionsDrilldownIntent,
+  buildGatewayDrilldownIntent,
+} from '../lib/drilldown';
 import { formatTimestamp } from '../lib/format';
 import { buildRuntimePosture } from '../lib/posture';
 import { consumePageIntent, getPageIntent, getPanelState, navigate, notify, subscribePanelState } from '../lib/panel-state';
@@ -108,6 +113,21 @@ function applyIntent(view, intent, announce = true) {
   if (announce) {
     notify('info', `${intent.headline} 已带入诊断工作台。`);
   }
+}
+
+function relaySeed(view) {
+  return view.investigation
+    ? {
+        sourcePage: 'diagnostics',
+        headline: view.investigation.headline,
+        description: view.investigation.description,
+        context: view.investigation.context,
+      }
+    : {
+        sourcePage: 'diagnostics',
+        headline: '从诊断台继续修复',
+        description: '继续围绕安装、配置、网关、技能、插件和记忆链路闭环。',
+      };
 }
 
 function derivedState(view) {
@@ -402,33 +422,33 @@ function renderPage(view) {
           <div class="action-card-header">
             <div>
               <p class="eyebrow">Repair</p>
-              <h3 class="action-card-title">Setup / Model / Gateway</h3>
+              <h3 class="action-card-title">配置 / 模型 / Gateway</h3>
             </div>
             ${pillHtml(view.snapshot?.gateway?.gatewayState ?? 'gateway 待修复', view.snapshot?.gateway?.gatewayState === 'running' ? 'good' : 'warn')}
           </div>
-          <p class="action-card-copy">provider、消息平台或上下文主链路出问题时，优先回到 Hermes 官方 setup 向导处理。</p>
-          <p class="command-line">${escapeHtml(view.installation ? `${view.installation.setupCommand} · ${view.installation.modelCommand} · ${view.installation.gatewaySetupCommand}` : '未读取 setup 命令')}</p>
+          <p class="action-card-copy">大多数问题先回结构化配置中心和 Gateway 工作台，优先在客户端里完成修正。</p>
+          <p class="command-line">${escapeHtml(view.installation ? `${view.config?.summary.modelProvider || 'provider 未配'} / ${view.config?.summary.modelDefault || 'model 未配'} · gateway ${view.snapshot?.gateway?.gatewayState || 'unknown'}` : '未读取配置摘要')}</p>
           <div class="toolbar">
-            ${buttonHtml({ action: 'terminal-setup', label: view.runningDesktopAction === 'diagnostics:setup' ? '全量 Setup…' : '全量 Setup', kind: 'primary', disabled: state.actionBusy || !view.installation?.binaryFound })}
-            ${buttonHtml({ action: 'terminal-model', label: view.runningDesktopAction === 'diagnostics:model' ? '模型 / Provider…' : '模型 / Provider', disabled: state.actionBusy || !view.installation?.binaryFound })}
-            ${buttonHtml({ action: 'terminal-gateway-setup', label: view.runningDesktopAction === 'diagnostics:gateway-setup' ? 'Gateway Setup…' : 'Gateway Setup', disabled: state.actionBusy || !view.installation?.binaryFound })}
+            ${buttonHtml({ action: 'goto-config-model', label: '配置中心', kind: 'primary', disabled: state.actionBusy || !view.installation?.binaryFound })}
+            ${buttonHtml({ action: 'goto-config-credentials', label: '凭证 / 通道', disabled: state.actionBusy || !view.installation?.binaryFound })}
+            ${buttonHtml({ action: 'goto-gateway-workbench', label: 'Gateway 工作台', disabled: state.actionBusy || !view.installation?.binaryFound })}
           </div>
         </section>
         <section class="action-card action-card-compact">
           <div class="action-card-header">
             <div>
               <p class="eyebrow">Capability</p>
-              <h3 class="action-card-title">Tools / Skills / Memory / Plugins</h3>
+              <h3 class="action-card-title">Toolsets / Skills / Memory / Plugins</h3>
             </div>
             ${pillHtml(enabledToolCount(view.extensions) > 0 ? `${enabledToolCount(view.extensions)} 个 tools` : '能力面待修', enabledToolCount(view.extensions) > 0 ? 'good' : 'warn')}
           </div>
-          <p class="action-card-copy">“明明装了却没生效”的问题大多在这里，尤其是 toolsets、技能安装态、memory provider 和插件层。</p>
-          <p class="command-line">${escapeHtml(view.installation ? `${view.installation.toolsSetupCommand} · ${view.installation.skillsConfigCommand} · hermes memory setup · hermes plugins` : '未读取能力面入口')}</p>
+          <p class="action-card-copy">能力面问题优先回工具、技能、记忆和扩展工作台，不再打开交互式命令面板。</p>
+          <p class="command-line">${escapeHtml(view.installation ? `${view.config?.summary.toolsets.join(', ') || '无 toolsets'} · memory ${view.config?.summary.memoryProvider || 'builtin-file'} · plugins ${pluginsCount(view.extensions)}` : '未读取能力面摘要')}</p>
           <div class="toolbar">
-            ${buttonHtml({ action: 'terminal-tools-setup', label: view.runningDesktopAction === 'diagnostics:tools-setup' ? '工具选择…' : '工具选择', disabled: state.actionBusy || !view.installation?.binaryFound })}
-            ${buttonHtml({ action: 'terminal-skills-config', label: view.runningDesktopAction === 'diagnostics:skills-config' ? '技能开关…' : '技能开关', disabled: state.actionBusy || !view.installation?.binaryFound })}
-            ${buttonHtml({ action: 'terminal-memory-setup', label: view.runningDesktopAction === 'diagnostics:memory-setup' ? '记忆 Provider…' : '记忆 Provider', disabled: state.actionBusy || !view.installation?.binaryFound })}
-            ${buttonHtml({ action: 'terminal-plugins', label: view.runningDesktopAction === 'diagnostics:plugins' ? '插件与 Context Engine…' : '插件与 Context Engine', disabled: state.actionBusy || !view.installation?.binaryFound })}
+            ${buttonHtml({ action: 'goto-config-toolsets', label: 'Toolsets', disabled: state.actionBusy || !view.installation?.binaryFound })}
+            ${buttonHtml({ action: 'goto-skills-workbench', label: '技能工作台', disabled: state.actionBusy || !view.installation?.binaryFound })}
+            ${buttonHtml({ action: 'goto-memory-config', label: '记忆配置', disabled: state.actionBusy || !view.installation?.binaryFound })}
+            ${buttonHtml({ action: 'goto-extensions-workbench', label: '扩展插件', disabled: state.actionBusy || !view.installation?.binaryFound })}
           </div>
         </section>
         <section class="action-card action-card-compact">
@@ -836,40 +856,47 @@ function bindEvents(view) {
             await openTerminalAction(view, 'diagnostics:update', '升级 CLI', view.installation.updateCommand);
           }
           return;
-        case 'terminal-setup':
-          if (view.installation) {
-            await openTerminalAction(view, 'diagnostics:setup', '全量 Setup', view.installation.setupCommand);
-          }
+        case 'goto-config-model':
+          navigate('config', buildConfigDrilldownIntent(relaySeed(view), {
+            description: '继续在配置中心直接修改模型、provider 与默认链路，而不是回 Terminal 跑 setup/model。',
+            focus: 'model',
+            suggestedCommand: 'config-check',
+          }));
           return;
-        case 'terminal-model':
-          if (view.installation) {
-            await openTerminalAction(view, 'diagnostics:model', '模型 / Provider', view.installation.modelCommand);
-          }
+        case 'goto-config-credentials':
+          navigate('config', buildConfigDrilldownIntent(relaySeed(view), {
+            description: '继续在配置中心直接修改 API Key、消息通道和相关凭证。',
+            focus: 'credentials',
+            suggestedCommand: 'config-check',
+          }));
           return;
-        case 'terminal-gateway-setup':
-          if (view.installation) {
-            await openTerminalAction(view, 'diagnostics:gateway-setup', 'Gateway Setup', view.installation.gatewaySetupCommand);
-          }
+        case 'goto-gateway-workbench':
+          navigate('gateway', buildGatewayDrilldownIntent(relaySeed(view), {
+            description: '继续在 Gateway 工作台处理 service、平台、策略和远端投递。',
+          }));
           return;
-        case 'terminal-tools-setup':
-          if (view.installation) {
-            await openTerminalAction(view, 'diagnostics:tools-setup', '工具选择', view.installation.toolsSetupCommand);
-          }
+        case 'goto-config-toolsets':
+          navigate('config', buildConfigDrilldownIntent(relaySeed(view), {
+            description: '继续在配置中心直接核对和保存 toolsets / platform toolsets。',
+            focus: 'toolsets',
+            suggestedCommand: 'tools-summary',
+          }));
           return;
-        case 'terminal-skills-config':
-          if (view.installation) {
-            await openTerminalAction(view, 'diagnostics:skills-config', '技能开关', view.installation.skillsConfigCommand);
-          }
+        case 'goto-skills-workbench':
+          navigate('skills');
           return;
-        case 'terminal-memory-setup':
-          if (view.installation) {
-            await openTerminalAction(view, 'diagnostics:memory-setup', '记忆 Provider', 'hermes memory setup');
-          }
+        case 'goto-memory-config':
+          navigate('config', buildConfigDrilldownIntent(relaySeed(view), {
+            description: '继续在配置中心直接处理 memory provider、开关和用户画像。',
+            focus: 'memory',
+            suggestedCommand: 'memory-status',
+          }));
           return;
-        case 'terminal-plugins':
-          if (view.installation) {
-            await openTerminalAction(view, 'diagnostics:plugins', '插件与 Context Engine', 'hermes plugins');
-          }
+        case 'goto-extensions-workbench':
+          navigate('extensions', buildExtensionsDrilldownIntent(relaySeed(view), {
+            description: '继续在扩展工作台处理插件、tools runtime 和 memory runtime。',
+            rawKind: 'plugins',
+          }));
           return;
         default:
           return;

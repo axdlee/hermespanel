@@ -30,29 +30,22 @@ export function renderSidebar(el) {
   const viewedProfile = state.profiles?.profiles.find((item) => item.name === state.selectedProfile) ?? null;
   const pluginCount = state.shellExtensions?.plugins.installedCount ?? 0;
   const cliReady = state.shellInstallation?.binaryFound ?? false;
+  const gatewayState = viewedProfile?.gatewayState ?? state.shellDashboard?.gateway?.gatewayState ?? 'gateway ?';
+  const envReady = viewedProfile?.envExists ?? false;
+  const profileMode = state.selectedProfile === activeProfile ? '默认实例' : '浏览实例';
 
   el.className = `sidebar ${state.sidebarCollapsed ? 'sidebar-collapsed' : ''}`;
   el.innerHTML = `
     <div class="sidebar-brand">
-      <span class="brand-mark">HP</span>
+      <span class="brand-mark">H</span>
       <div class="sidebar-brand-copy">
         <p>HermesPanel</p>
-        <span>Desktop client</span>
+        <span>Native control shell</span>
       </div>
       <button type="button" class="sidebar-collapse-btn" id="sidebar-collapse-btn">
         ${state.sidebarCollapsed ? '»' : '«'}
       </button>
     </div>
-
-    <section class="sidebar-active-profile">
-      <div class="sidebar-active-copy">
-        <span class="sidebar-section-label">当前实例</span>
-        <strong>${esc(state.selectedProfile)}</strong>
-      </div>
-      <span class="pill pill-${state.selectedProfile === activeProfile ? 'good' : 'warn'}">
-        ${state.selectedProfile === activeProfile ? '默认' : '查看中'}
-      </span>
-    </section>
 
     <div class="sidebar-scroller">
       ${NAV_GROUPS.map((group) => `
@@ -78,13 +71,20 @@ export function renderSidebar(el) {
     </div>
 
     <section class="sidebar-footer-lite">
-      <div class="sidebar-footer-meta">
-        <span>${esc(viewedProfile?.modelDefault ?? '未配置模型')}</span>
-        <span>${esc(viewedProfile?.gatewayState ?? state.shellDashboard?.gateway?.gatewayState ?? 'gateway ?')}</span>
+      <div class="sidebar-summary-row">
+        <div class="sidebar-summary-copy">
+          <strong>${esc(state.selectedProfile)}</strong>
+          <span>${profileMode}</span>
+        </div>
+        <span class="pill pill-${cliReady ? 'good' : 'bad'}">${cliReady ? 'CLI Ready' : 'CLI Missing'}</span>
       </div>
       <div class="sidebar-footer-meta">
-        <span>${viewedProfile?.envExists ? 'Env Ready' : 'Env Missing'}</span>
-        <span>${cliReady ? `CLI Ready · ${pluginCount} Plugins` : 'CLI Missing'}</span>
+        <span>${envReady ? 'Env Ready' : 'Env Missing'}</span>
+        <span>${esc(gatewayState)}</span>
+      </div>
+      <div class="sidebar-footer-meta">
+        <span>${esc(viewedProfile?.modelDefault ?? '未配置模型')}</span>
+        <span>${pluginCount} Plugins</span>
       </div>
       <div class="sidebar-status-toolbar toolbar">
         <button type="button" class="button button-secondary" id="sidebar-make-active" ${state.syncingActive || state.selectedProfile === activeProfile ? 'disabled' : ''}>

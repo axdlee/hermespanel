@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,15 +13,17 @@ use walkdir::WalkDir;
 
 use crate::error::{AppError, AppResult};
 use crate::models::{
-    BinaryStatus, CommandRunResult, ConfigDocuments, ConfigSummary, CronCreateRequest,
-    CronDeleteRequest, CronJobItem, CronJobsSnapshot, CronUpdateRequest, DashboardCounts,
-    DashboardSnapshot, ExtensionsSnapshot, GatewayPlatformState, GatewayStateSnapshot, HermesHome,
-    InstallationSnapshot, LogReadResult, MemoryFileDetail, MemoryFileSummary, MemoryProviderOption,
-    MemoryRuntimeSnapshot, NamedCount, PluginRuntimeSnapshot, ProfileAliasCreateRequest,
-    ProfileAliasDeleteRequest, ProfileAliasItem, ProfileCreateRequest, ProfileDeleteRequest,
-    ProfileExportRequest, ProfileImportRequest, ProfileRenameRequest, ProfileSummary,
-    ProfilesSnapshot, RuntimeSkillItem, SessionDetail, SessionMessage, SessionRecord,
-    SkillFrontmatter, SkillItem, ToolPlatformInventory, ToolPlatformSummary, ToolRuntimeItem,
+    BinaryStatus, CommandRunResult, ConfigDocuments, ConfigSummary, ConfigWorkspace,
+    CronCreateRequest, CronDeleteRequest, CronJobItem, CronJobsSnapshot, CronUpdateRequest,
+    DashboardCounts, DashboardSnapshot, EnvWorkspace, ExtensionsSnapshot, GatewayPlatformState,
+    GatewayStateSnapshot, GatewayWorkspace, HermesHome, InstallationSnapshot, LogReadResult,
+    MemoryFileDetail, MemoryFileSummary, MemoryProviderOption, MemoryRuntimeSnapshot, NamedCount,
+    PlatformToolsetBinding, PluginCatalogItem, PluginExternalDependency, PluginRuntimeSnapshot,
+    ProfileAliasCreateRequest, ProfileAliasDeleteRequest, ProfileAliasItem, ProfileCreateRequest,
+    ProfileDeleteRequest, ProfileExportRequest, ProfileImportRequest, ProfileRenameRequest,
+    ProfileSummary, ProfilesSnapshot, RuntimeSkillItem, SessionDetail, SessionMessage,
+    SessionRecord, SkillCreateRequest, SkillFileDetail, SkillFrontmatter, SkillItem,
+    ToolPlatformInventory, ToolPlatformSummary, ToolRuntimeItem,
 };
 
 const QUICK_INSTALL_COMMAND: &str =
@@ -38,6 +40,38 @@ const GATEWAY_SETUP_COMMAND: &str = "hermes gateway setup";
 const CONFIG_MIGRATE_COMMAND: &str = "hermes config migrate";
 const SKILLS_CONFIG_COMMAND: &str = "hermes skills config";
 const CLAW_MIGRATE_COMMAND: &str = "hermes claw migrate";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum InstallationActionCommand {
+    Hermes(Vec<String>),
+    Shell(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum EnvLine {
+    Entry {
+        key: String,
+        value: String,
+        raw: String,
+    },
+    Raw(String),
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawPluginManifest {
+    name: Option<String>,
+    description: Option<String>,
+    pip_dependencies: Option<Vec<String>>,
+    requires_env: Option<Vec<String>>,
+    external_dependencies: Option<Vec<RawPluginExternalDependency>>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawPluginExternalDependency {
+    name: Option<String>,
+    install: Option<String>,
+    check: Option<String>,
+}
 
 pub fn resolve_default_hermes_root(explicit_root: Option<&Path>) -> AppResult<PathBuf> {
     explicit_root
@@ -428,10 +462,66 @@ pub fn run_hermes_command_owned(
     Ok(command_result_from_output(&hermes, &command_args, output))
 }
 
+fn installation_action_command(action: &str) -> AppResult<InstallationActionCommand> {
+    match action {
+        "install" | "reinstall" => {
+            Ok(InstallationActionCommand::Shell(QUICK_INSTALL_COMMAND.to_string()))
+        }
+        "update" => Ok(InstallationActionCommand::Hermes(vec!["update".to_string()])),
+        "uninstall" => Ok(InstallationActionCommand::Hermes(vec![
+            "uninstall".to_string(),
+            "--yes".to_string(),
+        ])),
+        other => Err(AppError::Message(format!(
+            "不支持的安装动作: {other}"
+        ))),
+    }
+}
+
+pub fn run_installation_action(action: &str) -> AppResult<CommandRunResult> {
+    match installation_action_command(action)? {
+        InstallationActionCommand::Hermes(args) => run_hermes_command_owned(None, &args),
+        InstallationActionCommand::Shell(command) => run_shell_command(&command, None),
+    }
+}
+
+pub fn run_shell_command(
+    command: &str,
+    working_directory: Option<&Path>,
+) -> AppResult<CommandRunResult> {
+    let normalized = command.trim();
+    if normalized.is_empty() {
+        return Err(AppError::Message("shell command 不能为空".into()));
+    }
+
+    let mut shell = Command::new("/bin/bash");
+    shell.arg("-lc").arg(normalized);
+    if let Some(path) = working_directory {
+        shell.current_dir(path);
+    }
+    let output = shell.output()?;
+
+    Ok(CommandRunResult {
+        command: build_shell_display_command(normalized, working_directory),
+        exit_code: output.status.code().unwrap_or(-1),
+        stderr: normalize_command_text(&String::from_utf8_lossy(&output.stderr)),
+        stdout: normalize_command_text(&String::from_utf8_lossy(&output.stdout)),
+        success: output.status.success(),
+    })
+}
+
 pub fn read_config_documents(home: &HermesHome) -> AppResult<ConfigDocuments> {
     let config_yaml = read_text_file(&home.config_yaml)?;
     let env_file = read_text_file(&home.env_file)?;
-    let summary = build_config_summary(&config_yaml)?;
+    let value = if config_yaml.trim().is_empty() {
+        Value::Mapping(Default::default())
+    } else {
+        serde_yaml::from_str::<Value>(&config_yaml)?
+    };
+    let summary = build_config_summary_from_value(&value);
+    let workspace = build_config_workspace(&value);
+    let gateway_workspace = build_gateway_workspace(&value, &env_file);
+    let env_workspace = build_env_workspace(&env_file);
 
     Ok(ConfigDocuments {
         config_path: home.config_yaml.display().to_string(),
@@ -440,6 +530,9 @@ pub fn read_config_documents(home: &HermesHome) -> AppResult<ConfigDocuments> {
         env_path: home.env_file.display().to_string(),
         hermes_home: home.root.display().to_string(),
         summary,
+        workspace,
+        gateway_workspace,
+        env_workspace,
     })
 }
 
@@ -468,6 +561,8 @@ pub fn read_extensions_snapshot(home: &HermesHome) -> AppResult<ExtensionsSnapsh
     let runtime_skills = parse_runtime_skills(&skills.stdout);
     let skill_source_counts = count_by_name(runtime_skills.iter().map(|item| item.source.as_str()));
     let skill_trust_counts = count_by_name(runtime_skills.iter().map(|item| item.trust.as_str()));
+    let plugin_runtime = parse_plugin_runtime(&plugins.stdout);
+    let plugin_catalog = build_plugin_catalog(home, &plugin_runtime);
 
     Ok(ExtensionsSnapshot {
         profile_name: home.profile_name.clone(),
@@ -480,7 +575,8 @@ pub fn read_extensions_snapshot(home: &HermesHome) -> AppResult<ExtensionsSnapsh
         skills_raw_output: skills.stdout,
         skill_source_counts,
         skill_trust_counts,
-        plugins: parse_plugin_runtime(&plugins.stdout),
+        plugins: plugin_runtime,
+        plugin_catalog,
     })
 }
 
@@ -522,7 +618,10 @@ pub fn build_tool_action_args(
 
 pub fn build_plugin_action_args(action: &str, name: &str) -> AppResult<Vec<String>> {
     let normalized_action = action.trim();
-    if normalized_action != "enable" && normalized_action != "disable" {
+    if !matches!(
+        normalized_action,
+        "enable" | "disable" | "install" | "update" | "remove"
+    ) {
         return Err(AppError::Message(format!(
             "不支持的 plugins 操作: {action}"
         )));
@@ -540,6 +639,47 @@ pub fn build_plugin_action_args(action: &str, name: &str) -> AppResult<Vec<Strin
     ])
 }
 
+pub fn build_skill_action_args(action: &str, value: Option<&str>) -> AppResult<Vec<String>> {
+    let normalized_action = action.trim();
+    match normalized_action {
+        "search" => {
+            let terms = value
+                .unwrap_or_default()
+                .split_whitespace()
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+                .map(ToString::to_string)
+                .collect::<Vec<_>>();
+
+            if terms.is_empty() {
+                return Err(AppError::Message("skills search 关键词不能为空".into()));
+            }
+
+            let mut args = vec!["skills".to_string(), "search".to_string()];
+            args.extend(terms);
+            Ok(args)
+        }
+        "inspect" | "install" => {
+            let normalized_value = value.unwrap_or_default().trim();
+            if normalized_value.is_empty() {
+                return Err(AppError::Message(format!(
+                    "skills {normalized_action} 目标不能为空"
+                )));
+            }
+
+            Ok(vec![
+                "skills".to_string(),
+                normalized_action.to_string(),
+                normalized_value.to_string(),
+            ])
+        }
+        "check" | "update" | "audit" => {
+            Ok(vec!["skills".to_string(), normalized_action.to_string()])
+        }
+        other => Err(AppError::Message(format!("不支持的 skills 操作: {other}"))),
+    }
+}
+
 pub fn write_config_yaml(home: &HermesHome, content: &str) -> AppResult<()> {
     serde_yaml::from_str::<Value>(content)?;
     fs::write(&home.config_yaml, content)?;
@@ -553,22 +693,704 @@ pub fn write_env_file(home: &HermesHome, content: &str) -> AppResult<()> {
 
 pub fn build_config_summary(config_yaml: &str) -> AppResult<ConfigSummary> {
     let value = serde_yaml::from_str::<Value>(config_yaml)?;
-    Ok(ConfigSummary {
-        context_engine: lookup_yaml_string(&value, &["context", "engine"]),
-        memory_enabled: lookup_yaml_bool(&value, &["memory", "memory_enabled"]),
-        memory_char_limit: lookup_yaml_i64(&value, &["memory", "memory_char_limit"]),
-        memory_provider: lookup_yaml_string(&value, &["memory", "provider"]),
-        model_base_url: lookup_yaml_string(&value, &["model", "base_url"]),
-        model_default: lookup_yaml_string(&value, &["model", "default"])
-            .or_else(|| lookup_yaml_string(&value, &["model"])),
-        model_provider: lookup_yaml_string(&value, &["model", "provider"]),
-        personality: lookup_yaml_string(&value, &["display", "personality"]),
-        streaming_enabled: lookup_yaml_bool(&value, &["display", "streaming"]),
-        terminal_backend: lookup_yaml_string(&value, &["terminal", "backend"]),
-        terminal_cwd: lookup_yaml_string(&value, &["terminal", "cwd"]),
-        toolsets: lookup_yaml_array(&value, &["toolsets"]),
-        user_char_limit: lookup_yaml_i64(&value, &["memory", "user_char_limit"]),
-        user_profile_enabled: lookup_yaml_bool(&value, &["memory", "user_profile_enabled"]),
+    Ok(build_config_summary_from_value(&value))
+}
+
+fn build_config_summary_from_value(value: &Value) -> ConfigSummary {
+    ConfigSummary {
+        context_engine: lookup_yaml_string(value, &["context", "engine"]),
+        memory_enabled: lookup_yaml_bool(value, &["memory", "memory_enabled"]),
+        memory_char_limit: lookup_yaml_i64(value, &["memory", "memory_char_limit"]),
+        memory_provider: lookup_yaml_string(value, &["memory", "provider"]),
+        model_base_url: lookup_yaml_string(value, &["model", "base_url"]),
+        model_default: lookup_yaml_string(value, &["model", "default"])
+            .or_else(|| lookup_yaml_string(value, &["model"])),
+        model_provider: lookup_yaml_string(value, &["model", "provider"]),
+        personality: lookup_yaml_string(value, &["display", "personality"]),
+        streaming_enabled: lookup_yaml_bool(value, &["display", "streaming"])
+            .or_else(|| lookup_yaml_bool(value, &["streaming", "enabled"])),
+        terminal_backend: lookup_yaml_string(value, &["terminal", "backend"]),
+        terminal_cwd: lookup_yaml_string(value, &["terminal", "cwd"]),
+        toolsets: lookup_yaml_array(value, &["toolsets"]),
+        user_char_limit: lookup_yaml_i64(value, &["memory", "user_char_limit"]),
+        user_profile_enabled: lookup_yaml_bool(value, &["memory", "user_profile_enabled"]),
+    }
+}
+
+fn build_config_workspace(value: &Value) -> ConfigWorkspace {
+    ConfigWorkspace {
+        model_default: lookup_yaml_string(value, &["model", "default"]).unwrap_or_default(),
+        model_provider: lookup_yaml_string(value, &["model", "provider"]).unwrap_or_default(),
+        model_base_url: lookup_yaml_string(value, &["model", "base_url"]).unwrap_or_default(),
+        context_engine: lookup_yaml_string(value, &["context", "engine"]).unwrap_or_default(),
+        terminal_backend: lookup_yaml_string(value, &["terminal", "backend"]).unwrap_or_default(),
+        terminal_cwd: lookup_yaml_string(value, &["terminal", "cwd"]).unwrap_or_default(),
+        personality: lookup_yaml_string(value, &["display", "personality"]).unwrap_or_default(),
+        streaming_enabled: lookup_yaml_bool(value, &["display", "streaming"])
+            .or_else(|| lookup_yaml_bool(value, &["streaming", "enabled"]))
+            .unwrap_or(false),
+        memory_enabled: lookup_yaml_bool(value, &["memory", "memory_enabled"]).unwrap_or(false),
+        user_profile_enabled: lookup_yaml_bool(value, &["memory", "user_profile_enabled"])
+            .unwrap_or(false),
+        memory_provider: lookup_yaml_string(value, &["memory", "provider"]).unwrap_or_default(),
+        memory_char_limit: lookup_yaml_i64(value, &["memory", "memory_char_limit"]),
+        user_char_limit: lookup_yaml_i64(value, &["memory", "user_char_limit"]),
+        toolsets: lookup_yaml_array(value, &["toolsets"]),
+        platform_toolsets: lookup_platform_toolsets(value),
+        skills_external_dirs: lookup_yaml_array(value, &["skills", "external_dirs"]),
+        discord_require_mention: lookup_yaml_bool(value, &["discord", "require_mention"])
+            .unwrap_or(false),
+        discord_free_response_channels: lookup_yaml_string(
+            value,
+            &["discord", "free_response_channels"],
+        )
+        .unwrap_or_default(),
+        discord_allowed_channels: lookup_yaml_string(value, &["discord", "allowed_channels"])
+            .unwrap_or_default(),
+        discord_auto_thread: lookup_yaml_bool(value, &["discord", "auto_thread"]).unwrap_or(false),
+        discord_reactions: lookup_yaml_bool(value, &["discord", "reactions"]).unwrap_or(false),
+        approvals_mode: lookup_yaml_string(value, &["approvals", "mode"]).unwrap_or_default(),
+        approvals_timeout: lookup_yaml_i64(value, &["approvals", "timeout"]),
+    }
+}
+
+fn build_gateway_workspace(value: &Value, env_file: &str) -> GatewayWorkspace {
+    let env = env_map(env_file);
+    let reset_triggers = lookup_yaml_array(value, &["reset_triggers"]);
+
+    GatewayWorkspace {
+        hermes_gateway_token: lookup_env_string(&env, "HERMES_GATEWAY_TOKEN"),
+        always_log_local: lookup_yaml_bool(value, &["always_log_local"]).unwrap_or(true),
+        stt_enabled: lookup_yaml_bool(value, &["stt", "enabled"]).unwrap_or(true),
+        group_sessions_per_user: lookup_yaml_bool(value, &["group_sessions_per_user"])
+            .unwrap_or(true),
+        thread_sessions_per_user: lookup_yaml_bool(value, &["thread_sessions_per_user"])
+            .unwrap_or(false),
+        unauthorized_dm_behavior: lookup_yaml_string(value, &["unauthorized_dm_behavior"])
+            .unwrap_or_else(|| "pair".into()),
+        reset_triggers: if reset_triggers.is_empty() {
+            vec!["/new".into(), "/reset".into()]
+        } else {
+            reset_triggers
+        },
+        session_reset_mode: lookup_yaml_string(value, &["session_reset", "mode"])
+            .unwrap_or_else(|| "both".into()),
+        session_reset_at_hour: lookup_yaml_i64(value, &["session_reset", "at_hour"]).or(Some(4)),
+        session_reset_idle_minutes: lookup_yaml_i64(value, &["session_reset", "idle_minutes"])
+            .or(Some(1440)),
+        session_reset_notify: lookup_yaml_bool(value, &["session_reset", "notify"]).unwrap_or(true),
+    }
+}
+
+pub fn write_structured_config(
+    home: &HermesHome,
+    workspace: &ConfigWorkspace,
+) -> AppResult<ConfigDocuments> {
+    let current = read_text_file(&home.config_yaml)?;
+    let mut value = if current.trim().is_empty() {
+        Value::Mapping(Default::default())
+    } else {
+        serde_yaml::from_str::<Value>(&current)?
+    };
+
+    set_yaml_string(&mut value, &["model", "default"], &workspace.model_default);
+    set_yaml_string(
+        &mut value,
+        &["model", "provider"],
+        &workspace.model_provider,
+    );
+    set_yaml_string(
+        &mut value,
+        &["model", "base_url"],
+        &workspace.model_base_url,
+    );
+    set_yaml_string(
+        &mut value,
+        &["context", "engine"],
+        &workspace.context_engine,
+    );
+    set_yaml_string(
+        &mut value,
+        &["terminal", "backend"],
+        &workspace.terminal_backend,
+    );
+    set_yaml_string(&mut value, &["terminal", "cwd"], &workspace.terminal_cwd);
+    set_yaml_string(
+        &mut value,
+        &["display", "personality"],
+        &workspace.personality,
+    );
+    set_yaml_bool(
+        &mut value,
+        &["display", "streaming"],
+        workspace.streaming_enabled,
+    );
+    set_yaml_bool(
+        &mut value,
+        &["streaming", "enabled"],
+        workspace.streaming_enabled,
+    );
+    set_yaml_bool(
+        &mut value,
+        &["memory", "memory_enabled"],
+        workspace.memory_enabled,
+    );
+    set_yaml_bool(
+        &mut value,
+        &["memory", "user_profile_enabled"],
+        workspace.user_profile_enabled,
+    );
+    set_yaml_string(
+        &mut value,
+        &["memory", "provider"],
+        &workspace.memory_provider,
+    );
+    set_yaml_optional_i64(
+        &mut value,
+        &["memory", "memory_char_limit"],
+        workspace.memory_char_limit,
+    );
+    set_yaml_optional_i64(
+        &mut value,
+        &["memory", "user_char_limit"],
+        workspace.user_char_limit,
+    );
+    set_yaml_string_array(&mut value, &["toolsets"], &workspace.toolsets);
+    set_yaml_string_array(
+        &mut value,
+        &["skills", "external_dirs"],
+        &workspace.skills_external_dirs,
+    );
+    set_yaml_bool(
+        &mut value,
+        &["discord", "require_mention"],
+        workspace.discord_require_mention,
+    );
+    set_yaml_string(
+        &mut value,
+        &["discord", "free_response_channels"],
+        &workspace.discord_free_response_channels,
+    );
+    set_yaml_string(
+        &mut value,
+        &["discord", "allowed_channels"],
+        &workspace.discord_allowed_channels,
+    );
+    set_yaml_bool(
+        &mut value,
+        &["discord", "auto_thread"],
+        workspace.discord_auto_thread,
+    );
+    set_yaml_bool(
+        &mut value,
+        &["discord", "reactions"],
+        workspace.discord_reactions,
+    );
+    set_yaml_string(
+        &mut value,
+        &["approvals", "mode"],
+        &workspace.approvals_mode,
+    );
+    set_yaml_optional_i64(
+        &mut value,
+        &["approvals", "timeout"],
+        workspace.approvals_timeout,
+    );
+    set_platform_toolsets(&mut value, &workspace.platform_toolsets);
+
+    let content = serde_yaml::to_string(&value)?;
+    fs::write(&home.config_yaml, content)?;
+    read_config_documents(home)
+}
+
+pub fn write_structured_gateway(
+    home: &HermesHome,
+    workspace: &GatewayWorkspace,
+) -> AppResult<ConfigDocuments> {
+    let current = read_text_file(&home.config_yaml)?;
+    let mut value = if current.trim().is_empty() {
+        Value::Mapping(Default::default())
+    } else {
+        serde_yaml::from_str::<Value>(&current)?
+    };
+
+    let dm_behavior = match workspace.unauthorized_dm_behavior.trim() {
+        "ignore" => "ignore",
+        _ => "pair",
+    };
+    let reset_mode = match workspace.session_reset_mode.trim() {
+        "daily" => "daily",
+        "idle" => "idle",
+        "none" => "none",
+        _ => "both",
+    };
+
+    set_yaml_bool(
+        &mut value,
+        &["always_log_local"],
+        workspace.always_log_local,
+    );
+    set_yaml_bool(&mut value, &["stt", "enabled"], workspace.stt_enabled);
+    set_yaml_bool(
+        &mut value,
+        &["group_sessions_per_user"],
+        workspace.group_sessions_per_user,
+    );
+    set_yaml_bool(
+        &mut value,
+        &["thread_sessions_per_user"],
+        workspace.thread_sessions_per_user,
+    );
+    set_yaml_string(&mut value, &["unauthorized_dm_behavior"], dm_behavior);
+    set_yaml_string_array(&mut value, &["reset_triggers"], &workspace.reset_triggers);
+    set_yaml_string(&mut value, &["session_reset", "mode"], reset_mode);
+    set_yaml_optional_i64(
+        &mut value,
+        &["session_reset", "at_hour"],
+        workspace.session_reset_at_hour,
+    );
+    set_yaml_optional_i64(
+        &mut value,
+        &["session_reset", "idle_minutes"],
+        workspace.session_reset_idle_minutes,
+    );
+    set_yaml_bool(
+        &mut value,
+        &["session_reset", "notify"],
+        workspace.session_reset_notify,
+    );
+
+    let content = serde_yaml::to_string(&value)?;
+    fs::write(&home.config_yaml, content)?;
+
+    let current_env = read_text_file(&home.env_file)?;
+    let mut env_workspace = build_env_workspace(&current_env);
+    env_workspace.hermes_gateway_token = workspace.hermes_gateway_token.trim().to_string();
+    let env_content = serialize_env_file(&current_env, &env_workspace);
+    fs::write(&home.env_file, env_content)?;
+
+    read_config_documents(home)
+}
+
+pub fn write_structured_env(
+    home: &HermesHome,
+    workspace: &EnvWorkspace,
+) -> AppResult<ConfigDocuments> {
+    let current = read_text_file(&home.env_file)?;
+    let content = serialize_env_file(&current, workspace);
+    fs::write(&home.env_file, content)?;
+    read_config_documents(home)
+}
+
+fn build_env_workspace(content: &str) -> EnvWorkspace {
+    let map = env_map(content);
+
+    EnvWorkspace {
+        openai_api_key: lookup_env_string(&map, "OPENAI_API_KEY"),
+        openrouter_api_key: lookup_env_string(&map, "OPENROUTER_API_KEY"),
+        anthropic_api_key: lookup_env_string(&map, "ANTHROPIC_API_KEY"),
+        google_api_key: lookup_env_string(&map, "GOOGLE_API_KEY"),
+        hf_token: lookup_env_string(&map, "HF_TOKEN"),
+        anyrouter_2_api_key: lookup_env_string(&map, "ANYROUTER_2_API_KEY"),
+        crs_api_key: lookup_env_string(&map, "CRS_API_KEY"),
+        siliconflow_api_key: lookup_env_string(&map, "SILICONFLOW_API_KEY"),
+        hermes_gateway_token: lookup_env_string(&map, "HERMES_GATEWAY_TOKEN"),
+        telegram_bot_token: lookup_env_string(&map, "TELEGRAM_BOT_TOKEN"),
+        telegram_home_channel: lookup_env_string(&map, "TELEGRAM_HOME_CHANNEL"),
+        telegram_reply_to_mode: lookup_env_string(&map, "TELEGRAM_REPLY_TO_MODE"),
+        discord_bot_token: lookup_env_string(&map, "DISCORD_BOT_TOKEN"),
+        discord_home_channel: lookup_env_string(&map, "DISCORD_HOME_CHANNEL"),
+        discord_reply_to_mode: lookup_env_string(&map, "DISCORD_REPLY_TO_MODE"),
+        slack_bot_token: lookup_env_string(&map, "SLACK_BOT_TOKEN"),
+        whatsapp_enabled: lookup_env_bool(&map, "WHATSAPP_ENABLED"),
+        terminal_modal_image: lookup_env_string(&map, "TERMINAL_MODAL_IMAGE"),
+        terminal_timeout: lookup_env_i64(&map, "TERMINAL_TIMEOUT"),
+        terminal_lifetime_seconds: lookup_env_i64(&map, "TERMINAL_LIFETIME_SECONDS"),
+        browser_session_timeout: lookup_env_i64(&map, "BROWSER_SESSION_TIMEOUT"),
+        browser_inactivity_timeout: lookup_env_i64(&map, "BROWSER_INACTIVITY_TIMEOUT"),
+    }
+}
+
+fn env_map(content: &str) -> BTreeMap<String, String> {
+    parse_env_lines(content)
+        .into_iter()
+        .filter_map(|line| match line {
+            EnvLine::Entry { key, value, .. } => Some((key, value)),
+            EnvLine::Raw(_) => None,
+        })
+        .collect()
+}
+
+fn parse_env_lines(content: &str) -> Vec<EnvLine> {
+    let assignment = Regex::new(r"^(?:export\s+)?(?P<key>[A-Za-z_][A-Za-z0-9_]*)=(?P<value>.*)$")
+        .expect(".env 正则应可编译");
+
+    content
+        .lines()
+        .map(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                return EnvLine::Raw(line.to_string());
+            }
+
+            let Some(captures) = assignment.captures(trimmed) else {
+                return EnvLine::Raw(line.to_string());
+            };
+
+            let key = captures
+                .name("key")
+                .map(|value| value.as_str().to_string())
+                .unwrap_or_default();
+            let value = captures
+                .name("value")
+                .map(|value| parse_env_value(value.as_str()))
+                .unwrap_or_default();
+
+            EnvLine::Entry {
+                key,
+                value,
+                raw: line.to_string(),
+            }
+        })
+        .collect()
+}
+
+fn parse_env_value(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    if trimmed.len() >= 2
+        && ((trimmed.starts_with('"') && trimmed.ends_with('"'))
+            || (trimmed.starts_with('\'') && trimmed.ends_with('\'')))
+    {
+        return unquote_env_value(&trimmed[1..trimmed.len() - 1]);
+    }
+
+    trimmed
+        .split(" #")
+        .next()
+        .unwrap_or(trimmed)
+        .trim()
+        .to_string()
+}
+
+fn unquote_env_value(raw: &str) -> String {
+    raw.replace("\\n", "\n")
+        .replace("\\r", "\r")
+        .replace("\\t", "\t")
+        .replace("\\\"", "\"")
+        .replace("\\\\", "\\")
+}
+
+fn lookup_env_string(map: &BTreeMap<String, String>, key: &str) -> String {
+    map.get(key)
+        .map(|value| value.trim().to_string())
+        .unwrap_or_default()
+}
+
+fn lookup_env_bool(map: &BTreeMap<String, String>, key: &str) -> bool {
+    matches!(
+        map.get(key)
+            .map(|value| value.trim().to_ascii_lowercase())
+            .as_deref(),
+        Some("1" | "true" | "yes" | "on")
+    )
+}
+
+fn lookup_env_i64(map: &BTreeMap<String, String>, key: &str) -> Option<i64> {
+    map.get(key)
+        .and_then(|value| value.trim().parse::<i64>().ok())
+}
+
+fn serialize_env_file(current: &str, workspace: &EnvWorkspace) -> String {
+    let managed = managed_env_entries(workspace);
+    let managed_map = managed
+        .iter()
+        .map(|(key, value)| ((*key).to_string(), value.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let mut handled = BTreeSet::new();
+    let mut lines = Vec::new();
+
+    for line in parse_env_lines(current) {
+        match line {
+            EnvLine::Raw(raw) => lines.push(raw),
+            EnvLine::Entry { key, raw, .. } => {
+                if let Some(value) = managed_map.get(&key) {
+                    handled.insert(key.clone());
+                    if let Some(value) = value {
+                        lines.push(format_env_assignment(&key, value));
+                    }
+                } else {
+                    lines.push(raw);
+                }
+            }
+        }
+    }
+
+    let missing = managed
+        .into_iter()
+        .filter(|(key, value)| value.is_some() && !handled.contains(*key))
+        .map(|(key, value)| format_env_assignment(key, &value.unwrap_or_default()))
+        .collect::<Vec<_>>();
+
+    if !missing.is_empty() {
+        if lines.last().is_some_and(|line| !line.trim().is_empty()) {
+            lines.push(String::new());
+        }
+        lines.extend(missing);
+    }
+
+    if lines.is_empty() {
+        return String::new();
+    }
+
+    let mut serialized = lines.join("\n");
+    if !serialized.ends_with('\n') {
+        serialized.push('\n');
+    }
+    serialized
+}
+
+fn managed_env_entries(workspace: &EnvWorkspace) -> Vec<(&'static str, Option<String>)> {
+    vec![
+        (
+            "OPENAI_API_KEY",
+            optional_env_string(&workspace.openai_api_key),
+        ),
+        (
+            "OPENROUTER_API_KEY",
+            optional_env_string(&workspace.openrouter_api_key),
+        ),
+        (
+            "ANTHROPIC_API_KEY",
+            optional_env_string(&workspace.anthropic_api_key),
+        ),
+        (
+            "GOOGLE_API_KEY",
+            optional_env_string(&workspace.google_api_key),
+        ),
+        ("HF_TOKEN", optional_env_string(&workspace.hf_token)),
+        (
+            "ANYROUTER_2_API_KEY",
+            optional_env_string(&workspace.anyrouter_2_api_key),
+        ),
+        ("CRS_API_KEY", optional_env_string(&workspace.crs_api_key)),
+        (
+            "SILICONFLOW_API_KEY",
+            optional_env_string(&workspace.siliconflow_api_key),
+        ),
+        (
+            "HERMES_GATEWAY_TOKEN",
+            optional_env_string(&workspace.hermes_gateway_token),
+        ),
+        (
+            "TELEGRAM_BOT_TOKEN",
+            optional_env_string(&workspace.telegram_bot_token),
+        ),
+        (
+            "TELEGRAM_HOME_CHANNEL",
+            optional_env_string(&workspace.telegram_home_channel),
+        ),
+        (
+            "TELEGRAM_REPLY_TO_MODE",
+            optional_env_string(&workspace.telegram_reply_to_mode),
+        ),
+        (
+            "DISCORD_BOT_TOKEN",
+            optional_env_string(&workspace.discord_bot_token),
+        ),
+        (
+            "DISCORD_HOME_CHANNEL",
+            optional_env_string(&workspace.discord_home_channel),
+        ),
+        (
+            "DISCORD_REPLY_TO_MODE",
+            optional_env_string(&workspace.discord_reply_to_mode),
+        ),
+        (
+            "SLACK_BOT_TOKEN",
+            optional_env_string(&workspace.slack_bot_token),
+        ),
+        (
+            "WHATSAPP_ENABLED",
+            Some(workspace.whatsapp_enabled.to_string()),
+        ),
+        (
+            "TERMINAL_MODAL_IMAGE",
+            optional_env_string(&workspace.terminal_modal_image),
+        ),
+        (
+            "TERMINAL_TIMEOUT",
+            workspace.terminal_timeout.map(|value| value.to_string()),
+        ),
+        (
+            "TERMINAL_LIFETIME_SECONDS",
+            workspace
+                .terminal_lifetime_seconds
+                .map(|value| value.to_string()),
+        ),
+        (
+            "BROWSER_SESSION_TIMEOUT",
+            workspace
+                .browser_session_timeout
+                .map(|value| value.to_string()),
+        ),
+        (
+            "BROWSER_INACTIVITY_TIMEOUT",
+            workspace
+                .browser_inactivity_timeout
+                .map(|value| value.to_string()),
+        ),
+    ]
+}
+
+fn optional_env_string(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+fn format_env_assignment(key: &str, value: &str) -> String {
+    let needs_quotes = value.is_empty()
+        || value
+            .chars()
+            .any(|ch| ch.is_whitespace() || matches!(ch, '#' | '"' | '\\'));
+
+    if needs_quotes {
+        let escaped = value
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n")
+            .replace('\r', "\\r")
+            .replace('\t', "\\t");
+        format!(r#"{key}="{escaped}""#)
+    } else {
+        format!("{key}={value}")
+    }
+}
+
+fn build_plugin_catalog(
+    home: &HermesHome,
+    runtime: &PluginRuntimeSnapshot,
+) -> Vec<PluginCatalogItem> {
+    let Some(root) = plugin_catalog_root(home) else {
+        return Vec::new();
+    };
+
+    let installed = plugin_installed_aliases(runtime);
+    let mut items = WalkDir::new(&root)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry.file_type().is_file() && entry.file_name() == OsString::from("plugin.yaml")
+        })
+        .filter_map(|entry| parse_plugin_catalog_item(&root, entry.path(), &installed).ok())
+        .collect::<Vec<_>>();
+
+    items.sort_by(|left, right| {
+        right
+            .installed
+            .cmp(&left.installed)
+            .then_with(|| left.category.cmp(&right.category))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    items
+}
+
+fn plugin_catalog_root(home: &HermesHome) -> Option<PathBuf> {
+    let mut candidates = vec![home.root.join("hermes-agent").join("plugins")];
+    if let Ok(default_root) = resolve_default_hermes_root(None) {
+        candidates.push(default_root.join("hermes-agent").join("plugins"));
+    }
+
+    candidates
+        .into_iter()
+        .find(|candidate| candidate.exists() && candidate.is_dir())
+}
+
+fn plugin_installed_aliases(runtime: &PluginRuntimeSnapshot) -> BTreeSet<String> {
+    let mut aliases = BTreeSet::new();
+    for item in &runtime.items {
+        add_plugin_aliases(&mut aliases, item);
+    }
+    aliases
+}
+
+fn add_plugin_aliases(aliases: &mut BTreeSet<String>, value: &str) {
+    let normalized = value.trim().replace('\\', "/").to_ascii_lowercase();
+    if normalized.is_empty() {
+        return;
+    }
+
+    aliases.insert(normalized.clone());
+    if let Some(last_segment) = normalized.rsplit('/').next() {
+        aliases.insert(last_segment.to_string());
+    }
+}
+
+fn parse_plugin_catalog_item(
+    root: &Path,
+    manifest_path: &Path,
+    installed_aliases: &BTreeSet<String>,
+) -> AppResult<PluginCatalogItem> {
+    let manifest: RawPluginManifest = serde_yaml::from_str(&read_text_file(manifest_path)?)?;
+    let directory = manifest_path
+        .parent()
+        .ok_or_else(|| AppError::Message("plugin.yaml 缺少父目录".into()))?;
+    let relative_path = directory
+        .strip_prefix(root)
+        .unwrap_or(directory)
+        .to_string_lossy()
+        .replace('\\', "/");
+    let category = relative_path
+        .split('/')
+        .next()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("uncategorized")
+        .to_string();
+    let fallback_name = directory
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("unknown-plugin");
+    let name = manifest
+        .name
+        .unwrap_or_else(|| fallback_name.to_string())
+        .trim()
+        .to_string();
+    let mut aliases = BTreeSet::new();
+    add_plugin_aliases(&mut aliases, &name);
+    add_plugin_aliases(&mut aliases, &relative_path);
+    add_plugin_aliases(&mut aliases, &format!("{category}/{name}"));
+    let installed = aliases
+        .iter()
+        .any(|alias| installed_aliases.contains(alias.as_str()));
+
+    Ok(PluginCatalogItem {
+        name,
+        category,
+        relative_path,
+        directory_path: directory.display().to_string(),
+        description: manifest.description.unwrap_or_default().trim().to_string(),
+        requires_env: manifest.requires_env.unwrap_or_default(),
+        pip_dependencies: manifest.pip_dependencies.unwrap_or_default(),
+        external_dependencies: manifest
+            .external_dependencies
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|item| {
+                let name = item.name.unwrap_or_default().trim().to_string();
+                if name.is_empty() {
+                    return None;
+                }
+                Some(PluginExternalDependency {
+                    name,
+                    install: item.install.unwrap_or_default().trim().to_string(),
+                    check: item.check.unwrap_or_default().trim().to_string(),
+                })
+            })
+            .collect(),
+        installed,
     })
 }
 
@@ -612,6 +1434,64 @@ pub fn list_skills(home: &HermesHome) -> AppResult<Vec<SkillItem>> {
     });
 
     Ok(skills)
+}
+
+pub fn read_skill_file(home: &HermesHome, file_path: &str) -> AppResult<SkillFileDetail> {
+    let path = ensure_skill_file_within_home(home, file_path)?;
+    let content = read_text_file(&path)?;
+    let relative = path
+        .strip_prefix(&home.skills_dir)
+        .unwrap_or(path.as_path())
+        .to_string_lossy()
+        .replace('\\', "/");
+    let meta = parse_skill_frontmatter(&content, &relative);
+
+    Ok(SkillFileDetail {
+        category: meta.category,
+        content,
+        file_path: path.display().to_string(),
+        name: meta.name,
+        relative_path: meta.relative_path,
+    })
+}
+
+pub fn write_skill_file(
+    home: &HermesHome,
+    file_path: &str,
+    content: &str,
+) -> AppResult<SkillFileDetail> {
+    let path = ensure_skill_file_within_home(home, file_path)?;
+    fs::write(&path, content)?;
+    read_skill_file(home, &path.display().to_string())
+}
+
+pub fn create_skill_file(
+    home: &HermesHome,
+    request: &SkillCreateRequest,
+) -> AppResult<SkillFileDetail> {
+    let category = normalize_skill_segment(&request.category, "custom");
+    let slug = normalize_skill_segment(&request.name, "new-skill");
+    let directory = home.skills_dir.join(&category).join(&slug);
+    let file_path = directory.join("SKILL.md");
+
+    if file_path.exists() && !request.overwrite {
+        return Err(AppError::Message(format!(
+            "技能已存在：{}/{}",
+            category, slug
+        )));
+    }
+
+    fs::create_dir_all(&directory)?;
+    fs::write(
+        &file_path,
+        build_skill_markdown(
+            request.name.trim(),
+            request.description.trim(),
+            request.content.trim(),
+        ),
+    )?;
+
+    read_skill_file(home, &file_path.display().to_string())
 }
 
 pub fn get_session_detail(db_path: &Path, session_id: &str) -> AppResult<SessionDetail> {
@@ -1480,6 +2360,103 @@ fn lookup_yaml_array(root: &Value, path: &[&str]) -> Vec<String> {
         .collect()
 }
 
+fn lookup_platform_toolsets(root: &Value) -> Vec<PlatformToolsetBinding> {
+    root.get("platform_toolsets")
+        .and_then(Value::as_mapping)
+        .into_iter()
+        .flatten()
+        .filter_map(|(key, value)| {
+            let platform = key.as_str()?.trim().to_string();
+            if platform.is_empty() {
+                return None;
+            }
+            Some(PlatformToolsetBinding {
+                platform,
+                toolsets: value
+                    .as_sequence()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(ToString::to_string)
+                    .collect(),
+            })
+        })
+        .collect()
+}
+
+fn set_yaml_value(root: &mut Value, path: &[&str], value: Value) {
+    if path.is_empty() {
+        *root = value;
+        return;
+    }
+
+    let mut current = root;
+    for segment in &path[..path.len() - 1] {
+        let key = Value::String((*segment).to_string());
+        let mapping = current.as_mapping_mut().expect("YAML 根节点必须是 mapping");
+        let entry = mapping
+            .entry(key)
+            .or_insert_with(|| Value::Mapping(Default::default()));
+        if !matches!(entry, Value::Mapping(_)) {
+            *entry = Value::Mapping(Default::default());
+        }
+        current = entry;
+    }
+
+    if let Some(mapping) = current.as_mapping_mut() {
+        mapping.insert(Value::String(path[path.len() - 1].to_string()), value);
+    }
+}
+
+fn set_yaml_string(root: &mut Value, path: &[&str], value: &str) {
+    set_yaml_value(root, path, Value::String(value.trim().to_string()));
+}
+
+fn set_yaml_bool(root: &mut Value, path: &[&str], value: bool) {
+    set_yaml_value(root, path, Value::Bool(value));
+}
+
+fn set_yaml_optional_i64(root: &mut Value, path: &[&str], value: Option<i64>) {
+    let yaml_value = value
+        .map(|item| Value::Number(item.into()))
+        .unwrap_or(Value::Null);
+    set_yaml_value(root, path, yaml_value);
+}
+
+fn set_yaml_string_array(root: &mut Value, path: &[&str], values: &[String]) {
+    let sequence = values
+        .iter()
+        .map(|item| item.trim())
+        .filter(|item| !item.is_empty())
+        .map(|item| Value::String(item.to_string()))
+        .collect();
+    set_yaml_value(root, path, Value::Sequence(sequence));
+}
+
+fn set_platform_toolsets(root: &mut Value, bindings: &[PlatformToolsetBinding]) {
+    let mapping = bindings
+        .iter()
+        .filter_map(|binding| {
+            let platform = binding.platform.trim();
+            if platform.is_empty() {
+                return None;
+            }
+            let toolsets = binding
+                .toolsets
+                .iter()
+                .map(|item| item.trim())
+                .filter(|item| !item.is_empty())
+                .map(|item| Value::String(item.to_string()))
+                .collect::<Vec<_>>();
+            Some((
+                Value::String(platform.to_string()),
+                Value::Sequence(toolsets),
+            ))
+        })
+        .collect();
+    set_yaml_value(root, &["platform_toolsets"], Value::Mapping(mapping));
+}
+
 fn extract_markdown_preview(markdown: &str) -> String {
     markdown
         .lines()
@@ -1500,6 +2477,73 @@ fn extract_markdown_preview(markdown: &str) -> String {
         .take(2)
         .collect::<Vec<_>>()
         .join(" · ")
+}
+
+fn normalize_skill_segment(value: &str, fallback: &str) -> String {
+    let normalized = value
+        .trim()
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .split('-')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+
+    if normalized.is_empty() {
+        fallback.to_string()
+    } else {
+        normalized
+    }
+}
+
+fn build_skill_markdown(name: &str, description: &str, body: &str) -> String {
+    let fallback_body = format!(
+        "# {}\n\n## 目标\n\n在这里描述这个 skill 解决的问题。\n\n## 用法\n\n补充你的执行步骤、约束和示例。\n",
+        name
+    );
+    let content = if body.is_empty() {
+        fallback_body
+    } else {
+        body.to_string()
+    };
+
+    format!(
+        "---\nname: {}\ndescription: {}\n---\n\n{}\n",
+        name.trim(),
+        description.trim(),
+        content.trim()
+    )
+}
+
+fn ensure_skill_file_within_home(home: &HermesHome, file_path: &str) -> AppResult<PathBuf> {
+    let candidate = PathBuf::from(file_path);
+    let resolved = if candidate.is_absolute() {
+        candidate
+    } else {
+        home.skills_dir.join(candidate)
+    };
+
+    if resolved.file_name() != Some(std::ffi::OsStr::new("SKILL.md")) {
+        return Err(AppError::Message("技能文件必须是 SKILL.md".into()));
+    }
+
+    let skills_root =
+        fs::canonicalize(&home.skills_dir).unwrap_or_else(|_| home.skills_dir.clone());
+    let canonical = fs::canonicalize(&resolved)?;
+    if !canonical.starts_with(&skills_root) {
+        return Err(AppError::Message(
+            "只能读取或保存 Hermes skills 目录内的文件".into(),
+        ));
+    }
+
+    Ok(canonical)
 }
 
 fn memory_path_for_key(home: &HermesHome, key: &str) -> AppResult<(String, PathBuf)> {
@@ -1538,6 +2582,17 @@ fn command_result_from_output(
     }
 }
 
+fn build_shell_display_command(command: &str, working_directory: Option<&Path>) -> String {
+    match working_directory {
+        Some(path) => format!(
+            "cd {} && {}",
+            shell_quote(&path.display().to_string()),
+            command.trim()
+        ),
+        None => command.trim().to_string(),
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn run_process_with_tty(hermes: &Path, command_args: &[String]) -> AppResult<Output> {
     Command::new("script")
@@ -1563,7 +2618,6 @@ fn run_process_with_tty(hermes: &Path, command_args: &[String]) -> AppResult<Out
         .map_err(AppError::from)
 }
 
-#[cfg(not(target_os = "macos"))]
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', r"'\''"))
 }
@@ -1919,21 +2973,25 @@ mod tests {
     use tempfile::tempdir;
 
     use crate::models::{
-        CronCreateRequest, CronDeleteRequest, CronUpdateRequest, ProfileAliasCreateRequest,
+        ConfigWorkspace, CronCreateRequest, CronDeleteRequest, CronUpdateRequest, EnvWorkspace,
+        GatewayWorkspace, PlatformToolsetBinding, PluginRuntimeSnapshot, ProfileAliasCreateRequest,
         ProfileAliasDeleteRequest, ProfileCreateRequest, ProfileDeleteRequest,
-        ProfileExportRequest, ProfileImportRequest, ProfileRenameRequest,
+        ProfileExportRequest, ProfileImportRequest, ProfileRenameRequest, SkillCreateRequest,
     };
 
     use super::{
         build_config_summary, build_cron_create_args, build_cron_delete_args,
-        build_cron_update_args, build_plugin_action_args, build_profile_alias_create_args,
-        build_profile_alias_delete_args, build_profile_create_args, build_profile_delete_args,
-        build_profile_export_args, build_profile_import_args, build_profile_rename_args,
-        build_tool_action_args, compose_hermes_command_args, get_active_profile,
-        list_profile_aliases, list_profiles, load_recent_sessions, parse_memory_runtime,
-        parse_plugin_runtime, parse_runtime_skills, parse_skill_frontmatter, parse_tool_inventory,
-        parse_tool_inventory_line, parse_tool_summary, read_cron_jobs, read_gateway_state,
-        resolve_hermes_home, set_active_profile,
+        build_cron_update_args, build_plugin_action_args, build_plugin_catalog,
+        build_profile_alias_create_args, build_profile_alias_delete_args,
+        build_profile_create_args, build_profile_delete_args, build_profile_export_args,
+        build_profile_import_args, build_profile_rename_args, build_skill_action_args,
+        build_tool_action_args, compose_hermes_command_args, create_skill_file, get_active_profile,
+        installation_action_command, list_profile_aliases, list_profiles, load_recent_sessions,
+        parse_memory_runtime, parse_plugin_runtime, parse_runtime_skills,
+        parse_skill_frontmatter, parse_tool_inventory, parse_tool_inventory_line,
+        parse_tool_summary, read_config_documents, read_cron_jobs, read_gateway_state,
+        resolve_hermes_home, set_active_profile, write_structured_config, write_structured_env,
+        write_structured_gateway, InstallationActionCommand, QUICK_INSTALL_COMMAND,
     };
 
     #[test]
@@ -2185,6 +3243,26 @@ description: 管理 GitHub 认证
     }
 
     #[test]
+    fn maps_installation_actions_to_supported_commands() {
+        assert_eq!(
+            installation_action_command("install").expect("install 应映射成功"),
+            InstallationActionCommand::Shell(QUICK_INSTALL_COMMAND.to_string())
+        );
+        assert_eq!(
+            installation_action_command("update").expect("update 应映射成功"),
+            InstallationActionCommand::Hermes(vec!["update".to_string()])
+        );
+        assert_eq!(
+            installation_action_command("uninstall").expect("uninstall 应映射成功"),
+            InstallationActionCommand::Hermes(vec![
+                "uninstall".to_string(),
+                "--yes".to_string()
+            ])
+        );
+        assert!(installation_action_command("unknown").is_err());
+    }
+
+    #[test]
     fn parses_memory_fields_from_config_summary() {
         let yaml = r#"
 memory:
@@ -2214,6 +3292,316 @@ toolsets:
         assert_eq!(summary.streaming_enabled, Some(true));
         assert_eq!(summary.terminal_backend.as_deref(), Some("docker"));
         assert_eq!(summary.toolsets, vec!["hermes-cli"]);
+    }
+
+    #[test]
+    fn reads_config_documents_with_workspace_projection() {
+        let temp = tempdir().expect("创建临时目录失败");
+        let root = temp.path().join(".hermes");
+        seed_profile_root(&root, "gpt-5.4");
+        fs::write(
+            root.join("config.yaml"),
+            r#"
+model:
+  default: gpt-5.4
+  provider: custom
+  base_url: https://example.com/v1
+toolsets:
+  - hermes-cli
+context:
+  engine: compressor
+memory:
+  memory_enabled: true
+  user_profile_enabled: true
+  provider: byterover
+  memory_char_limit: 2200
+  user_char_limit: 1375
+always_log_local: false
+group_sessions_per_user: false
+thread_sessions_per_user: true
+unauthorized_dm_behavior: ignore
+reset_triggers:
+  - /fresh
+  - /clear
+session_reset:
+  mode: idle
+  at_hour: 6
+  idle_minutes: 90
+  notify: false
+stt:
+  enabled: false
+discord:
+  require_mention: true
+  free_response_channels: "dev,ops"
+  allowed_channels: "dev"
+  auto_thread: true
+  reactions: false
+approvals:
+  mode: manual
+  timeout: 90
+skills:
+  external_dirs:
+    - /tmp/skills-a
+platform_toolsets:
+  discord:
+    - hermes-discord
+"#,
+        )
+        .expect("写入 config.yaml 失败");
+        fs::write(
+            root.join(".env"),
+            "OPENAI_API_KEY=test\nHERMES_GATEWAY_TOKEN=gw-read\n",
+        )
+        .expect("写入 .env 失败");
+
+        let home =
+            resolve_hermes_home(Some("default"), Some(&root)).expect("解析 Hermes Home 失败");
+        let documents = read_config_documents(&home).expect("读取配置文档失败");
+
+        assert_eq!(documents.workspace.model_default, "gpt-5.4");
+        assert_eq!(documents.env_workspace.openai_api_key, "test");
+        assert_eq!(documents.workspace.model_provider, "custom");
+        assert_eq!(documents.workspace.model_base_url, "https://example.com/v1");
+        assert_eq!(documents.workspace.toolsets, vec!["hermes-cli"]);
+        assert_eq!(
+            documents.workspace.skills_external_dirs,
+            vec!["/tmp/skills-a"]
+        );
+        assert_eq!(
+            documents.workspace.discord_free_response_channels,
+            "dev,ops"
+        );
+        assert_eq!(documents.workspace.approvals_timeout, Some(90));
+        assert_eq!(documents.workspace.platform_toolsets.len(), 1);
+        assert_eq!(documents.workspace.platform_toolsets[0].platform, "discord");
+        assert_eq!(documents.gateway_workspace.hermes_gateway_token, "gw-read");
+        assert!(!documents.gateway_workspace.always_log_local);
+        assert!(!documents.gateway_workspace.stt_enabled);
+        assert!(!documents.gateway_workspace.group_sessions_per_user);
+        assert!(documents.gateway_workspace.thread_sessions_per_user);
+        assert_eq!(
+            documents.gateway_workspace.unauthorized_dm_behavior,
+            "ignore"
+        );
+        assert_eq!(
+            documents.gateway_workspace.reset_triggers,
+            vec!["/fresh".to_string(), "/clear".to_string()]
+        );
+        assert_eq!(documents.gateway_workspace.session_reset_mode, "idle");
+        assert_eq!(documents.gateway_workspace.session_reset_at_hour, Some(6));
+        assert_eq!(
+            documents.gateway_workspace.session_reset_idle_minutes,
+            Some(90)
+        );
+        assert!(!documents.gateway_workspace.session_reset_notify);
+    }
+
+    #[test]
+    fn writes_structured_config_back_to_yaml() {
+        let temp = tempdir().expect("创建临时目录失败");
+        let root = temp.path().join(".hermes");
+        seed_profile_root(&root, "gpt-5.4");
+        let home =
+            resolve_hermes_home(Some("default"), Some(&root)).expect("解析 Hermes Home 失败");
+
+        let saved = write_structured_config(
+            &home,
+            &ConfigWorkspace {
+                model_default: "claude-sonnet-4".into(),
+                model_provider: "anthropic".into(),
+                model_base_url: "https://api.example.com/v1".into(),
+                context_engine: "compressor".into(),
+                terminal_backend: "local".into(),
+                terminal_cwd: "/tmp".into(),
+                personality: "technical".into(),
+                streaming_enabled: true,
+                memory_enabled: true,
+                user_profile_enabled: false,
+                memory_provider: "byterover".into(),
+                memory_char_limit: Some(4096),
+                user_char_limit: Some(2048),
+                toolsets: vec!["hermes-cli".into(), "web".into()],
+                platform_toolsets: vec![
+                    PlatformToolsetBinding {
+                        platform: "cli".into(),
+                        toolsets: vec!["hermes-cli".into(), "web".into()],
+                    },
+                    PlatformToolsetBinding {
+                        platform: "discord".into(),
+                        toolsets: vec!["hermes-discord".into()],
+                    },
+                ],
+                skills_external_dirs: vec!["/opt/skills".into()],
+                discord_require_mention: true,
+                discord_free_response_channels: "general".into(),
+                discord_allowed_channels: "general,ops".into(),
+                discord_auto_thread: true,
+                discord_reactions: true,
+                approvals_mode: "manual".into(),
+                approvals_timeout: Some(120),
+            },
+        )
+        .expect("写入结构化配置失败");
+
+        assert_eq!(saved.workspace.model_provider, "anthropic");
+        assert_eq!(saved.workspace.memory_provider, "byterover");
+        assert_eq!(saved.workspace.platform_toolsets.len(), 2);
+
+        let written = fs::read_to_string(root.join("config.yaml")).expect("读取写回 YAML 失败");
+        assert!(written.contains("claude-sonnet-4"));
+        assert!(written.contains("anthropic"));
+        assert!(written.contains("platform_toolsets"));
+        assert!(written.contains("/opt/skills"));
+    }
+
+    #[test]
+    fn writes_structured_env_back_to_env_file() {
+        let temp = tempdir().expect("创建临时目录失败");
+        let root = temp.path().join(".hermes");
+        seed_profile_root(&root, "gpt-5.4");
+        let home =
+            resolve_hermes_home(Some("default"), Some(&root)).expect("解析 Hermes Home 失败");
+
+        let saved = write_structured_env(
+            &home,
+            &EnvWorkspace {
+                openai_api_key: "sk-openai".into(),
+                openrouter_api_key: String::new(),
+                anthropic_api_key: "sk-anthropic".into(),
+                google_api_key: "google-key".into(),
+                hf_token: "hf-token".into(),
+                anyrouter_2_api_key: String::new(),
+                crs_api_key: String::new(),
+                siliconflow_api_key: String::new(),
+                hermes_gateway_token: "gateway-token".into(),
+                telegram_bot_token: "telegram-token".into(),
+                telegram_home_channel: "ops-room".into(),
+                telegram_reply_to_mode: "inline".into(),
+                discord_bot_token: "discord-token".into(),
+                discord_home_channel: "discord-main".into(),
+                discord_reply_to_mode: "thread".into(),
+                slack_bot_token: String::new(),
+                whatsapp_enabled: true,
+                terminal_modal_image: "debian_slim".into(),
+                terminal_timeout: Some(120),
+                terminal_lifetime_seconds: Some(900),
+                browser_session_timeout: Some(600),
+                browser_inactivity_timeout: Some(90),
+            },
+        )
+        .expect("写入结构化 env 失败");
+
+        assert_eq!(saved.env_workspace.openai_api_key, "sk-openai");
+        assert!(saved.env_workspace.whatsapp_enabled);
+        assert_eq!(saved.env_workspace.terminal_timeout, Some(120));
+
+        let written = fs::read_to_string(root.join(".env")).expect("读取写回 .env 失败");
+        assert!(written.contains("OPENAI_API_KEY=sk-openai"));
+        assert!(written.contains("ANTHROPIC_API_KEY=sk-anthropic"));
+        assert!(written.contains("GOOGLE_API_KEY=google-key"));
+        assert!(written.contains("HF_TOKEN=hf-token"));
+        assert!(written.contains("HERMES_GATEWAY_TOKEN=gateway-token"));
+        assert!(written.contains("WHATSAPP_ENABLED=true"));
+        assert!(written.contains("TERMINAL_TIMEOUT=120"));
+        assert!(!written.contains("OPENROUTER_API_KEY"));
+    }
+
+    #[test]
+    fn writes_structured_gateway_back_to_yaml_and_env() {
+        let temp = tempdir().expect("创建临时目录失败");
+        let root = temp.path().join(".hermes");
+        seed_profile_root(&root, "gpt-5.4");
+        let home =
+            resolve_hermes_home(Some("default"), Some(&root)).expect("解析 Hermes Home 失败");
+
+        let saved = write_structured_gateway(
+            &home,
+            &GatewayWorkspace {
+                hermes_gateway_token: "gw-save".into(),
+                always_log_local: false,
+                stt_enabled: false,
+                group_sessions_per_user: false,
+                thread_sessions_per_user: true,
+                unauthorized_dm_behavior: "ignore".into(),
+                reset_triggers: vec!["/fresh".into(), "/clear".into()],
+                session_reset_mode: "daily".into(),
+                session_reset_at_hour: Some(7),
+                session_reset_idle_minutes: Some(180),
+                session_reset_notify: false,
+            },
+        )
+        .expect("写入结构化 gateway 失败");
+
+        assert_eq!(saved.gateway_workspace.hermes_gateway_token, "gw-save");
+        assert!(!saved.gateway_workspace.always_log_local);
+        assert!(!saved.gateway_workspace.group_sessions_per_user);
+        assert!(saved.gateway_workspace.thread_sessions_per_user);
+        assert_eq!(saved.gateway_workspace.session_reset_mode, "daily");
+
+        let written_yaml =
+            fs::read_to_string(root.join("config.yaml")).expect("读取写回 YAML 失败");
+        let written_env = fs::read_to_string(root.join(".env")).expect("读取写回 .env 失败");
+
+        assert!(written_yaml.contains("always_log_local: false"));
+        assert!(written_yaml.contains("group_sessions_per_user: false"));
+        assert!(written_yaml.contains("thread_sessions_per_user: true"));
+        assert!(written_yaml.contains("unauthorized_dm_behavior: ignore"));
+        assert!(written_yaml.contains("mode: daily"));
+        assert!(written_yaml.contains("idle_minutes: 180"));
+        assert!(written_yaml.contains("/fresh"));
+        assert!(written_env.contains("HERMES_GATEWAY_TOKEN=gw-save"));
+    }
+
+    #[test]
+    fn reads_plugin_catalog_from_local_repo_and_marks_installed_plugins() {
+        let temp = tempdir().expect("创建临时目录失败");
+        let root = temp.path().join(".hermes");
+        seed_profile_root(&root, "gpt-5.4");
+        let plugins_root = root.join("hermes-agent").join("plugins").join("memory");
+        fs::create_dir_all(plugins_root.join("byterover")).expect("创建 byterover 目录失败");
+        fs::create_dir_all(plugins_root.join("retaindb")).expect("创建 retaindb 目录失败");
+        fs::write(
+            plugins_root.join("byterover").join("plugin.yaml"),
+            r#"name: byterover
+description: "ByteRover memory"
+external_dependencies:
+  - name: brv
+    install: "curl -fsSL https://byterover.dev/install.sh | sh"
+    check: "brv --version"
+"#,
+        )
+        .expect("写入 byterover plugin.yaml 失败");
+        fs::write(
+            plugins_root.join("retaindb").join("plugin.yaml"),
+            r#"name: retaindb
+description: "RetainDB memory"
+pip_dependencies:
+  - requests
+requires_env:
+  - RETAINDB_API_KEY
+"#,
+        )
+        .expect("写入 retaindb plugin.yaml 失败");
+
+        let home =
+            resolve_hermes_home(Some("default"), Some(&root)).expect("解析 Hermes Home 失败");
+        let catalog = build_plugin_catalog(
+            &home,
+            &PluginRuntimeSnapshot {
+                installed_count: 1,
+                items: vec!["byterover".into()],
+                install_hint: None,
+                raw_output: String::new(),
+            },
+        );
+
+        assert_eq!(catalog.len(), 2);
+        assert_eq!(catalog[0].name, "byterover");
+        assert!(catalog[0].installed);
+        assert_eq!(catalog[0].external_dependencies.len(), 1);
+        assert_eq!(catalog[1].name, "retaindb");
+        assert_eq!(catalog[1].requires_env, vec!["RETAINDB_API_KEY"]);
+        assert_eq!(catalog[1].pip_dependencies, vec!["requests"]);
     }
 
     #[test]
@@ -2298,6 +3686,33 @@ Memory status
     }
 
     #[test]
+    fn creates_local_skill_scaffold_inside_skills_dir() {
+        let temp = tempdir().expect("创建临时目录失败");
+        let root = temp.path().join(".hermes");
+        seed_profile_root(&root, "gpt-5.4");
+        let home =
+            resolve_hermes_home(Some("default"), Some(&root)).expect("解析 Hermes Home 失败");
+
+        let detail = create_skill_file(
+            &home,
+            &SkillCreateRequest {
+                name: "Release Notes".into(),
+                category: "ops automation".into(),
+                description: "生成版本发布说明".into(),
+                content: "## 步骤\n\n1. 收集提交\n2. 总结亮点".into(),
+                overwrite: false,
+            },
+        )
+        .expect("创建技能脚手架失败");
+
+        assert!(detail
+            .file_path
+            .ends_with("skills/ops-automation/release-notes/SKILL.md"));
+        assert!(detail.content.contains("name: Release Notes"));
+        assert!(detail.content.contains("## 步骤"));
+    }
+
+    #[test]
     fn builds_tool_action_args_for_platform_and_names() {
         let args = build_tool_action_args(
             "enable",
@@ -2331,6 +3746,54 @@ Memory status
                 "disable".to_string(),
                 "local/memory-plugin".to_string(),
             ]
+        );
+    }
+
+    #[test]
+    fn builds_plugin_action_args_for_registry_operations() {
+        let args = build_plugin_action_args("install", " nousresearch/byterover ")
+            .expect("构建 plugins install 参数失败");
+
+        assert_eq!(
+            args,
+            vec![
+                "plugins".to_string(),
+                "install".to_string(),
+                "nousresearch/byterover".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn builds_skill_action_args_for_targeted_and_global_commands() {
+        let search_args = build_skill_action_args("search", Some("react release notes"))
+            .expect("构建 skills search 参数失败");
+        let install_args = build_skill_action_args("install", Some("official/security/1password"))
+            .expect("构建 skills install 参数失败");
+        let update_args =
+            build_skill_action_args("update", None).expect("构建 skills update 参数失败");
+
+        assert_eq!(
+            search_args,
+            vec![
+                "skills".to_string(),
+                "search".to_string(),
+                "react".to_string(),
+                "release".to_string(),
+                "notes".to_string(),
+            ]
+        );
+        assert_eq!(
+            install_args,
+            vec![
+                "skills".to_string(),
+                "install".to_string(),
+                "official/security/1password".to_string(),
+            ]
+        );
+        assert_eq!(
+            update_args,
+            vec!["skills".to_string(), "update".to_string()]
         );
     }
 

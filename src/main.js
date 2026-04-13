@@ -5,14 +5,12 @@ import './styles.css';
 import { renderSidebar } from './components/sidebar.js';
 import { renderTopbar } from './components/topbar.js';
 import { SessionsPage } from './pages/SessionsPage';
-import { CronPage } from './pages/CronPage';
 import { createLegacyRoute } from './lib/create-legacy-route';
 import { getPanelState, initializePanelState, subscribePanelState, syncRoute } from './lib/panel-state';
 import { getCurrentRoute, initRouter, registerRoute, setDefaultRoute } from './router.js';
 
 function registerLegacyRoutes() {
   registerRoute('/sessions', createLegacyRoute(SessionsPage, 'sessions'));
-  registerRoute('/cron', createLegacyRoute(CronPage, 'cron'));
 }
 
 function registerNativeRoutes() {
@@ -25,6 +23,7 @@ function registerNativeRoutes() {
   registerRoute('/logs', () => import('./pages/logs.js'));
   registerRoute('/memory', () => import('./pages/memory.js'));
   registerRoute('/diagnostics', () => import('./pages/diagnostics.js'));
+  registerRoute('/cron', () => import('./pages/cron.js'));
 }
 
 function createShell(root) {

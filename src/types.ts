@@ -32,6 +32,76 @@ export interface ConfigSummary {
   streamingEnabled?: boolean | null;
 }
 
+export interface PlatformToolsetBinding {
+  platform: string;
+  toolsets: string[];
+}
+
+export interface ConfigWorkspace {
+  modelDefault: string;
+  modelProvider: string;
+  modelBaseUrl: string;
+  contextEngine: string;
+  terminalBackend: string;
+  terminalCwd: string;
+  personality: string;
+  streamingEnabled: boolean;
+  memoryEnabled: boolean;
+  userProfileEnabled: boolean;
+  memoryProvider: string;
+  memoryCharLimit?: number | null;
+  userCharLimit?: number | null;
+  toolsets: string[];
+  platformToolsets: PlatformToolsetBinding[];
+  skillsExternalDirs: string[];
+  discordRequireMention: boolean;
+  discordFreeResponseChannels: string;
+  discordAllowedChannels: string;
+  discordAutoThread: boolean;
+  discordReactions: boolean;
+  approvalsMode: string;
+  approvalsTimeout?: number | null;
+}
+
+export interface EnvWorkspace {
+  openaiApiKey: string;
+  openrouterApiKey: string;
+  anthropicApiKey: string;
+  googleApiKey: string;
+  hfToken: string;
+  anyrouter2ApiKey: string;
+  crsApiKey: string;
+  siliconflowApiKey: string;
+  hermesGatewayToken: string;
+  telegramBotToken: string;
+  telegramHomeChannel: string;
+  telegramReplyToMode: string;
+  discordBotToken: string;
+  discordHomeChannel: string;
+  discordReplyToMode: string;
+  slackBotToken: string;
+  whatsappEnabled: boolean;
+  terminalModalImage: string;
+  terminalTimeout?: number | null;
+  terminalLifetimeSeconds?: number | null;
+  browserSessionTimeout?: number | null;
+  browserInactivityTimeout?: number | null;
+}
+
+export interface GatewayWorkspace {
+  hermesGatewayToken: string;
+  alwaysLogLocal: boolean;
+  sttEnabled: boolean;
+  groupSessionsPerUser: boolean;
+  threadSessionsPerUser: boolean;
+  unauthorizedDmBehavior: string;
+  resetTriggers: string[];
+  sessionResetMode: string;
+  sessionResetAtHour?: number | null;
+  sessionResetIdleMinutes?: number | null;
+  sessionResetNotify: boolean;
+}
+
 export interface ConfigDocuments {
   hermesHome: string;
   configPath: string;
@@ -39,6 +109,9 @@ export interface ConfigDocuments {
   configYaml: string;
   envFile: string;
   summary: ConfigSummary;
+  workspace: ConfigWorkspace;
+  gatewayWorkspace: GatewayWorkspace;
+  envWorkspace: EnvWorkspace;
 }
 
 export interface NamedCount {
@@ -91,6 +164,24 @@ export interface PluginRuntimeSnapshot {
   rawOutput: string;
 }
 
+export interface PluginExternalDependency {
+  name: string;
+  install: string;
+  check: string;
+}
+
+export interface PluginCatalogItem {
+  name: string;
+  category: string;
+  relativePath: string;
+  directoryPath: string;
+  description: string;
+  requiresEnv: string[];
+  pipDependencies: string[];
+  externalDependencies: PluginExternalDependency[];
+  installed: boolean;
+}
+
 export interface ExtensionsSnapshot {
   profileName: string;
   hermesHome: string;
@@ -103,6 +194,7 @@ export interface ExtensionsSnapshot {
   skillSourceCounts: NamedCount[];
   skillTrustCounts: NamedCount[];
   plugins: PluginRuntimeSnapshot;
+  pluginCatalog: PluginCatalogItem[];
 }
 
 export interface DashboardCounts {
@@ -161,6 +253,27 @@ export interface SkillItem {
   relativePath: string;
   filePath: string;
   preview: string;
+}
+
+export interface SkillFileDetail {
+  name: string;
+  category: string;
+  relativePath: string;
+  filePath: string;
+  content: string;
+}
+
+export interface SkillSaveRequest {
+  filePath: string;
+  content: string;
+}
+
+export interface SkillCreateRequest {
+  name: string;
+  category: string;
+  description: string;
+  content: string;
+  overwrite: boolean;
 }
 
 export interface LogReadResult {

@@ -4,6 +4,9 @@ import type { DiagnosticKind } from './diagnostics';
 import type {
   CommandRunResult,
   ConfigDocuments,
+  ConfigWorkspace,
+  EnvWorkspace,
+  GatewayWorkspace,
   CronCreateRequest,
   CronDeleteRequest,
   CronJobsSnapshot,
@@ -26,7 +29,10 @@ import type {
   ProfilesSnapshot,
   SessionDetail,
   SessionRecord,
+  SkillCreateRequest,
+  SkillFileDetail,
   SkillItem,
+  SkillSaveRequest,
 } from '../types';
 
 const desktopOnlyMessage = '当前页面运行在浏览器预览环境，HermesPanel 的控制能力仅在 Tauri 桌面端可用。请使用 npm run tauri:dev 打开桌面客户端。';
@@ -83,23 +89,39 @@ export const api = {
     call<DashboardSnapshot>('get_dashboard_snapshot', withProfile(profile)),
   getInstallationSnapshot: (profile?: string) =>
     call<InstallationSnapshot>('get_installation_snapshot', withProfile(profile)),
+  runInstallationAction: (action: 'install' | 'update' | 'uninstall') =>
+    call<CommandRunResult>('run_installation_action', { action }),
   getConfigDocuments: (profile?: string) =>
     call<ConfigDocuments>('get_config_documents', withProfile(profile)),
   getExtensionsSnapshot: (profile?: string) =>
     call<ExtensionsSnapshot>('get_extensions_snapshot', withProfile(profile)),
   runToolAction: (action: 'enable' | 'disable', platform: string, names: string[], profile?: string) =>
     call<CommandRunResult>('run_tool_action', withProfile(profile, { action, platform, names })),
-  runPluginAction: (action: 'enable' | 'disable', name: string, profile?: string) =>
+  runPluginAction: (action: 'enable' | 'disable' | 'install' | 'update' | 'remove', name: string, profile?: string) =>
     call<CommandRunResult>('run_plugin_action', withProfile(profile, { action, name })),
   saveConfigYaml: (content: string, profile?: string) =>
     call<void>('save_config_yaml', withProfile(profile, { content })),
   saveEnvFile: (content: string, profile?: string) =>
     call<void>('save_env_file', withProfile(profile, { content })),
+  saveStructuredConfig: (request: ConfigWorkspace, profile?: string) =>
+    call<ConfigDocuments>('save_structured_config', withProfile(profile, { request })),
+  saveStructuredEnv: (request: EnvWorkspace, profile?: string) =>
+    call<ConfigDocuments>('save_structured_env', withProfile(profile, { request })),
+  saveStructuredGateway: (request: GatewayWorkspace, profile?: string) =>
+    call<ConfigDocuments>('save_structured_gateway', withProfile(profile, { request })),
   listSessions: (limit?: number, profile?: string) =>
     call<SessionRecord[]>('list_sessions', withProfile(profile, { limit })),
   getSessionDetail: (sessionId: string, profile?: string) =>
     call<SessionDetail>('get_session_detail', withProfile(profile, { sessionId })),
   listSkills: (profile?: string) => call<SkillItem[]>('list_skills', withProfile(profile)),
+  readSkillFile: (filePath: string, profile?: string) =>
+    call<SkillFileDetail>('read_skill_file', withProfile(profile, { filePath })),
+  saveSkillFile: (request: SkillSaveRequest, profile?: string) =>
+    call<SkillFileDetail>('save_skill_file', withProfile(profile, { request })),
+  createSkill: (request: SkillCreateRequest, profile?: string) =>
+    call<SkillFileDetail>('create_skill', withProfile(profile, { request })),
+  runSkillAction: (action: string, value?: string | null, profile?: string) =>
+    call<CommandRunResult>('run_skill_action', withProfile(profile, { action, value: value || null })),
   getCronJobs: (profile?: string) =>
     call<CronJobsSnapshot>('get_cron_jobs', withProfile(profile)),
   createCronJob: (request: CronCreateRequest, profile?: string) =>

@@ -1,12 +1,13 @@
 use crate::error::{AppError, AppResult};
 use crate::infrastructure::hermes;
 use crate::models::{
-    CommandRunResult, ConfigDocuments, CronCreateRequest, CronDeleteRequest, CronJobsSnapshot,
-    CronUpdateRequest, DashboardSnapshot, ExtensionsSnapshot, HermesHome, InstallationSnapshot,
-    LogReadResult, MemoryFileDetail, MemoryFileSummary, ProfileAliasCreateRequest,
-    ProfileAliasDeleteRequest, ProfileCreateRequest, ProfileDeleteRequest, ProfileExportRequest,
-    ProfileImportRequest, ProfileRenameRequest, ProfilesSnapshot, SessionDetail, SessionRecord,
-    SkillItem,
+    CommandRunResult, ConfigDocuments, ConfigWorkspace, CronCreateRequest, CronDeleteRequest,
+    CronJobsSnapshot, CronUpdateRequest, DashboardSnapshot, EnvWorkspace, ExtensionsSnapshot,
+    GatewayWorkspace, HermesHome, InstallationSnapshot, LogReadResult, MemoryFileDetail,
+    MemoryFileSummary, ProfileAliasCreateRequest, ProfileAliasDeleteRequest, ProfileCreateRequest,
+    ProfileDeleteRequest, ProfileExportRequest, ProfileImportRequest, ProfileRenameRequest,
+    ProfilesSnapshot, SessionDetail, SessionRecord, SkillCreateRequest, SkillFileDetail, SkillItem,
+    SkillSaveRequest,
 };
 
 pub struct HermesManager {
@@ -36,6 +37,10 @@ impl HermesManager {
         Ok(Self {
             home: hermes::resolve_hermes_home(profile_name, None)?,
         })
+    }
+
+    pub fn run_installation_action(action: &str) -> AppResult<CommandRunResult> {
+        hermes::run_installation_action(action)
     }
 
     pub fn dashboard(&self) -> AppResult<DashboardSnapshot> {
@@ -69,12 +74,39 @@ impl HermesManager {
         hermes::run_hermes_command_owned(Some(&self.home.profile_name), &args)
     }
 
+    pub fn run_skill_action(
+        &self,
+        action: &str,
+        value: Option<&str>,
+    ) -> AppResult<CommandRunResult> {
+        let args = hermes::build_skill_action_args(action, value)?;
+        hermes::run_hermes_command_owned(Some(&self.home.profile_name), &args)
+    }
+
     pub fn save_config_yaml(&self, content: &str) -> AppResult<()> {
         hermes::write_config_yaml(&self.home, content)
     }
 
     pub fn save_env_file(&self, content: &str) -> AppResult<()> {
         hermes::write_env_file(&self.home, content)
+    }
+
+    pub fn save_structured_config(
+        &self,
+        workspace: &ConfigWorkspace,
+    ) -> AppResult<ConfigDocuments> {
+        hermes::write_structured_config(&self.home, workspace)
+    }
+
+    pub fn save_structured_env(&self, workspace: &EnvWorkspace) -> AppResult<ConfigDocuments> {
+        hermes::write_structured_env(&self.home, workspace)
+    }
+
+    pub fn save_structured_gateway(
+        &self,
+        workspace: &GatewayWorkspace,
+    ) -> AppResult<ConfigDocuments> {
+        hermes::write_structured_gateway(&self.home, workspace)
     }
 
     pub fn sessions(&self, limit: usize) -> AppResult<Vec<SessionRecord>> {
@@ -87,6 +119,18 @@ impl HermesManager {
 
     pub fn skills(&self) -> AppResult<Vec<SkillItem>> {
         hermes::list_skills(&self.home)
+    }
+
+    pub fn read_skill_file(&self, file_path: &str) -> AppResult<SkillFileDetail> {
+        hermes::read_skill_file(&self.home, file_path)
+    }
+
+    pub fn save_skill_file(&self, request: &SkillSaveRequest) -> AppResult<SkillFileDetail> {
+        hermes::write_skill_file(&self.home, &request.file_path, &request.content)
+    }
+
+    pub fn create_skill(&self, request: &SkillCreateRequest) -> AppResult<SkillFileDetail> {
+        hermes::create_skill_file(&self.home, request)
     }
 
     pub fn read_log(

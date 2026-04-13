@@ -63,7 +63,7 @@ export interface MemoryPageIntent extends PageIntentBase {
   selectedKey?: MemorySlotKey;
 }
 
-export type ConfigFocus = 'model' | 'context' | 'toolsets' | 'memory';
+export type ConfigFocus = 'model' | 'context' | 'toolsets' | 'memory' | 'credentials';
 
 export interface ConfigPageIntent extends PageIntentBase {
   kind: 'config';

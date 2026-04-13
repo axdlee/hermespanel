@@ -1,6 +1,11 @@
 import { api } from '../lib/api';
-import { handoffToTerminal, openFinderLocation } from '../lib/desktop';
-import { buildDiagnosticsDrilldownIntent, buildLogsDrilldownIntent } from '../lib/drilldown';
+import { openFinderLocation } from '../lib/desktop';
+import {
+  buildConfigDrilldownIntent,
+  buildDiagnosticsDrilldownIntent,
+  buildExtensionsDrilldownIntent,
+  buildLogsDrilldownIntent,
+} from '../lib/drilldown';
 import { formatTimestamp, truncate } from '../lib/format';
 import { getPanelState, navigate, notify, subscribePanelState } from '../lib/panel-state';
 import {
@@ -14,6 +19,13 @@ import {
 } from './native-helpers';
 
 let activeView = null;
+
+const EMPTY_SKILL_DRAFT = {
+  category: 'custom',
+  content: '',
+  description: '',
+  name: '',
+};
 
 function infoTipHtml(content) {
   return `
@@ -75,6 +87,15 @@ function runtimeLocalSkillCount(view) {
 
 function runtimeSkillMismatch(view) {
   return runtimeLocalSkillCount(view) !== view.skills.length;
+}
+
+function cloneSkillDraft(draft = EMPTY_SKILL_DRAFT) {
+  return {
+    category: draft.category || 'custom',
+    content: draft.content || '',
+    description: draft.description || '',
+    name: draft.name || '',
+  };
 }
 
 function capabilityWarnings(view, skill, jobs) {
@@ -151,6 +172,7 @@ function renderSkillList(view, filtered, skill) {
     <div class="list-stack workspace-list-scroll">
       ${filtered.map((item) => {
         const referenced = (view.cron?.jobs ?? []).some((job) => job.skills.includes(item.name));
+        const runtimeVisible = (view.extensions?.runtimeSkills ?? []).some((runtimeItem) => runtimeItem.name === item.name);
         return `
           <button
             type="button"
@@ -163,12 +185,13 @@ function renderSkillList(view, filtered, skill) {
               <div class="pill-row">
                 ${pillHtml(item.category || 'uncategorized', 'neutral')}
                 ${referenced ? pillHtml('Cron 中', 'good') : pillHtml('未编排', 'neutral')}
+                ${runtimeVisible ? pillHtml('runtime ok', 'good') : pillHtml('local only', 'warn')}
               </div>
             </div>
-            <p>${escapeHtml(item.description || 'CLI 未返回描述。')}</p>
-            <p class="helper-text">${escapeHtml(truncate(firstLine(item.preview, '无预览'), 84))}</p>
+            <p class="skill-list-copy">${escapeHtml(truncate(item.description || firstLine(item.preview, 'CLI 未返回描述。'), 92))}</p>
             <div class="meta-line">
               <span>${escapeHtml(item.relativePath)}</span>
+              <span>${escapeHtml(runtimeVisible ? '已进入运行面' : '仅目录可见')}</span>
             </div>
           </button>
         `;
@@ -204,6 +227,275 @@ function renderCronJobs(jobs) {
   `;
 }
 
+function renderSkillWorkbenchTabs(view) {
+  const tabs = [
+    { key: 'overview', label: '详情' },
+    { key: 'registry', label: '安装治理' },
+    { key: 'studio', label: '本地编修' },
+  ];
+
+  return `
+    <div class="tab-bar">
+      ${tabs.map((tab) => `
+        <button
+          type="button"
+          class="tab ${view.workspaceTab === tab.key ? 'active' : ''}"
+          data-action="switch-workspace-tab"
+          data-tab="${escapeHtml(tab.key)}"
+        >
+          ${escapeHtml(tab.label)}
+        </button>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderSkillOutputCard(view) {
+  return `
+    <section class="workspace-main-card">
+      <div class="workspace-main-header">
+        <div>
+          <h2 class="config-section-title">最近动作与原始输出</h2>
+          <p class="config-section-desc">执行 search / inspect / install / audit 后，原始输出会留在这里。</p>
+        </div>
+        ${pillHtml(view.lastResult ? '最近动作' : 'CLI 快照', view.lastResult ? 'good' : 'neutral')}
+      </div>
+      ${commandResultHtml(view.lastResult, '尚未执行动作', '先在安装治理页执行一次动作，这里会保留最近结果。')}
+      <pre class="code-block compact-code top-gap">${escapeHtml(view.extensions.skillsRawOutput || '当前没有可展示的 skills 原始输出。')}</pre>
+    </section>
+  `;
+}
+
+function renderSkillOverviewWorkspace(view, skill, jobs, selectedExistsInRuntime, warnings) {
+  return `
+    <section class="workspace-main-card">
+      <div class="workspace-main-header">
+        <div>
+          <div class="panel-title-row">
+            <h2 class="config-section-title">${escapeHtml(skill?.name || '技能详情')}</h2>
+            ${skill ? pillHtml(skill.category || 'uncategorized', 'neutral') : ''}
+            ${skill ? pillHtml(selectedExistsInRuntime ? 'runtime ok' : 'runtime drift', selectedExistsInRuntime ? 'good' : 'warn') : ''}
+          </div>
+          <p class="workspace-main-copy">${escapeHtml(skill?.description || '从左侧选择技能后，这里会展示目录态、运行态和自动化引用。')}</p>
+        </div>
+        <div class="toolbar">
+          ${buttonHtml({ action: 'use-selected-skill-name', label: '带入治理', kind: 'primary', disabled: !skill })}
+          ${buttonHtml({ action: 'goto-logs', label: '日志', disabled: !skill })}
+          ${buttonHtml({ action: 'goto-extensions', label: '扩展面' })}
+          ${buttonHtml({ action: 'goto-diagnostics', label: '诊断' })}
+        </div>
+      </div>
+      ${
+        skill
+          ? `
+            ${keyValueRowsHtml([
+              { label: '名称', value: skill.name },
+              { label: '分类', value: skill.category || 'uncategorized' },
+              { label: '相对路径', value: skill.relativePath },
+              { label: '运行态可见', value: selectedExistsInRuntime ? 'true' : 'false' },
+              { label: 'Cron 引用', value: String(jobs.length) },
+              { label: '文件路径', value: skill.filePath },
+            ])}
+            <pre class="code-block compact-code skill-detail-preview top-gap">${escapeHtml(skill.preview || '无预览内容')}</pre>
+          `
+          : emptyStateHtml('未选择技能', '先从左侧选择一个技能。')
+      }
+    </section>
+
+    <div class="workspace-bottom-grid">
+      <section class="workspace-main-card">
+        <div class="workspace-main-header">
+          <div>
+            <h2 class="config-section-title">自动化引用</h2>
+            <p class="config-section-desc">优先核对真正被 cron 显式引用的技能。</p>
+          </div>
+          ${pillHtml(skill ? `${jobs.length} 个作业` : '等待选择', skill && jobs.length > 0 ? 'good' : 'warn')}
+        </div>
+        ${skill ? renderCronJobs(jobs) : emptyStateHtml('未选择技能', '先从左侧选择一个技能。')}
+      </section>
+
+      ${renderSkillOutputCard(view)}
+    </div>
+
+    ${warnings.length > 0
+      ? `
+        <section class="workspace-main-card">
+          <div class="workspace-main-header">
+            <div>
+              <h2 class="config-section-title">关键提醒</h2>
+              <p class="config-section-desc">只保留会影响技能闭环的信号，不抢主操作位。</p>
+            </div>
+            ${pillHtml(`${warnings.length} 条`, 'warn')}
+          </div>
+          <div class="warning-stack">
+            ${warnings.map((warning) => `<div class="warning-item">${escapeHtml(warning)}</div>`).join('')}
+          </div>
+        </section>
+      `
+      : ''}
+  `;
+}
+
+function renderSkillRegistryWorkspace(view, skill, jobs, selectedExistsInRuntime, currentToolsets, runtimeLocal, usedNames) {
+  return `
+    <div class="compact-overview-grid">
+      <section class="shell-card">
+        <div class="shell-card-header">
+          <div>
+            <div class="panel-title-row">
+              <strong>搜索 / 预检 / 安装</strong>
+              ${infoTipHtml('调用的是 Tauri 后端封装的 Hermes skills 动作，不把你甩去外部 Terminal。')}
+            </div>
+            <p class="shell-card-copy">先搜关键词，再对目标 skill 做 inspect / install。</p>
+          </div>
+          ${pillHtml(view.installTarget.trim() || '等待目标', view.installTarget.trim() ? 'good' : 'warn')}
+        </div>
+        <div class="form-grid">
+          <label class="field-stack">
+            <span>搜索关键词</span>
+            <input class="search-input" id="skills-registry-query" placeholder="react / security / browser">
+          </label>
+          <label class="field-stack">
+            <span>技能 ID</span>
+            <input class="search-input" id="skills-install-target" placeholder="official/security/1password">
+          </label>
+        </div>
+        <div class="toolbar">
+          ${buttonHtml({ action: 'skills-search', label: view.runningAction === 'skills:search' ? '搜索中…' : '搜索技能', kind: 'primary', disabled: Boolean(view.runningAction) || !view.installation.binaryFound || !view.registryQuery.trim() })}
+          ${buttonHtml({ action: 'skills-inspect', label: view.runningAction === 'skills:inspect' ? '预检中…' : '预检技能', disabled: Boolean(view.runningAction) || !view.installation.binaryFound || !view.installTarget.trim() })}
+          ${buttonHtml({ action: 'skills-install', label: view.runningAction === 'skills:install' ? '安装中…' : '安装技能', disabled: Boolean(view.runningAction) || !view.installation.binaryFound || !view.installTarget.trim() })}
+          ${buttonHtml({ action: 'use-selected-skill-name', label: '使用当前技能', disabled: Boolean(view.runningAction) || !skill })}
+        </div>
+      </section>
+
+      <section class="shell-card">
+        <div class="shell-card-header">
+          <div>
+            <strong>治理与布线</strong>
+            <p class="shell-card-copy">更新、审计和布线核查集中在一处，避免在多个页面重复露出。</p>
+          </div>
+          ${pillHtml(view.installation.binaryFound ? 'CLI 就绪' : 'CLI 缺失', view.installation.binaryFound ? 'good' : 'bad')}
+        </div>
+        ${keyValueRowsHtml([
+          { label: 'Toolsets', value: currentToolsets.length ? currentToolsets.join(', ') : '—' },
+          { label: '运行态 Local', value: String(runtimeLocal) },
+          { label: '已编排技能', value: String(usedNames.size) },
+          { label: '当前技能可见', value: skill ? (selectedExistsInRuntime ? 'true' : 'false') : '—' },
+        ])}
+        <div class="toolbar top-gap">
+          ${buttonHtml({ action: 'skills-check', label: view.runningAction === 'skills:check' ? '检查中…' : '检查更新', kind: 'primary', disabled: Boolean(view.runningAction) || !view.installation.binaryFound })}
+          ${buttonHtml({ action: 'skills-update', label: view.runningAction === 'skills:update' ? '更新中…' : '更新技能', disabled: Boolean(view.runningAction) || !view.installation.binaryFound })}
+          ${buttonHtml({ action: 'skills-audit', label: view.runningAction === 'skills:audit' ? '审计中…' : '审计已装技能', disabled: Boolean(view.runningAction) || !view.installation.binaryFound })}
+          ${buttonHtml({ action: 'goto-config-toolsets', label: '核对 Toolsets' })}
+          ${buttonHtml({ action: 'goto-config-memory', label: '核对 Memory' })}
+          ${buttonHtml({ action: 'goto-extensions', label: '扩展运行态' })}
+        </div>
+      </section>
+    </div>
+
+    <div class="workspace-bottom-grid top-gap">
+      <section class="workspace-main-card">
+        <div class="workspace-main-header">
+          <div>
+            <h2 class="config-section-title">当前目标布线</h2>
+            <p class="config-section-desc">把目录技能、runtime 可见性和自动化引用放在一起核对。</p>
+          </div>
+          ${skill ? pillHtml(skill.name, 'neutral') : pillHtml('等待选择', 'warn')}
+        </div>
+        ${keyValueRowsHtml([
+          { label: '当前技能', value: skill?.name || '—' },
+          { label: '分类', value: skill?.category || '—' },
+          { label: 'runtime', value: skill ? (selectedExistsInRuntime ? 'ok' : 'drift') : '—' },
+          { label: 'Cron 显式引用', value: skill ? String(jobs.length) : '0' },
+          { label: '目录路径', value: skill?.relativePath || '—' },
+        ])}
+        <div class="toolbar top-gap">
+          ${buttonHtml({ action: 'goto-cron', label: '查看 Cron' })}
+          ${buttonHtml({ action: 'goto-logs', label: '查看日志', disabled: !skill })}
+          ${buttonHtml({ action: 'goto-diagnostics', label: '进入诊断页' })}
+        </div>
+      </section>
+
+      ${renderSkillOutputCard(view)}
+    </div>
+  `;
+}
+
+function renderSkillStudio(view, skill) {
+  const skillDirty = Boolean(skill && view.skillFile && view.skillFile.content !== view.skillFileSavedContent);
+  const draft = view.createDraft ?? cloneSkillDraft();
+
+  return `
+    <div class="compact-overview-grid">
+      <section class="workspace-main-card">
+        <div class="workspace-main-header">
+          <div>
+            <div class="panel-title-row">
+              <h2 class="config-section-title">新建本地 Skill</h2>
+              ${infoTipHtml('本地 skill 直接写入当前 Hermes skills 目录，适合团队私有能力和快速原型。')}
+            </div>
+            <p class="workspace-main-copy">保持最小表单，只保留真正创建 skill 所需的信息。</p>
+          </div>
+          ${pillHtml(draft.category || 'custom', 'neutral')}
+        </div>
+        <div class="form-grid">
+          <label class="field-stack">
+            <span>名称</span>
+            <input class="search-input" id="skill-create-name" value="${escapeHtml(draft.name)}" placeholder="Release Notes">
+          </label>
+          <label class="field-stack">
+            <span>分类</span>
+            <input class="search-input" id="skill-create-category" value="${escapeHtml(draft.category)}" placeholder="ops / coding / custom">
+          </label>
+        </div>
+        <label class="field-stack">
+          <span>描述</span>
+          <input class="search-input" id="skill-create-description" value="${escapeHtml(draft.description)}" placeholder="生成版本发布说明并整理亮点">
+        </label>
+        <label class="field-stack top-gap">
+          <span>内容模板</span>
+          <textarea class="editor compact-control-editor" id="skill-create-content" placeholder="# Release Notes&#10;&#10;## 目标&#10;&#10;在这里编写 skill 具体内容。">${escapeHtml(draft.content)}</textarea>
+        </label>
+        <div class="toolbar top-gap">
+          ${buttonHtml({ action: 'create-local-skill', label: view.runningAction === 'skills:create-local' ? '创建中…' : '创建本地 Skill', kind: 'primary', disabled: Boolean(view.runningAction) || !draft.name.trim(), attrs: { id: 'skill-create-submit' } })}
+          ${buttonHtml({ action: 'reset-local-skill-draft', label: '清空草稿', disabled: Boolean(view.runningAction) })}
+          ${buttonHtml({ action: 'open-home', label: '打开 Home', disabled: Boolean(view.runningAction) })}
+        </div>
+      </section>
+
+      <section class="workspace-main-card">
+        <div class="workspace-main-header">
+          <div>
+            <div class="panel-title-row">
+              <h2 class="config-section-title">当前 Skill 文件</h2>
+              ${skill ? `${pillHtml(skill.category || 'uncategorized', 'neutral')}` : ''}
+            </div>
+            <p class="workspace-main-copy">${escapeHtml(skill ? '直接编辑本地 SKILL.md，不再强制跳回 CLI。' : '先从左侧选择一个技能，再进入本地编修。')}</p>
+          </div>
+          ${skill ? `<span id="skill-file-dirty-pill">${pillHtml(skillDirty ? '未保存' : '已同步', skillDirty ? 'warn' : 'good')}</span>` : pillHtml('等待选择', 'neutral')}
+        </div>
+        ${
+          skill
+            ? `
+              <p class="command-line">${escapeHtml(view.skillFile?.filePath || skill.filePath)}</p>
+              <label class="field-stack">
+                <span>SKILL.md</span>
+                <textarea class="editor compact-skill-editor" id="skill-content-editor" placeholder="正在读取技能文件…">${escapeHtml(view.skillFile?.content || '')}</textarea>
+              </label>
+              <div class="toolbar top-gap">
+                ${buttonHtml({ action: 'save-skill-file', label: view.runningAction === 'skills:save-file' ? '保存中…' : '保存 Skill', kind: 'primary', disabled: Boolean(view.runningAction) || !view.skillFile })}
+                ${buttonHtml({ action: 'reload-skill-file', label: view.runningAction === 'skills:reload-file' ? '刷新中…' : '重新读取', disabled: Boolean(view.runningAction) || !skill })}
+                ${buttonHtml({ action: 'open-skill-file', label: '定位文件', disabled: Boolean(view.runningAction) || !skill })}
+                ${buttonHtml({ action: 'open-skill-dir', label: '打开目录', disabled: Boolean(view.runningAction) || !skill })}
+              </div>
+            `
+            : emptyStateHtml('未选择技能', '从左侧选择一个技能后，这里会直接加载并允许编辑对应的 SKILL.md。')
+        }
+      </section>
+    </div>
+  `;
+}
+
 function renderPage(view) {
   if (view.destroyed) {
     return;
@@ -220,7 +512,7 @@ function renderPage(view) {
         <div class="panel-title-row">
           <h1 class="page-title">技能工作台</h1>
         </div>
-        <p class="page-desc">围绕 skills 的目录态、安装态与运行态做统一治理。</p>
+        <p class="page-desc">围绕 skills 的目录、安装和运行态做统一治理。</p>
       </div>
       <section class="config-section">
         <div class="config-section-header">
@@ -245,6 +537,7 @@ function renderPage(view) {
   const usedNames = skillUsageNames(view);
   const warnings = capabilityWarnings(view, skill, jobs);
   const categories = categoryOptions(view.skills);
+  const quickCategories = categories.filter((item) => item !== 'all').slice(0, 6);
   const currentToolsets = view.dashboard.config.toolsets ?? [];
   const runtimeLocal = runtimeLocalSkillCount(view);
   const selectedExistsInRuntime = skill ? view.extensions.runtimeSkills.some((item) => item.name === skill.name) : false;
@@ -258,6 +551,27 @@ function renderPage(view) {
     suggestedCommand: skill ? 'tools-summary' : 'doctor',
     logName: 'agent',
   });
+  const configToolsetsIntent = buildConfigDrilldownIntent(seed, {
+    description: '继续在配置中心核对 toolsets、外部 skills 目录和技能暴露范围。',
+    focus: 'toolsets',
+  });
+  const configMemoryIntent = buildConfigDrilldownIntent(seed, {
+    description: '继续在配置中心核对记忆开关、provider 与长期记忆链路。',
+    focus: 'memory',
+  });
+  const extensionsIntent = buildExtensionsDrilldownIntent(seed, {
+    description: skill
+      ? `继续核对技能 ${skill.name} 关联的 runtime source、插件和扩展状态。`
+      : '继续核对技能层关联的 runtime source、插件和扩展状态。',
+    rawKind: 'skills',
+    query: skill?.name ?? view.query,
+    sourceFilter: view.extensions.runtimeSkills.some((item) => item.source === 'local') ? 'local' : 'all',
+  });
+  const workspaceMain = view.workspaceTab === 'registry'
+    ? renderSkillRegistryWorkspace(view, skill, jobs, selectedExistsInRuntime, currentToolsets, runtimeLocal, usedNames)
+    : view.workspaceTab === 'studio'
+      ? renderSkillStudio(view, skill)
+      : renderSkillOverviewWorkspace(view, skill, jobs, selectedExistsInRuntime, warnings);
 
   view.page.innerHTML = `
     <div class="page-header">
@@ -265,258 +579,118 @@ function renderPage(view) {
         <h1 class="page-title">技能工作台</h1>
         ${infoTipHtml('这里不再堆大段说明。核心只保留技能目录、安装动作、运行态差异和自动化引用，跨页入口尽量收敛到少量真正有用的跳转。')}
       </div>
-      <p class="page-desc">浏览、安装、核对运行态，再把技能接入 cron 和日志排查链路。</p>
+      <p class="page-desc">目录、安装治理和本地编修在这里合流。</p>
     </div>
+
+    <section class="workspace-summary-strip">
+      <section class="summary-mini-card">
+        <span class="summary-mini-label">目录技能</span>
+        <strong class="summary-mini-value">${escapeHtml(String(view.skills.length))}</strong>
+        <span class="summary-mini-meta">当前 profile 扫描到的本地技能</span>
+      </section>
+      <section class="summary-mini-card">
+        <span class="summary-mini-label">运行态 Local</span>
+        <strong class="summary-mini-value">${escapeHtml(String(runtimeLocal))}</strong>
+        <span class="summary-mini-meta">${runtimeSkillMismatch(view) ? 'CLI 与目录存在偏差' : 'CLI 与目录已对齐'}</span>
+      </section>
+      <section class="summary-mini-card">
+        <span class="summary-mini-label">当前目标</span>
+        <strong class="summary-mini-value">${escapeHtml(view.installTarget.trim() || skill?.name || '未指定')}</strong>
+        <span class="summary-mini-meta">${escapeHtml(view.registryQuery.trim() || '优先在这里搜索、预检、安装技能')}</span>
+      </section>
+      <section class="summary-mini-card">
+        <span class="summary-mini-label">最近动作</span>
+        <strong class="summary-mini-value">${escapeHtml(view.lastResult?.label || '待执行')}</strong>
+        <span class="summary-mini-meta">${escapeHtml(view.lastResult?.result?.success ? '最近一次命令成功' : view.lastResult ? '最近一次命令失败' : '执行 search / install / audit 后会显示')}</span>
+      </section>
+    </section>
 
     <section class="config-section">
       <div class="config-section-header">
         <div>
-          <h2 class="config-section-title">运行摘要</h2>
-          <p class="config-section-desc">目录态和运行态放在同一层看，避免只读扫描信息掩盖真实可用性。</p>
+          <div class="panel-title-row">
+            <h2 class="config-section-title">Skills Workbench</h2>
+            ${infoTipHtml('左侧只保留筛选、技能列表和少量关键动作；右侧通过页内标签切换详情、安装治理和本地编修。')}
+          </div>
+          <p class="config-section-desc">尽量像 clawpanel 那样让一个主工作台承接闭环，而不是把说明和重复按钮铺满页面。</p>
         </div>
         <div class="toolbar">
+          ${pillHtml(view.workspaceTab === 'overview' ? '详情' : view.workspaceTab === 'registry' ? '安装治理' : '本地编修', 'neutral')}
           ${buttonHtml({ action: 'refresh', label: view.refreshing ? '同步中…' : '刷新状态', kind: 'primary', disabled: view.refreshing || Boolean(view.runningAction) })}
         </div>
       </div>
-      <div class="compact-overview-grid">
-        <div class="shell-card">
-          <div class="shell-card-header">
-            <strong>当前 Profile</strong>
-            <div class="pill-row">
-              ${pillHtml(view.dashboard.config.memoryEnabled ? 'Memory On' : 'Memory Off', view.dashboard.config.memoryEnabled ? 'good' : 'warn')}
-              ${pillHtml(view.dashboard.gateway?.gatewayState ?? 'Gateway ?', view.dashboard.gateway?.gatewayState === 'running' ? 'good' : 'warn')}
+      ${renderSkillWorkbenchTabs(view)}
+      <div class="workspace-shell workspace-shell-editor">
+        <section class="workspace-rail">
+          <div class="workspace-rail-header">
+            <div>
+              <h2 class="config-section-title">技能目录</h2>
+              <p class="config-section-desc">优先定位当前 profile 真正在用，或者最值得治理的技能。</p>
             </div>
+            ${skill ? pillHtml(skill.name, 'neutral') : pillHtml('等待选择', 'warn')}
           </div>
-          ${keyValueRowsHtml([
-            { label: 'Profile', value: view.profile },
-            { label: '终端后端', value: view.dashboard.config.terminalBackend || '—' },
-            { label: '默认模型', value: view.dashboard.config.modelDefault || '—' },
-            { label: 'Provider', value: view.dashboard.config.modelProvider || '—' },
-            { label: 'Toolsets', value: currentToolsets.length ? currentToolsets.join(', ') : '—' },
-          ])}
-        </div>
-        <div class="metrics-grid metrics-grid-tight">
-          <div class="metric-card">
-            <p class="metric-label">目录技能</p>
-            <div class="metric-value">${escapeHtml(String(view.skills.length))}</div>
-            <p class="metric-hint">扫描自 Hermes skills 目录</p>
+          <div class="workspace-rail-toolbar">
+            <input class="search-input" id="skills-query" placeholder="搜索名称、分类、描述、路径">
+            <select class="select-input" id="skills-category-filter">
+              ${categories.map((item) => `
+                <option value="${escapeHtml(item)}" ${item === view.categoryFilter ? 'selected' : ''}>
+                  ${escapeHtml(item === 'all' ? '全部分类' : item)}
+                </option>
+              `).join('')}
+            </select>
           </div>
-          <div class="metric-card">
-            <p class="metric-label">运行态 Local</p>
-            <div class="metric-value">${escapeHtml(String(runtimeLocal))}</div>
-            <p class="metric-hint">${runtimeSkillMismatch(view) ? 'CLI 与目录存在偏差' : 'CLI 与目录已对齐'}</p>
-          </div>
-          <div class="metric-card">
-            <p class="metric-label">分类数</p>
-            <div class="metric-value">${escapeHtml(String(new Set(view.skills.map((item) => item.category)).size))}</div>
-            <p class="metric-hint">当前本地技能分类簇</p>
-          </div>
-          <div class="metric-card">
-            <p class="metric-label">Cron 引用</p>
-            <div class="metric-value">${escapeHtml(String(usedNames.size))}</div>
-            <p class="metric-hint">${escapeHtml(`${view.cron.jobs.length} 个作业里显式引用技能`)}</p>
-          </div>
+          ${quickCategories.length > 0 ? `
+            <div class="selection-chip-grid top-gap">
+              ${buttonHtml({ action: 'filter-category', label: '全部分类', className: `selection-chip${view.categoryFilter === 'all' ? ' selection-chip-active' : ''}`, attrs: { 'data-value': 'all' } })}
+              ${quickCategories.map((item) => buttonHtml({
+                action: 'filter-category',
+                label: item,
+                className: `selection-chip${view.categoryFilter === item ? ' selection-chip-active' : ''}`,
+                attrs: { 'data-value': item },
+              })).join('')}
+            </div>
+          ` : ''}
+          <section class="workspace-rail-section">
+            <div class="workspace-rail-section-header">
+              <span class="workspace-rail-section-title">当前目标</span>
+              ${pillHtml(skill ? (selectedExistsInRuntime ? 'runtime ok' : 'runtime drift') : '等待选择', skill ? (selectedExistsInRuntime ? 'good' : 'warn') : 'neutral')}
+            </div>
+            ${keyValueRowsHtml([
+              { label: '当前技能', value: skill?.name || '—' },
+              { label: '分类', value: skill?.category || '—' },
+              { label: 'Cron', value: skill ? String(jobs.length) : '0' },
+              { label: 'runtime', value: skill ? (selectedExistsInRuntime ? 'ok' : 'drift') : '—' },
+            ])}
+            <div class="workspace-rail-toolbar workspace-rail-toolbar-grid top-gap">
+              ${buttonHtml({ action: 'use-selected-skill-name', label: '带入治理', kind: 'primary', disabled: Boolean(view.runningAction) || !skill })}
+              ${buttonHtml({ action: 'open-skill-dir', label: '打开目录', disabled: Boolean(view.runningAction) || !skill })}
+              ${buttonHtml({ action: 'goto-extensions', label: '扩展面' })}
+              ${buttonHtml({ action: 'goto-config-toolsets', label: 'Toolsets' })}
+            </div>
+          </section>
+          ${warnings.length > 0 && view.workspaceTab !== 'overview' ? `
+            <div class="warning-stack top-gap">
+              ${warnings.slice(0, 3).map((warning) => `<div class="warning-item">${escapeHtml(warning)}</div>`).join('')}
+            </div>
+          ` : ''}
+          ${renderSkillList(view, filtered, skill)}
+        </section>
+
+        <div class="workspace-main">
+          ${workspaceMain}
         </div>
       </div>
     </section>
-
-    <section class="config-section">
-      <div class="config-section-header">
-        <div>
-          <h2 class="config-section-title">治理动作</h2>
-          <p class="config-section-desc">尽量沿用 Hermes 官方命令，桌面端只负责把常见操作收拢成闭环。</p>
-        </div>
-      </div>
-      <div class="control-card-grid">
-        <section class="action-card action-card-compact">
-          <div class="action-card-header">
-            <div>
-              <p class="eyebrow">Registry</p>
-              <h3 class="action-card-title">浏览与治理</h3>
-            </div>
-            ${pillHtml(view.installation.binaryFound ? 'CLI 就绪' : 'CLI 缺失', view.installation.binaryFound ? 'good' : 'bad')}
-          </div>
-          <p class="command-line">hermes skills browse · ${escapeHtml(view.installation.skillsConfigCommand)} · hermes skills check · hermes skills update</p>
-          <div class="toolbar">
-            ${buttonHtml({ action: 'skills-browse', label: view.runningAction === 'skills:browse' ? '技能浏览器…' : '技能浏览器', kind: 'primary', disabled: Boolean(view.runningAction) || !view.installation.binaryFound })}
-            ${buttonHtml({ action: 'skills-config', label: view.runningAction === 'skills:config' ? '技能开关…' : '技能开关', disabled: Boolean(view.runningAction) || !view.installation.binaryFound })}
-            ${buttonHtml({ action: 'skills-check', label: view.runningAction === 'skills:check' ? '检查更新…' : '检查更新', disabled: Boolean(view.runningAction) || !view.installation.binaryFound })}
-            ${buttonHtml({ action: 'skills-update', label: view.runningAction === 'skills:update' ? '更新中…' : '更新已装技能', disabled: Boolean(view.runningAction) || !view.installation.binaryFound })}
-          </div>
-        </section>
-
-        <section class="action-card action-card-compact">
-          <div class="action-card-header">
-            <div>
-              <p class="eyebrow">Install</p>
-              <h3 class="action-card-title">搜索 / 预检 / 安装</h3>
-            </div>
-            ${pillHtml(view.installTarget.trim() || '等待输入 ID', view.installTarget.trim() ? 'good' : 'warn')}
-          </div>
-          <div class="form-grid">
-            <label class="field-stack">
-              <span>搜索关键词</span>
-              <input class="search-input" id="skills-registry-query" placeholder="react / kubernetes / official/security/1password">
-            </label>
-            <label class="field-stack">
-              <span>技能 ID</span>
-              <input class="search-input" id="skills-install-target" placeholder="official/security/1password">
-            </label>
-          </div>
-          <p class="command-line">
-            ${escapeHtml(view.registryQuery.trim() ? `hermes skills search ${view.registryQuery.trim()}` : '先输入关键词执行 skills search')}
-            ·
-            ${escapeHtml(view.installTarget.trim() ? `hermes skills inspect ${view.installTarget.trim()} / hermes skills install ${view.installTarget.trim()}` : '输入技能 ID 后可 inspect / install')}
-          </p>
-          <div class="toolbar">
-            ${buttonHtml({ action: 'skills-search', label: view.runningAction === 'skills:search' ? '搜索中…' : '搜索技能', kind: 'primary', disabled: Boolean(view.runningAction) || !view.installation.binaryFound || !view.registryQuery.trim() })}
-            ${buttonHtml({ action: 'skills-inspect', label: view.runningAction === 'skills:inspect' ? '预检中…' : '预检技能', disabled: Boolean(view.runningAction) || !view.installation.binaryFound || !view.installTarget.trim() })}
-            ${buttonHtml({ action: 'skills-install', label: view.runningAction === 'skills:install' ? '安装中…' : '安装技能', disabled: Boolean(view.runningAction) || !view.installation.binaryFound || !view.installTarget.trim() })}
-            ${buttonHtml({ action: 'skills-audit', label: view.runningAction === 'skills:audit' ? '审计中…' : '审计已装技能', disabled: Boolean(view.runningAction) || !view.installation.binaryFound })}
-          </div>
-        </section>
-
-        <section class="action-card action-card-compact">
-          <div class="action-card-header">
-            <div>
-              <p class="eyebrow">Runtime</p>
-              <h3 class="action-card-title">目录态 vs 运行态</h3>
-            </div>
-            ${pillHtml(selectedExistsInRuntime ? '运行态可见' : '运行态未见', selectedExistsInRuntime ? 'good' : 'warn')}
-          </div>
-          <p class="command-line">
-            ${escapeHtml(`toolsets [${currentToolsets.length ? currentToolsets.join(', ') : '未配置'}] · gateway ${view.dashboard.gateway?.gatewayState ?? 'unknown'} · memory ${view.dashboard.config.memoryEnabled ? 'on' : 'off'}`)}
-          </p>
-          ${keyValueRowsHtml([
-            { label: '运行态 Local', value: String(runtimeLocal) },
-            { label: '目录扫描', value: String(view.skills.length) },
-            { label: 'Cron 作业', value: String(view.cron.jobs.length) },
-            { label: '已编排技能', value: String(usedNames.size) },
-          ])}
-        </section>
-
-        <section class="action-card action-card-compact">
-          <div class="action-card-header">
-            <div>
-              <p class="eyebrow">Workspace</p>
-              <h3 class="action-card-title">目录与物料</h3>
-            </div>
-            ${pillHtml(skill ? '已选中' : '未选择', skill ? 'good' : 'warn')}
-          </div>
-          <p class="command-line">${escapeHtml(skill?.filePath || view.dashboard.hermesHome)}</p>
-          <div class="toolbar">
-            ${buttonHtml({ action: 'open-skill-file', label: '定位技能文件', disabled: Boolean(view.runningAction) || !skill })}
-            ${buttonHtml({ action: 'open-skill-dir', label: '打开技能目录', disabled: Boolean(view.runningAction) || !skill })}
-            ${buttonHtml({ action: 'open-home', label: '打开 Home', disabled: Boolean(view.runningAction) })}
-            ${buttonHtml({ action: 'goto-diagnostics', label: '去做诊断' })}
-          </div>
-        </section>
-      </div>
-    </section>
-
-    <div class="workspace-shell">
-      <section class="workspace-rail">
-        <div class="workspace-rail-header">
-          <div>
-            <h2 class="config-section-title">技能列表</h2>
-            <p class="config-section-desc">优先定位当前 profile 真正在用、或者最值得验证的技能。</p>
-          </div>
-          ${infoTipHtml('这里聚焦目录文件，不重复展示扩展页已经有的 runtime source 全景。左侧先找到技能，右侧再看运行态差异、cron 引用和目录定位。')}
-        </div>
-        <div class="workspace-rail-toolbar">
-          <input class="search-input" id="skills-query" placeholder="搜索名称、分类、描述、路径">
-          <select class="select-input" id="skills-category-filter">
-            ${categories.map((item) => `
-              <option value="${escapeHtml(item)}" ${item === view.categoryFilter ? 'selected' : ''}>
-                ${escapeHtml(item === 'all' ? '全部分类' : item)}
-              </option>
-            `).join('')}
-          </select>
-        </div>
-        ${renderSkillList(view, filtered, skill)}
-      </section>
-
-      <div class="workspace-main">
-        <section class="workspace-main-card">
-          <div class="workspace-main-header">
-            <div>
-              <div class="panel-title-row">
-                <h2 class="config-section-title">${escapeHtml(skill?.name || '技能详情')}</h2>
-                ${skill ? pillHtml(skill.category || 'uncategorized', 'neutral') : ''}
-                ${skill ? pillHtml(selectedExistsInRuntime ? 'runtime ok' : 'runtime drift', selectedExistsInRuntime ? 'good' : 'warn') : ''}
-              </div>
-              <p class="workspace-main-copy">${escapeHtml(skill?.description || '从左侧选择一个技能后，这里会展示文件详情、运行态差异和自动化引用。')}</p>
-            </div>
-            <div class="toolbar">
-              ${buttonHtml({ action: 'goto-logs', label: '查看日志', disabled: !skill })}
-              ${buttonHtml({ action: 'goto-cron', label: '查看 Cron' })}
-              ${buttonHtml({ action: 'goto-diagnostics', label: '进入诊断页' })}
-            </div>
-          </div>
-          ${
-            skill
-              ? `
-                ${keyValueRowsHtml([
-                  { label: '名称', value: skill.name },
-                  { label: '分类', value: skill.category || 'uncategorized' },
-                  { label: '相对路径', value: skill.relativePath },
-                  { label: '文件路径', value: skill.filePath },
-                  { label: '运行态可见', value: selectedExistsInRuntime ? 'true' : 'false' },
-                  { label: '被 Cron 引用', value: String(jobs.length) },
-                ])}
-                <pre class="code-block compact-code skill-detail-preview top-gap">${escapeHtml(skill.preview || '无预览内容')}</pre>
-              `
-              : emptyStateHtml('未选择技能', '从左侧选择一个技能查看详情。')
-          }
-        </section>
-
-        <div class="workspace-bottom-grid">
-          <section class="workspace-main-card">
-            <div class="workspace-main-header">
-              <div>
-                <h2 class="config-section-title">自动化引用</h2>
-                <p class="config-section-desc">被 cron 显式引用的技能更接近真实生产链路。</p>
-              </div>
-              ${pillHtml(skill ? `${jobs.length} 个作业` : '等待选择', skill && jobs.length > 0 ? 'good' : 'warn')}
-            </div>
-            ${skill ? renderCronJobs(jobs) : emptyStateHtml('未选择技能', '先从左侧选择一个技能。')}
-          </section>
-
-          <section class="workspace-main-card">
-            <div class="workspace-main-header">
-              <div>
-                <h2 class="config-section-title">最近动作与原始输出</h2>
-                <p class="config-section-desc">保留最近一次命令回显，同时可直接对照 Hermes 的 skills 原始快照。</p>
-              </div>
-              ${pillHtml(view.lastResult ? '最近动作' : 'CLI 快照', view.lastResult ? 'good' : 'neutral')}
-            </div>
-            ${commandResultHtml(view.lastResult, '尚未执行命令', '执行技能搜索、安装或治理动作后，这里会保留最近一次结果。')}
-            <pre class="code-block compact-code top-gap">${escapeHtml(view.extensions.skillsRawOutput || '当前没有可展示的 skills 原始输出。')}</pre>
-          </section>
-        </div>
-      </div>
-    </div>
-
-    ${
-      warnings.length > 0
-        ? `
-          <section class="config-section">
-            <div class="config-section-header">
-              <div>
-                <h2 class="config-section-title">当前提醒</h2>
-                <p class="config-section-desc">只保留会影响技能闭环的关键信号，不再把说明文案铺满页面。</p>
-              </div>
-            </div>
-            <div class="warning-stack">
-              ${warnings.map((warning) => `<div class="warning-item">${escapeHtml(warning)}</div>`).join('')}
-            </div>
-          </section>
-        `
-        : ''
-    }
   `;
 
-  bindEvents(view, { diagnosticsIntent, logsIntent, skill });
+  bindEvents(view, {
+    configMemoryIntent,
+    configToolsetsIntent,
+    diagnosticsIntent,
+    extensionsIntent,
+    logsIntent,
+    skill,
+  });
 
   const queryInput = view.page.querySelector('#skills-query');
   const categorySelect = view.page.querySelector('#skills-category-filter');
@@ -571,6 +745,13 @@ async function loadData(view, options = {}) {
     view.selectedPath = skills.some((item) => item.filePath === view.selectedPath)
       ? view.selectedPath
       : skills[0]?.filePath ?? null;
+
+    if (view.selectedPath) {
+      await loadSkillFile(view, view.selectedPath, { silent: true });
+    } else {
+      view.skillFile = null;
+      view.skillFileSavedContent = '';
+    }
   } catch (reason) {
     if (view.destroyed) {
       return;
@@ -586,6 +767,39 @@ async function loadData(view, options = {}) {
   }
 }
 
+async function loadSkillFile(view, filePath, options = {}) {
+  const { silent = false } = options;
+  if (!filePath) {
+    view.skillFile = null;
+    view.skillFileSavedContent = '';
+    renderPage(view);
+    return;
+  }
+
+  view.skillFileLoading = true;
+  if (!silent) {
+    renderPage(view);
+  }
+  try {
+    const detail = await api.readSkillFile(filePath, view.profile);
+    if (view.destroyed) {
+      return;
+    }
+    if (filePath !== view.selectedPath) {
+      return;
+    }
+    view.skillFile = detail;
+    view.skillFileSavedContent = detail.content;
+  } catch (reason) {
+    if (!silent) {
+      notify('error', String(reason));
+    }
+  } finally {
+    view.skillFileLoading = false;
+    renderPage(view);
+  }
+}
+
 function storeResult(view, label, result) {
   view.lastResult = {
     label,
@@ -593,25 +807,29 @@ function storeResult(view, label, result) {
   };
 }
 
-async function openInTerminal(view, actionKey, label, command) {
-  view.runningAction = actionKey;
+async function executeSkillAction(view, action, value, options = {}) {
+  const actionId = options.actionId ?? `skills:${action}`;
+  const label = options.label ?? `skills ${action}`;
+
+  view.runningAction = actionId;
   renderPage(view);
   try {
-    await handoffToTerminal({
-      actionKey,
-      command,
-      label,
-      notify,
-      onResult: (nextLabel, result) => {
-        storeResult(view, nextLabel, result);
-      },
-      profile: view.profile,
-      setBusy: (value) => {
-        view.runningAction = value;
-        renderPage(view);
-      },
-      workingDirectory: view.installation?.hermesHomeExists ? view.installation.hermesHome : null,
-    });
+    const result = await api.runSkillAction(action, value || null, view.profile);
+    storeResult(view, label, result);
+    notify(
+      result.success ? 'success' : 'error',
+      result.success
+        ? `${label} 已在客户端执行。`
+        : `${label} 执行失败，请查看命令输出。`,
+    );
+    if (options.refresh) {
+      await Promise.all([
+        loadShell(view.profile, { silent: true }),
+        loadData(view, { silent: true }),
+      ]);
+    }
+  } catch (reason) {
+    notify('error', String(reason));
   } finally {
     view.runningAction = null;
     renderPage(view);
@@ -642,6 +860,60 @@ async function openInFinder(view, path, label, revealInFinder = false) {
   }
 }
 
+async function saveSkillFile(view) {
+  if (!view.skillFile) {
+    notify('error', '请先选择要保存的技能文件。');
+    return;
+  }
+
+  view.runningAction = 'skills:save-file';
+  renderPage(view);
+  try {
+    const detail = await api.saveSkillFile({
+      content: view.skillFile.content,
+      filePath: view.skillFile.filePath,
+    }, view.profile);
+    view.skillFile = detail;
+    view.skillFileSavedContent = detail.content;
+    notify('success', `${detail.name} 已保存。`);
+    await loadData(view, { silent: true });
+  } catch (reason) {
+    notify('error', String(reason));
+  } finally {
+    view.runningAction = null;
+    renderPage(view);
+  }
+}
+
+async function createLocalSkill(view) {
+  const draft = view.createDraft ?? cloneSkillDraft();
+  if (!draft.name.trim()) {
+    notify('error', '请先填写技能名称。');
+    return;
+  }
+
+  view.runningAction = 'skills:create-local';
+  renderPage(view);
+  try {
+    const detail = await api.createSkill({
+      category: draft.category.trim() || 'custom',
+      content: draft.content,
+      description: draft.description.trim(),
+      name: draft.name.trim(),
+      overwrite: false,
+    }, view.profile);
+    notify('success', `${detail.name} 已创建到本地 skills 目录。`);
+    view.createDraft = cloneSkillDraft();
+    view.selectedPath = detail.filePath;
+    await loadData(view, { silent: true });
+  } catch (reason) {
+    notify('error', String(reason));
+  } finally {
+    view.runningAction = null;
+    renderPage(view);
+  }
+}
+
 function syncWithPanelState(view) {
   const nextProfile = getPanelState().selectedProfile;
   if (nextProfile !== view.profile) {
@@ -653,6 +925,8 @@ function syncWithPanelState(view) {
     view.skills = [];
     view.error = null;
     view.lastResult = null;
+    view.skillFile = null;
+    view.skillFileSavedContent = '';
     void loadData(view);
     return;
   }
@@ -688,7 +962,10 @@ function bindEvents(view, intents = {}) {
     registryInput.onkeydown = (event) => {
       if (event.key === 'Enter' && view.registryQuery.trim()) {
         event.preventDefault();
-        void openInTerminal(view, 'skills:search', '搜索技能', `hermes skills search ${view.registryQuery.trim()}`);
+        void executeSkillAction(view, 'search', view.registryQuery.trim(), {
+          actionId: 'skills:search',
+          label: `搜索技能 · ${view.registryQuery.trim()}`,
+        });
       }
     };
   }
@@ -701,10 +978,39 @@ function bindEvents(view, intents = {}) {
     installInput.onkeydown = (event) => {
       if (event.key === 'Enter' && view.installTarget.trim()) {
         event.preventDefault();
-        void openInTerminal(view, 'skills:inspect', '预检技能', `hermes skills inspect ${view.installTarget.trim()}`);
+        void executeSkillAction(view, 'inspect', view.installTarget.trim(), {
+          actionId: 'skills:inspect',
+          label: `预检技能 · ${view.installTarget.trim()}`,
+        });
       }
     };
   }
+
+  view.page.querySelector('#skill-create-name')?.addEventListener('input', (event) => {
+    view.createDraft.name = event.target.value;
+    const submit = view.page.querySelector('#skill-create-submit');
+    if (submit) {
+      submit.disabled = Boolean(view.runningAction) || !view.createDraft.name.trim();
+    }
+  });
+  view.page.querySelector('#skill-create-category')?.addEventListener('input', (event) => {
+    view.createDraft.category = event.target.value;
+  });
+  view.page.querySelector('#skill-create-description')?.addEventListener('input', (event) => {
+    view.createDraft.description = event.target.value;
+  });
+  view.page.querySelector('#skill-create-content')?.addEventListener('input', (event) => {
+    view.createDraft.content = event.target.value;
+  });
+  view.page.querySelector('#skill-content-editor')?.addEventListener('input', (event) => {
+    if (view.skillFile) {
+      view.skillFile.content = event.target.value;
+      const dirtyPill = view.page.querySelector('#skill-file-dirty-pill');
+      if (dirtyPill) {
+        dirtyPill.innerHTML = pillHtml(view.skillFile.content !== view.skillFileSavedContent ? '未保存' : '已同步', view.skillFile.content !== view.skillFileSavedContent ? 'warn' : 'good');
+      }
+    }
+  });
 
   view.page.querySelectorAll('[data-action]').forEach((element) => {
     element.onclick = async () => {
@@ -717,33 +1023,75 @@ function bindEvents(view, intents = {}) {
         case 'refresh':
           await loadData(view);
           return;
-        case 'select-skill':
-          view.selectedPath = element.getAttribute('data-path');
+        case 'switch-workspace-tab':
+          view.workspaceTab = element.getAttribute('data-tab') || 'overview';
           renderPage(view);
           return;
-        case 'skills-browse':
-          await openInTerminal(view, 'skills:browse', '技能浏览器', 'hermes skills browse');
+        case 'select-skill':
+          view.selectedPath = element.getAttribute('data-path');
+          await loadSkillFile(view, view.selectedPath);
           return;
-        case 'skills-config':
-          await openInTerminal(view, 'skills:config', '技能开关', view.installation.skillsConfigCommand);
+        case 'filter-category':
+          view.categoryFilter = element.getAttribute('data-value') || 'all';
+          renderPage(view);
+          return;
+        case 'create-local-skill':
+          await createLocalSkill(view);
+          return;
+        case 'reset-local-skill-draft':
+          view.createDraft = cloneSkillDraft();
+          renderPage(view);
+          return;
+        case 'save-skill-file':
+          await saveSkillFile(view);
+          return;
+        case 'reload-skill-file':
+          await loadSkillFile(view, view.selectedPath);
           return;
         case 'skills-check':
-          await openInTerminal(view, 'skills:check', '检查技能更新', 'hermes skills check');
+          await executeSkillAction(view, 'check', null, {
+            actionId: 'skills:check',
+            label: '检查技能更新',
+          });
           return;
         case 'skills-update':
-          await openInTerminal(view, 'skills:update', '更新已装技能', 'hermes skills update');
+          await executeSkillAction(view, 'update', null, {
+            actionId: 'skills:update',
+            label: '更新已装技能',
+            refresh: true,
+          });
           return;
         case 'skills-search':
-          await openInTerminal(view, 'skills:search', '搜索技能', `hermes skills search ${view.registryQuery.trim()}`);
+          await executeSkillAction(view, 'search', view.registryQuery.trim(), {
+            actionId: 'skills:search',
+            label: `搜索技能 · ${view.registryQuery.trim()}`,
+          });
           return;
         case 'skills-inspect':
-          await openInTerminal(view, 'skills:inspect', '预检技能', `hermes skills inspect ${view.installTarget.trim()}`);
+          await executeSkillAction(view, 'inspect', view.installTarget.trim(), {
+            actionId: 'skills:inspect',
+            label: `预检技能 · ${view.installTarget.trim()}`,
+          });
           return;
         case 'skills-install':
-          await openInTerminal(view, 'skills:install', '安装技能', `hermes skills install ${view.installTarget.trim()}`);
+          await executeSkillAction(view, 'install', view.installTarget.trim(), {
+            actionId: 'skills:install',
+            label: `安装技能 · ${view.installTarget.trim()}`,
+            refresh: true,
+          });
           return;
         case 'skills-audit':
-          await openInTerminal(view, 'skills:audit', '审计已安装技能', 'hermes skills audit');
+          await executeSkillAction(view, 'audit', null, {
+            actionId: 'skills:audit',
+            label: '审计已装技能',
+          });
+          return;
+        case 'use-selected-skill-name':
+          if (intents.skill) {
+            view.registryQuery = intents.skill.name;
+            view.installTarget = intents.skill.name;
+            renderPage(view);
+          }
           return;
         case 'open-skill-file':
           if (intents.skill) {
@@ -767,6 +1115,15 @@ function bindEvents(view, intents = {}) {
         case 'goto-diagnostics':
           navigate('diagnostics', intents.diagnosticsIntent);
           return;
+        case 'goto-config-toolsets':
+          navigate('config', intents.configToolsetsIntent);
+          return;
+        case 'goto-config-memory':
+          navigate('config', intents.configMemoryIntent);
+          return;
+        case 'goto-extensions':
+          navigate('extensions', intents.extensionsIntent);
+          return;
         default:
           return;
       }
@@ -783,6 +1140,7 @@ export async function render() {
   activeView = {
     categoryFilter: 'all',
     cron: null,
+    createDraft: cloneSkillDraft(),
     dashboard: null,
     destroyed: false,
     error: null,
@@ -797,9 +1155,13 @@ export async function render() {
     registryQuery: '',
     runningAction: null,
     selectedPath: null,
+    skillFile: null,
+    skillFileLoading: false,
+    skillFileSavedContent: '',
     skills: [],
     installTarget: '',
     unsubscribe: null,
+    workspaceTab: 'overview',
   };
 
   activeView.unsubscribe = subscribePanelState(() => {
