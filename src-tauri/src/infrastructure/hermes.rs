@@ -478,11 +478,29 @@ fn installation_action_command(action: &str) -> AppResult<InstallationActionComm
     }
 }
 
+fn config_compat_action_args(action: &str) -> AppResult<Vec<String>> {
+    match action {
+        "config-migrate" => Ok(vec!["config".to_string(), "migrate".to_string()]),
+        "claw-migrate" => Ok(vec!["claw".to_string(), "migrate".to_string()]),
+        other => Err(AppError::Message(format!(
+            "不支持的配置兼容动作: {other}"
+        ))),
+    }
+}
+
 pub fn run_installation_action(action: &str) -> AppResult<CommandRunResult> {
     match installation_action_command(action)? {
         InstallationActionCommand::Hermes(args) => run_hermes_command_owned(None, &args),
         InstallationActionCommand::Shell(command) => run_shell_command(&command, None),
     }
+}
+
+pub fn run_config_compat_action(
+    profile_name: Option<&str>,
+    action: &str,
+) -> AppResult<CommandRunResult> {
+    let args = config_compat_action_args(action)?;
+    run_hermes_command_owned(profile_name, &args)
 }
 
 pub fn run_shell_command(
@@ -2985,13 +3003,14 @@ mod tests {
         build_profile_alias_create_args, build_profile_alias_delete_args,
         build_profile_create_args, build_profile_delete_args, build_profile_export_args,
         build_profile_import_args, build_profile_rename_args, build_skill_action_args,
-        build_tool_action_args, compose_hermes_command_args, create_skill_file, get_active_profile,
-        installation_action_command, list_profile_aliases, list_profiles, load_recent_sessions,
-        parse_memory_runtime, parse_plugin_runtime, parse_runtime_skills,
-        parse_skill_frontmatter, parse_tool_inventory, parse_tool_inventory_line,
-        parse_tool_summary, read_config_documents, read_cron_jobs, read_gateway_state,
-        resolve_hermes_home, set_active_profile, write_structured_config, write_structured_env,
-        write_structured_gateway, InstallationActionCommand, QUICK_INSTALL_COMMAND,
+        build_tool_action_args, compose_hermes_command_args, config_compat_action_args,
+        create_skill_file, get_active_profile, installation_action_command, list_profile_aliases,
+        list_profiles, load_recent_sessions, parse_memory_runtime, parse_plugin_runtime,
+        parse_runtime_skills, parse_skill_frontmatter, parse_tool_inventory,
+        parse_tool_inventory_line, parse_tool_summary, read_config_documents, read_cron_jobs,
+        read_gateway_state, resolve_hermes_home, set_active_profile, write_structured_config,
+        write_structured_env, write_structured_gateway, InstallationActionCommand,
+        QUICK_INSTALL_COMMAND,
     };
 
     #[test]
@@ -3260,6 +3279,19 @@ description: 管理 GitHub 认证
             ])
         );
         assert!(installation_action_command("unknown").is_err());
+    }
+
+    #[test]
+    fn maps_config_compat_actions_to_supported_commands() {
+        assert_eq!(
+            config_compat_action_args("config-migrate").expect("config-migrate 应映射成功"),
+            vec!["config".to_string(), "migrate".to_string()]
+        );
+        assert_eq!(
+            config_compat_action_args("claw-migrate").expect("claw-migrate 应映射成功"),
+            vec!["claw".to_string(), "migrate".to_string()]
+        );
+        assert!(config_compat_action_args("unknown").is_err());
     }
 
     #[test]

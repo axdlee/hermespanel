@@ -28,6 +28,13 @@
     }
   },
   "bundle": {
-    "active": false
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/icon.png"
+    ],
+    "category": "DeveloperTool",
+    "shortDescription": "Hermes Agent 桌面管理客户端",
+    "longDescription": "面向 hermes-agent 的 0 侵入桌面管理客户端，负责安装、配置、诊断、网关、扩展、技能和运行闭环。"
   }
 }

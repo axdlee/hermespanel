@@ -43,6 +43,10 @@ impl HermesManager {
         hermes::run_installation_action(action)
     }
 
+    pub fn run_config_compat_action(&self, action: &str) -> AppResult<CommandRunResult> {
+        hermes::run_config_compat_action(Some(&self.home.profile_name), action)
+    }
+
     pub fn dashboard(&self) -> AppResult<DashboardSnapshot> {
         hermes::read_dashboard_snapshot(&self.home)
     }

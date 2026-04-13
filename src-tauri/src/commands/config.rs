@@ -1,5 +1,5 @@
 use crate::application::hermes_manager::HermesManager;
-use crate::models::{ConfigDocuments, ConfigWorkspace, EnvWorkspace, GatewayWorkspace};
+use crate::models::{CommandRunResult, ConfigDocuments, ConfigWorkspace, EnvWorkspace, GatewayWorkspace};
 
 #[tauri::command]
 pub fn get_config_documents(profile: Option<String>) -> Result<ConfigDocuments, String> {
@@ -49,5 +49,15 @@ pub fn save_structured_gateway(
 ) -> Result<ConfigDocuments, String> {
     HermesManager::new(profile.as_deref())
         .and_then(|manager| manager.save_structured_gateway(&request))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn run_config_compat_action(
+    action: String,
+    profile: Option<String>,
+) -> Result<CommandRunResult, String> {
+    HermesManager::new(profile.as_deref())
+        .and_then(|manager| manager.run_config_compat_action(&action))
         .map_err(|error| error.to_string())
 }

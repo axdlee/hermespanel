@@ -1,5 +1,5 @@
 import { api } from '../lib/api';
-import { handoffToTerminal, openFinderLocation } from '../lib/desktop';
+import { openFinderLocation } from '../lib/desktop';
 import {
   buildDiagnosticsDrilldownIntent,
   buildExtensionsDrilldownIntent,
@@ -18,7 +18,6 @@ import {
 } from '../lib/panel-state';
 import { enabledToolCount, isRemoteDelivery, localRuntimeSkillCount, pluginsCount, totalToolCount } from '../lib/runtime';
 import {
-  attrsToString,
   buttonHtml,
   commandResultHtml,
   emptyStateHtml,
@@ -26,6 +25,7 @@ import {
   pillHtml,
   statusDotHtml,
 } from './native-helpers';
+import { infoTipHtml, shortcutCardHtml } from './workbench-helpers';
 
 const CONFIG_WORKBENCH_KEYS = ['config-check', 'doctor', 'memory-status', 'gateway-status'];
 const MODEL_PROVIDER_PRESETS = [
@@ -575,29 +575,6 @@ function runtimeWarnings(data, snapshot, skills, extensions, cronSnapshot) {
   return Array.from(new Set(warnings));
 }
 
-function infoTipHtml(content) {
-  return `
-    <span class="info-tip" tabindex="0" aria-label="更多信息">
-      <span class="info-tip-trigger">?</span>
-      <span class="info-tip-bubble">${escapeHtml(content)}</span>
-    </span>
-  `;
-}
-
-function shortcutCardHtml({ action, label, meta, active = false, attrs = {} }) {
-  return `
-    <button
-      type="button"
-      class="workspace-shortcut-card${active ? ' active' : ''}"
-      data-action="${escapeHtml(action)}"
-      ${attrsToString(attrs)}
-    >
-      <strong>${escapeHtml(label)}</strong>
-      <span>${escapeHtml(meta)}</span>
-    </button>
-  `;
-}
-
 function workspaceSectionFromFocus(focus) {
   switch (focus) {
     case 'model':
@@ -905,19 +882,18 @@ function renderConfigRail(view, context) {
 
     <section class="workspace-rail-section workspace-compat-card">
       <div class="workspace-rail-section-header">
-        <span class="workspace-rail-section-title">高级兼容动作</span>
+        <span class="workspace-rail-section-title">历史迁移</span>
         ${buttonHtml({
           action: 'toggle-compatibility-actions',
           label: view.showCompatibilityActions ? '收起' : '展开',
           kind: 'secondary',
         })}
       </div>
-      <p class="helper-text">只保留系统边界动作；模型、通道、记忆、插件、skills 优先走客户端工作台。</p>
+      <p class="helper-text">只保留旧配置接管；模型、通道、记忆、插件和 skills 已优先收回客户端工作台。</p>
       ${view.showCompatibilityActions ? `
         <div class="workspace-compat-panel">
-          ${buttonHtml({ action: 'terminal-setup', label: '官方 Setup', disabled: actionBusy || !installation.binaryFound })}
-          ${buttonHtml({ action: 'terminal-config-migrate', label: '迁移旧配置', disabled: actionBusy || !installation.binaryFound })}
-          ${buttonHtml({ action: 'terminal-claw-migrate', label: '导入 OpenClaw', disabled: actionBusy || !installation.binaryFound })}
+          ${buttonHtml({ action: 'compat-config-migrate', label: view.runningAction === 'config:compat-migrate' ? '迁移中…' : '迁移旧配置', kind: 'primary', disabled: actionBusy || !installation.binaryFound })}
+          ${buttonHtml({ action: 'compat-claw-migrate', label: view.runningAction === 'config:claw-migrate' ? '导入中…' : '导入 OpenClaw', disabled: actionBusy || !installation.binaryFound })}
         </div>
       ` : ''}
     </section>
@@ -934,7 +910,7 @@ function renderStructuredControls(view) {
           <div>
             <div class="panel-title-row">
               <strong>结构化控制面</strong>
-              ${infoTipHtml('优先在客户端里直接完成模型、memory、toolsets 等高频配置，尽量减少回 Hermes CLI 跑交互式向导。')}
+              ${infoTipHtml('优先在客户端里直接完成模型、memory、toolsets 等高频配置，尽量减少回官方交互命令。')}
             </div>
           </div>
           <div class="pill-row">
@@ -1580,9 +1556,9 @@ function renderPage(view) {
     <div class="page-header">
       <div class="panel-title-row">
         <h1 class="page-title">配置中心</h1>
-        ${infoTipHtml('配置页只保留文件编辑、官方向导接管和运行体检，说明信息后置到提示里，避免抢主操作区。')}
+        ${infoTipHtml('优先在客户端内直接完成模型、通道、toolsets、记忆和凭证接管；历史迁移动作被收进侧栏，不再抢主操作区。')}
       </div>
-      <p class="page-desc">文件、结构化控制和体检在这里合流。</p>
+      <p class="page-desc">优先在这里完成配置接管，再去扩展、网关和诊断页做运行态闭环。</p>
     </div>
 
     ${view.investigation ? `
@@ -1748,7 +1724,7 @@ function renderPage(view) {
             <p class="config-section-desc">这里保留最近一次原始输出。</p>
           </div>
         </div>
-        ${commandResultHtml(view.lastResult, '尚未执行命令', '保存、体检或交接 Terminal 后，这里会保留最近一次原始结果。')}
+        ${commandResultHtml(view.lastResult, '尚未执行命令', '保存、体检或执行历史迁移动作后，这里会保留最近一次原始结果。')}
       </section>
 
       <section class="config-section">
@@ -1990,26 +1966,19 @@ async function saveStructuredEnv(view) {
   }
 }
 
-async function runTerminalAction(view, actionKey, label, command, options = {}) {
+async function runConfigCompatAction(view, actionKey, action, label) {
   view.runningAction = actionKey;
   renderPage(view);
   try {
-    await handoffToTerminal({
-      actionKey,
-      command,
-      confirmMessage: options.confirmMessage,
-      label,
-      notify,
-      onResult: (nextLabel, result) => {
-        storeResult(view, nextLabel, result);
-      },
-      profile: view.profile,
-      setBusy: (value) => {
-        view.runningAction = value;
-        renderPage(view);
-      },
-      workingDirectory: options.workingDirectory ?? (view.installation?.hermesHomeExists ? view.installation.hermesHome : null),
-    });
+    const result = await api.runConfigCompatAction(action, view.profile);
+    storeResult(view, label, result);
+    notify(result.success ? 'success' : 'error', `${label} 已执行。`);
+    await Promise.all([
+      loadShell(view.profile, { silent: true }),
+      loadData(view, { refreshEditors: true, silent: true }),
+    ]);
+  } catch (reason) {
+    notify('error', String(reason));
   } finally {
     view.runningAction = null;
     renderPage(view);
@@ -2426,38 +2395,11 @@ function bindEvents(view) {
         case 'save-env-verify':
           await saveDocument(view, 'env', true);
           return;
-        case 'terminal-setup':
-          await runTerminalAction(view, 'config:setup', '全量 Setup', view.installation.setupCommand);
+        case 'compat-config-migrate':
+          await runConfigCompatAction(view, 'config:compat-migrate', 'config-migrate', '迁移旧配置');
           return;
-        case 'terminal-model':
-          queueWorkspaceFocus(view, 'control', 'model-presets');
-          notify('info', '模型与 Provider 已收回配置控制面。');
-          return;
-        case 'terminal-config-migrate':
-          await runTerminalAction(view, 'config:migrate', '迁移配置', view.installation.configMigrateCommand);
-          return;
-        case 'terminal-claw-migrate':
-          await runTerminalAction(view, 'config:claw-migrate', '导入 OpenClaw', view.installation.clawMigrateCommand);
-          return;
-        case 'terminal-backend':
-          queueWorkspaceFocus(view, 'control', 'runtime-presets');
-          notify('info', 'Terminal backend 已收回配置控制面。');
-          return;
-        case 'terminal-tools':
-          queueWorkspaceFocus(view, 'control', 'toolsets-presets');
-          notify('info', 'Toolsets 已收回配置控制面。');
-          return;
-        case 'terminal-skills':
-          navigate('skills');
-          return;
-        case 'terminal-memory':
-          navigate('memory');
-          return;
-        case 'terminal-plugins':
-          navigate('extensions', view.cachedIntents?.extensionsIntent);
-          return;
-        case 'terminal-gateway-setup':
-          navigate('gateway', view.cachedIntents?.gatewayIntent);
+        case 'compat-claw-migrate':
+          await runConfigCompatAction(view, 'config:claw-migrate', 'claw-migrate', '导入 OpenClaw');
           return;
         case 'open-home':
           await runFinderAction(view, 'finder:home', 'Hermes Home', view.data.hermesHome, false);

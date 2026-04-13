@@ -109,6 +109,8 @@ export const api = {
     call<ConfigDocuments>('save_structured_env', withProfile(profile, { request })),
   saveStructuredGateway: (request: GatewayWorkspace, profile?: string) =>
     call<ConfigDocuments>('save_structured_gateway', withProfile(profile, { request })),
+  runConfigCompatAction: (action: 'config-migrate' | 'claw-migrate', profile?: string) =>
+    call<CommandRunResult>('run_config_compat_action', withProfile(profile, { action })),
   listSessions: (limit?: number, profile?: string) =>
     call<SessionRecord[]>('list_sessions', withProfile(profile, { limit })),
   getSessionDetail: (sessionId: string, profile?: string) =>

@@ -19,7 +19,6 @@ import {
 } from '../lib/panel-state';
 import { countConnectedPlatforms, cronTone, hasCronFailure, isRemoteDelivery, platformTone } from '../lib/runtime';
 import {
-  attrsToString,
   buttonHtml,
   commandResultHtml,
   emptyStateHtml,
@@ -28,6 +27,7 @@ import {
   pillHtml,
   statusDotHtml,
 } from './native-helpers';
+import { infoTipHtml, shortcutCardHtml } from './workbench-helpers';
 
 const RESET_MODE_OPTIONS = [
   { key: 'both', label: '双重重置' },
@@ -116,29 +116,6 @@ function relaySeed(view) {
         headline: '来自 Gateway 的链路下钻',
         description: '继续围绕消息平台、会话策略和远端交付做排障。',
       };
-}
-
-function infoTipHtml(content) {
-  return `
-    <span class="info-tip" tabindex="0" aria-label="更多信息">
-      <span class="info-tip-trigger">?</span>
-      <span class="info-tip-bubble">${escapeHtml(content)}</span>
-    </span>
-  `;
-}
-
-function shortcutCardHtml({ action, label, meta, active = false, attrs = {} }) {
-  return `
-    <button
-      type="button"
-      class="workspace-shortcut-card${active ? ' active' : ''}"
-      data-action="${escapeHtml(action)}"
-      ${attrsToString(attrs)}
-    >
-      <strong>${escapeHtml(label)}</strong>
-      <span>${escapeHtml(meta)}</span>
-    </button>
-  `;
 }
 
 function cloneGatewayWorkspace(workspace = {}) {

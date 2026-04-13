@@ -25,6 +25,7 @@ pub fn run() {
             commands::config::save_structured_config,
             commands::config::save_structured_env,
             commands::config::save_structured_gateway,
+            commands::config::run_config_compat_action,
             commands::extensions::get_extensions_snapshot,
             commands::extensions::run_tool_action,
             commands::extensions::run_plugin_action,

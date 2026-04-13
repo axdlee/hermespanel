@@ -3,7 +3,7 @@ import {
   RUNTIME_DIAGNOSTIC_COMMANDS,
   getDiagnosticCommand,
 } from '../lib/diagnostics';
-import { handoffToTerminal, openFinderLocation } from '../lib/desktop';
+import { openFinderLocation } from '../lib/desktop';
 import {
   buildConfigDrilldownIntent,
   buildExtensionsDrilldownIntent,
@@ -28,6 +28,7 @@ import {
   keyValueRowsHtml,
   pillHtml,
 } from './native-helpers';
+import { infoTipHtml } from './workbench-helpers';
 
 let activeView = null;
 
@@ -37,15 +38,6 @@ const LOG_OPTIONS = [
   { key: 'errors', label: 'errors.log' },
   { key: 'agent', label: 'agent.log' },
 ];
-
-function infoTipHtml(content) {
-  return `
-    <span class="info-tip" tabindex="0" aria-label="更多信息">
-      <span class="info-tip-trigger">?</span>
-      <span class="info-tip-bubble">${escapeHtml(content)}</span>
-    </span>
-  `;
-}
 
 function directoryOf(path) {
   const normalized = String(path ?? '').trim();
@@ -290,9 +282,9 @@ function renderPage(view) {
     <div class="page-header">
       <div class="panel-title-row">
         <h1 class="page-title">诊断工作台</h1>
-        ${infoTipHtml('诊断页只保留安全的体检命令、日志预览和 Finder / Terminal 修复接力，不用大段文字抢占排障区。')}
+        ${infoTipHtml('诊断页只保留体检、日志预览和客户端内修复动作；大段说明后置到提示里，不抢排障区。')}
       </div>
-      <p class="page-desc">先诊断，再把你送到真正能修问题的 Hermes 官方入口，而不是停留在只读摘要。</p>
+      <p class="page-desc">先诊断，再跳到真正能修问题的工作台，或直接在客户端里执行边界修复动作。</p>
     </div>
 
     <section class="config-section">
@@ -396,11 +388,11 @@ function renderPage(view) {
 
     <section class="config-section">
       <div class="config-section-header">
-        <div>
-          <h2 class="config-section-title">修复动作台</h2>
-          <p class="config-section-desc">参考 clawpanel 的闭环思路，先诊断，再送你回 Hermes 官方 setup、model、tools、skills 和 plugins 入口。</p>
+          <div>
+            <h2 class="config-section-title">修复动作台</h2>
+            <p class="config-section-desc">参考 clawpanel 的闭环思路，优先回结构化工作台；安装升级这类边界动作由客户端后端直接执行。</p>
+          </div>
         </div>
-      </div>
       <div class="control-card-grid">
         <section class="action-card action-card-compact">
           <div class="action-card-header">
@@ -411,10 +403,10 @@ function renderPage(view) {
             ${pillHtml(view.installation?.binaryFound ? 'CLI 可用' : 'CLI 缺失', view.installation?.binaryFound ? 'good' : 'bad')}
           </div>
           <p class="action-card-copy">如果 CLI 本体都不稳，后续 gateway、skills、plugins、memory 的问题很多都会是假问题。</p>
-          <p class="command-line">${escapeHtml(view.installation ? `${view.installation.quickInstallCommand} · ${view.installation.updateCommand}` : '未读取安装命令')}</p>
+          <p class="command-line">客户端内执行安装脚本与更新命令，不再默认弹出 Terminal。</p>
           <div class="toolbar">
-            ${buttonHtml({ action: 'terminal-install', label: view.runningDesktopAction === 'diagnostics:install' ? (view.installation?.binaryFound ? '重新安装 CLI…' : '一键安装 CLI…') : (view.installation?.binaryFound ? '重新安装 CLI' : '一键安装 CLI'), kind: 'primary', disabled: state.actionBusy || !view.installation })}
-            ${buttonHtml({ action: 'terminal-update', label: view.runningDesktopAction === 'diagnostics:update' ? '升级 CLI…' : '升级 CLI', disabled: state.actionBusy || !view.installation?.binaryFound })}
+            ${buttonHtml({ action: 'install-cli', label: view.runningDesktopAction === 'diagnostics:install' ? (view.installation?.binaryFound ? '重新安装 CLI…' : '一键安装 CLI…') : (view.installation?.binaryFound ? '重新安装 CLI' : '一键安装 CLI'), kind: 'primary', disabled: state.actionBusy || !view.installation })}
+            ${buttonHtml({ action: 'update-cli', label: view.runningDesktopAction === 'diagnostics:update' ? '升级 CLI…' : '升级 CLI', disabled: state.actionBusy || !view.installation?.binaryFound })}
             ${buttonHtml({ action: 'navigate-page', label: '进入控制中心', attrs: { 'data-page': 'dashboard' }, disabled: state.actionBusy })}
           </div>
         </section>
@@ -577,8 +569,8 @@ function renderPage(view) {
       <section class="config-section">
         <div class="config-section-header">
           <div>
-            <h2 class="config-section-title">CLI 输出</h2>
-            <p class="config-section-desc">保留 Hermes 原生命令的 stdout / stderr，不重新发明另一套解释器。</p>
+            <h2 class="config-section-title">原始输出</h2>
+            <p class="config-section-desc">保留 Hermes 原生命令的 stdout / stderr，方便把客户端动作和底层结果对齐。</p>
           </div>
         </div>
         ${commandResultHtml(view.resultPayload, '尚未执行命令', '先从上面的运行诊断或能力诊断里选一项，这里就会保留 Hermes 原始输出。')}
@@ -587,7 +579,7 @@ function renderPage(view) {
         <div class="config-section-header">
           <div>
             <h2 class="config-section-title">相关日志预览</h2>
-            <p class="config-section-desc">命令执行后会自动切到更相关的日志类型，帮助你把 CLI 结果和运行期日志串起来看。</p>
+            <p class="config-section-desc">命令执行后会自动切到更相关的日志类型，帮助你把原始结果和运行期日志串起来看。</p>
           </div>
           <div class="toolbar">
             <select class="select-input" id="diagnostics-log-select">
@@ -723,23 +715,24 @@ async function openFinderAction(view, path, label, revealInFinder = false) {
   });
 }
 
-async function openTerminalAction(view, actionKey, label, command, confirmMessage) {
-  await handoffToTerminal({
-    actionKey,
-    command,
-    confirmMessage,
-    label,
-    notify,
-    onResult: (resultLabel, result) => {
-      storeResult(view, resultLabel, result, null);
-    },
-    profile: view.profile,
-    setBusy: (value) => {
-      view.runningDesktopAction = value;
-      renderPage(view);
-    },
-    workingDirectory: view.installation?.hermesHomeExists ? view.installation.hermesHome : null,
-  });
+async function runInstallationAction(view, action, actionKey, label) {
+  view.runningDesktopAction = actionKey;
+  renderPage(view);
+
+  try {
+    const result = await api.runInstallationAction(action);
+    storeResult(view, label, result, null);
+    notify(result.success ? 'success' : 'error', `${label} 已执行。`);
+    await Promise.all([
+      loadContext(view, true),
+      loadLogPreview(view, view.logName, true),
+    ]);
+  } catch (reason) {
+    notify('error', String(reason));
+  } finally {
+    view.runningDesktopAction = null;
+    renderPage(view);
+  }
 }
 
 function syncWithPanelState(view) {
@@ -841,24 +834,24 @@ function bindEvents(view) {
             await openFinderAction(view, state.logsDir, 'logs 目录');
           }
           return;
-        case 'terminal-install':
+        case 'install-cli':
           if (view.installation) {
-            await openTerminalAction(
+            await runInstallationAction(
               view,
+              'install',
               'diagnostics:install',
               view.installation.binaryFound ? '重新安装 CLI' : '一键安装 CLI',
-              view.installation.quickInstallCommand,
             );
           }
           return;
-        case 'terminal-update':
+        case 'update-cli':
           if (view.installation) {
-            await openTerminalAction(view, 'diagnostics:update', '升级 CLI', view.installation.updateCommand);
+            await runInstallationAction(view, 'update', 'diagnostics:update', '升级 CLI');
           }
           return;
         case 'goto-config-model':
           navigate('config', buildConfigDrilldownIntent(relaySeed(view), {
-            description: '继续在配置中心直接修改模型、provider 与默认链路，而不是回 Terminal 跑 setup/model。',
+            description: '继续在配置中心直接修改模型、provider 与默认链路，不再依赖 setup/model 命令。',
             focus: 'model',
             suggestedCommand: 'config-check',
           }));
