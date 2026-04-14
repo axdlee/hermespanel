@@ -26,25 +26,35 @@ jobs:
             os: macos-14
             args: --target aarch64-apple-darwin
             rust_target: aarch64-apple-darwin
+            full_package: false
           - name: macOS (Intel)
             os: macos-13
             args: --target x86_64-apple-darwin
             rust_target: x86_64-apple-darwin
-          - name: Windows
-            os: windows-latest
-            args: ""
-            rust_target: ""
-          - name: Linux
+            full_package: false
+          - name: Linux (x64)
             os: ubuntu-latest
             args: ""
             rust_target: ""
+            full_package: false
+          - name: Windows (x64)
+            os: windows-latest
+            args: ""
+            rust_target: ""
+            full_package: false
+          - name: Windows (x64) 完整包
+            os: windows-latest
+            args: ""
+            rust_target: ""
+            full_package: true
 
     steps:
       - name: 签出代码
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: 解析发布标签
-        id: vars
         shell: bash
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -85,7 +95,8 @@ jobs:
             libgtk-3-dev \
             libayatana-appindicator3-dev
 
-      - name: 构建并上传安装包
+      - name: 构建并上传标准安装包
+        if: matrix.platform.full_package == false
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -96,3 +107,102 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.platform.args }}
+
+      - name: 开启 Windows 离线 WebView2 模式
+        if: matrix.platform.full_package == true
+        shell: bash
+        run: |
+          node -e "
+            const fs = require('fs');
+            const file = 'src-tauri/tauri.conf.json';
+            const conf = JSON.parse(fs.readFileSync(file, 'utf8'));
+            conf.bundle = conf.bundle || {};
+            conf.bundle.windows = conf.bundle.windows || {};
+            conf.bundle.windows.webviewInstallMode = { type: 'offlineInstaller', silent: true };
+            fs.writeFileSync(file, JSON.stringify(conf, null, 2) + '\n');
+          "
+
+      - name: 构建 Windows 完整包
+        if: matrix.platform.full_package == true
+        shell: bash
+        run: npx tauri build
+
+      - name: 上传 Windows 完整包
+        if: matrix.platform.full_package == true
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${TAG_NAME#v}"
+          BUNDLE_DIR="src-tauri/target/release/bundle"
+
+          gh release create "$TAG_NAME" \
+            --title "HermesPanel $TAG_NAME" \
+            --notes "自动构建的多平台安装包。" 2>/dev/null || true
+
+          if [ -f "${BUNDLE_DIR}/nsis/HermesPanel_${VERSION}_x64-setup.exe" ]; then
+            mv "${BUNDLE_DIR}/nsis/HermesPanel_${VERSION}_x64-setup.exe" \
+               "${BUNDLE_DIR}/nsis/HermesPanel_${VERSION}_x64-setup-full.exe"
+            gh release upload "$TAG_NAME" \
+               "${BUNDLE_DIR}/nsis/HermesPanel_${VERSION}_x64-setup-full.exe" --clobber
+          fi
+
+          if [ -f "${BUNDLE_DIR}/msi/HermesPanel_${VERSION}_x64_en-US.msi" ]; then
+            mv "${BUNDLE_DIR}/msi/HermesPanel_${VERSION}_x64_en-US.msi" \
+               "${BUNDLE_DIR}/msi/HermesPanel_${VERSION}_x64-full_en-US.msi"
+            gh release upload "$TAG_NAME" \
+               "${BUNDLE_DIR}/msi/HermesPanel_${VERSION}_x64-full_en-US.msi" --clobber
+          fi
+
+  update-release-notes:
+    name: 更新 Release Notes
+    needs: build
+    runs-on: ubuntu-latest
+    if: always() && needs.build.result != 'cancelled'
+    permissions:
+      contents: write
+
+    steps:
+      - name: 解析发布标签
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "TAG_NAME=${{ github.event.inputs.tag_name }}" >> "$GITHUB_ENV"
+          else
+            echo "TAG_NAME=${{ github.ref_name }}" >> "$GITHUB_ENV"
+          fi
+
+      - name: 生成 Release Notes
+        shell: bash
+        run: |
+          cat > RELEASE_NOTES.md <<'EOF'
+          ## HermesPanel 自动发布
+
+          这个版本由 GitHub Actions 自动构建并上传。
+
+          ### 安装包覆盖
+
+          - macOS Apple Silicon
+          - macOS Intel
+          - Windows 标准安装包
+          - Windows 完整包（内置离线 WebView2 安装器）
+          - Linux 安装包
+
+          ### 使用建议
+
+          - 已安装 WebView2 的 Windows 机器优先使用标准安装包
+          - 内网、离线或 WebView2 环境不稳定的 Windows 机器可直接使用 `full` 包
+          - macOS 请按芯片架构选择 Apple Silicon / Intel 对应版本
+
+          ### 说明
+
+          - 当前发布链路会自动构建 Tauri 安装包并上传到当前 Release
+          - 如果后续需要代码签名、公证或更多产物命名策略，可在此工作流基础上继续扩展
+          EOF
+
+      - name: 写回 Release Notes
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit "$TAG_NAME" --notes-file RELEASE_NOTES.md

@@ -182,9 +182,71 @@ export interface PluginCatalogItem {
   installed: boolean;
 }
 
+export interface PluginManifestDetail {
+  name: string;
+  category: string;
+  relativePath: string;
+  directoryPath: string;
+  manifestPath: string;
+  description: string;
+  requiresEnv: string[];
+  pipDependencies: string[];
+  externalDependencies: PluginExternalDependency[];
+  rawYaml: string;
+}
+
+export interface PluginManifestSaveRequest {
+  manifestPath: string;
+  name: string;
+  description: string;
+  requiresEnv: string[];
+  pipDependencies: string[];
+  externalDependencies: PluginExternalDependency[];
+}
+
+export interface PluginReadmeDetail {
+  name: string;
+  category: string;
+  relativePath: string;
+  directoryPath: string;
+  filePath: string;
+  exists: boolean;
+  content: string;
+}
+
+export interface PluginReadmeSaveRequest {
+  filePath: string;
+  content: string;
+}
+
+export interface PluginDeleteRequest {
+  directoryPath: string;
+  name: string;
+}
+
+export interface PluginDeleteResult {
+  name: string;
+  directoryPath: string;
+  removedFiles: number;
+}
+
 export interface PluginImportRequest {
   sourcePath: string;
   category: string;
+  overwrite: boolean;
+}
+
+export interface PluginCreateRequest {
+  name: string;
+  category: string;
+  description: string;
+  overwrite: boolean;
+}
+
+export interface PluginCreateResult {
+  created: PluginCatalogItem;
+  targetDirectory: string;
+  createdFiles: number;
   overwrite: boolean;
 }
 
@@ -271,6 +333,7 @@ export interface SkillItem {
 
 export interface SkillFileDetail {
   name: string;
+  description: string;
   category: string;
   relativePath: string;
   filePath: string;
@@ -280,6 +343,12 @@ export interface SkillFileDetail {
 export interface SkillSaveRequest {
   filePath: string;
   content: string;
+}
+
+export interface SkillFrontmatterSaveRequest {
+  filePath: string;
+  name: string;
+  description: string;
 }
 
 export interface SkillCreateRequest {
@@ -302,6 +371,17 @@ export interface SkillImportResult {
   targetDirectory: string;
   copiedFiles: number;
   overwrite: boolean;
+}
+
+export interface SkillDeleteRequest {
+  filePath: string;
+  name: string;
+}
+
+export interface SkillDeleteResult {
+  name: string;
+  directoryPath: string;
+  removedFiles: number;
 }
 
 export interface LogReadResult {

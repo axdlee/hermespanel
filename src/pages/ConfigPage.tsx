@@ -335,7 +335,7 @@ export function ConfigPage({ notify, profile, navigate, pageIntent, consumePageI
 
       <Panel
         title="配置接管动作台"
-        subtitle="参考 ClawPanel 的闭环思路，把 Hermes 配置相关的交互式命令直接收进配置页，不再只是编辑 `config.yaml`。"
+        subtitle="参考闭环思路，把 Hermes 配置相关的交互式命令直接收进配置页，不再只是编辑 `config.yaml`。"
       >
         <div className="control-card-grid">
           <section className="action-card action-card-compact">
@@ -546,7 +546,7 @@ export function ConfigPage({ notify, profile, navigate, pageIntent, consumePageI
           )}
         </Panel>
 
-        <Panel title="校验与修复工作台" subtitle="参考 ClawPanel 的治理工作台思路，把保存、体检、验证和跳转收成一条顺手路径。">
+        <Panel title="校验与修复工作台" subtitle="治理工作台思路，把保存、体检、验证和跳转收成一条顺手路径。">
           <div className="workbench-grid">
             {workbenchCommands.map((command) => (
               <section className="action-card" key={command.key}>

@@ -2,7 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { Button, EmptyState, KeyValueRow, MetricCard, Panel, Pill, Toolbar } from '../components/ui';
 import { api } from '../lib/api';
-import { handoffToTerminal, openFinderLocation } from '../lib/desktop';
+import {
+  buildConfigDrilldownIntent,
+  buildDiagnosticsDrilldownIntent,
+  buildExtensionsDrilldownIntent,
+  buildGatewayDrilldownIntent,
+  buildLogsDrilldownIntent,
+  type DrilldownSeed,
+} from '../lib/drilldown';
+import { openFinderLocation } from '../lib/desktop';
 import { isRemoteDelivery, platformTone } from '../lib/runtime';
 import type {
   CommandRunResult,
@@ -20,7 +28,7 @@ import type {
   ProfileRenameRequest,
   ProfileSummary,
 } from '../types';
-import type { PageProps } from './types';
+import type { AppPageKey, MemoryPageIntent, PageIntent, PageProps } from './types';
 
 type CreateMode = 'fresh' | 'clone' | 'clone-all';
 
@@ -138,7 +146,29 @@ function runtimeHealthWarnings(profile: ProfileSummary, bundle: ProfileRuntimeBu
   return warnings;
 }
 
-export function ProfilesPage({ notify, profile, profiles, refreshProfiles }: PageProps) {
+function profileRelaySeed(profileName: string, bundle?: ProfileRuntimeBundle | null): DrilldownSeed {
+  const toolNames = Array.from(
+    new Set((bundle?.extensions.toolPlatforms ?? []).flatMap((item) => item.enabledTools)),
+  );
+
+  return {
+    sourcePage: 'profiles',
+    headline: `从 Profile 管理继续治理 ${profileName}`,
+    description: `继续围绕 ${profileName} 的配置、Gateway、扩展和运行物料做闭环。`,
+    context: bundle
+      ? {
+          sessionId: `profile:${profileName}`,
+          title: `${profileName} profile`,
+          source: bundle.dashboard.gateway?.platforms[0]?.name || 'profiles',
+          model: bundle.config.summary.modelDefault || null,
+          preview: `${bundle.config.summary.modelProvider || 'provider 未配置'} / ${bundle.config.summary.contextEngine || 'context 未配置'}`,
+          toolNames,
+        }
+      : undefined,
+  };
+}
+
+export function ProfilesPage({ notify, profile, profiles, refreshProfiles, navigate }: PageProps) {
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [compareName, setCompareName] = useState<string | null>(null);
 
@@ -273,6 +303,53 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles }: Pag
     ? profileDrifts(selectedProfile, selectedRuntime, compareProfile, compareRuntime)
     : [];
   const selectedInstallation = selectedRuntime?.installation;
+  const selectedRelaySeed = selectedProfile ? profileRelaySeed(selectedProfile.name, selectedRuntime ?? null) : null;
+  const configModelIntent = selectedProfile && selectedRelaySeed
+    ? buildConfigDrilldownIntent(selectedRelaySeed, {
+        description: `继续在 ${selectedProfile.name} 的配置中心直接调整模型、provider 和默认链路。`,
+        focus: 'model',
+        suggestedCommand: 'config-check',
+      })
+    : null;
+  const configCredentialsIntent = selectedProfile && selectedRelaySeed
+    ? buildConfigDrilldownIntent(selectedRelaySeed, {
+        description: `继续在 ${selectedProfile.name} 的配置中心直接核对 API Key、通道和运行超时。`,
+        focus: 'credentials',
+        suggestedCommand: 'config-check',
+      })
+    : null;
+  const gatewayWorkbenchIntent = selectedProfile && selectedRelaySeed
+    ? buildGatewayDrilldownIntent(selectedRelaySeed, {
+        description: `继续在 ${selectedProfile.name} 的 Gateway 工作台处理 service、平台接入和投递链路。`,
+      })
+    : null;
+  const extensionsWorkbenchIntent = selectedProfile && selectedRelaySeed
+    ? buildExtensionsDrilldownIntent(selectedRelaySeed, {
+        description: `继续在 ${selectedProfile.name} 的扩展工作台治理 plugins、tools 和运行能力面。`,
+        rawKind: 'plugins',
+      })
+    : null;
+  const diagnosticsWorkbenchIntent = selectedProfile && selectedRelaySeed
+    ? buildDiagnosticsDrilldownIntent(selectedRelaySeed, {
+        description: `继续围绕 ${selectedProfile.name} 的安装、配置、能力面和 Gateway 做诊断。`,
+        suggestedCommand: selectedInstallation?.binaryFound ? 'doctor' : 'dump',
+      })
+    : null;
+  const logsWorkbenchIntent = selectedProfile && selectedRelaySeed
+    ? buildLogsDrilldownIntent(selectedRelaySeed, {
+        description: `继续查看 ${selectedProfile.name} 的运行日志、治理回执和异常输出。`,
+        logName: remoteJobCount(selectedRuntime) > 0 ? 'gateway.error' : undefined,
+      })
+    : null;
+  const memoryWorkbenchIntent: MemoryPageIntent | null = selectedProfile
+    ? {
+        kind: 'memory',
+        sourcePage: 'profiles',
+        headline: `从 Profile 管理继续治理 ${selectedProfile.name}`,
+        description: `继续在 ${selectedProfile.name} 的记忆工作台核对 SOUL、长期记忆与用户画像。`,
+        selectedKey: selectedRuntime?.config.summary.memoryEnabled === false ? 'soul' : 'memory',
+      }
+    : null;
 
   async function refreshProfileWorkspace(forceName?: string) {
     const target = forceName ?? selectedProfile?.name;
@@ -543,30 +620,28 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles }: Pag
     });
   }
 
-  async function openInTerminal(profileName: string, actionKey: string, label: string, command: string, confirmMessage?: string) {
-    await handoffToTerminal({
-      actionKey,
-      command,
-      confirmMessage,
-      label,
-      notify,
-      onResult: (resultLabel, result) => {
-        setLastCommandLabel(resultLabel);
-        setLastCommand(result);
-      },
-      profile: profileName,
-      setBusy: setRunningAction,
-      workingDirectory: runtimeBundles[profileName]?.installation.hermesHomeExists
-        ? runtimeBundles[profileName]?.installation.hermesHome
-        : null,
-    });
+  async function enterProfileWorkbench(page: AppPageKey, options?: { actionKey?: string; intent?: PageIntent | null }) {
+    if (!selectedProfile) {
+      return;
+    }
+
+    const actionKey = options?.actionKey ?? `goto:${selectedProfile.name}:${page}`;
+    setRunningAction(actionKey);
+    try {
+      await refreshProfiles(selectedProfile.name);
+      navigate(page, options?.intent ?? null);
+    } catch (reason) {
+      notify('error', String(reason));
+    } finally {
+      setRunningAction(null);
+    }
   }
 
   return (
     <div className="two-column wide-left">
       <Panel
         title="Profile 管理"
-        subtitle="参考 ClawPanel 的多实例治理思路，把 Hermes profile 从“目录列表”升级成“运行态工作区”来管理。"
+        subtitle="多实例治理思路，把 Hermes profile 从“目录列表”升级成“运行态工作区”来管理。"
         aside={
           <Toolbar>
             <Button onClick={() => void refreshProfileWorkspace()}>刷新列表</Button>
@@ -659,25 +734,41 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles }: Pag
         </Panel>
 
         <Panel
-          title="Profile 接管与工作区"
-          subtitle="把每个 Hermes profile 当成独立实例来治理，直接接管 setup、gateway、skills、plugins 和记忆 Provider。"
+          title="实例工作台"
+          subtitle="把模型、通道、扩展、技能、记忆与诊断入口收回到客户端里，优先走结构化治理页面。"
+          aside={
+            selectedProfile ? (
+              <Toolbar>
+                <Button
+                  onClick={() => void refreshProfileWorkspace(selectedProfile.name)}
+                  disabled={runningAction !== null || selectedRuntimeLoading}
+                >
+                  {selectedRuntimeLoading ? '刷新中…' : '刷新实例'}
+                </Button>
+              </Toolbar>
+            ) : undefined
+          }
         >
-          {selectedProfile && selectedInstallation ? (
+          {selectedProfile ? (
             <div className="control-card-grid">
               <section className="action-card action-card-compact">
                 <div className="action-card-header">
                   <div>
                     <p className="eyebrow">Workspace</p>
-                    <h3 className="action-card-title">实例工作区</h3>
+                    <h3 className="action-card-title">实例主卡</h3>
                   </div>
                   <Pill tone={selectedProfile.isActive ? 'good' : 'warn'}>
                     {selectedProfile.isActive ? '当前默认' : '独立实例'}
                   </Pill>
                 </div>
                 <p className="action-card-copy">
-                  先确认 home、config、env、日志和状态文件都在，再决定是做迁移、修复还是切换默认 profile。
+                  先把这个 profile 的 home、config、env 和基础状态核准，再决定是否切换默认实例或进入专项工作台。
                 </p>
-                <p className="command-line">{selectedProfile.homePath}</p>
+                <div className="detail-list compact">
+                  <KeyValueRow label="Home" value={selectedProfile.homePath} />
+                  <KeyValueRow label="模型" value={selectedRuntime?.config.summary.modelDefault || selectedProfile.modelDefault || '—'} />
+                  <KeyValueRow label="Gateway" value={selectedRuntime?.dashboard.gateway?.gatewayState || selectedProfile.gatewayState || '—'} />
+                </div>
                 <Toolbar>
                   <Button onClick={() => void openInFinder(selectedProfile.homePath, `${selectedProfile.name} 目录`)} disabled={runningAction !== null}>
                     打开目录
@@ -707,41 +798,53 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles }: Pag
               <section className="action-card action-card-compact">
                 <div className="action-card-header">
                   <div>
-                    <p className="eyebrow">Bootstrap</p>
-                    <h3 className="action-card-title">Setup / Model / Gateway</h3>
+                    <p className="eyebrow">Workbench</p>
+                    <h3 className="action-card-title">配置 / Gateway / 扩展</h3>
                   </div>
-                  <Pill tone={selectedInstallation.binaryFound ? 'good' : 'bad'}>
-                    {selectedInstallation.binaryFound ? 'CLI 就绪' : 'CLI 缺失'}
+                  <Pill tone={selectedRuntime?.config.summary.modelDefault ? 'good' : 'warn'}>
+                    {selectedRuntime?.config.summary.modelDefault || '模型待配置'}
                   </Pill>
                 </div>
                 <p className="action-card-copy">
-                  针对选中的 profile 直接进入 Hermes 官方交互式向导，不让你在多实例之间来回跳。
-                </p>
-                <p className="command-line">
-                  {selectedInstallation.setupCommand} · {selectedInstallation.modelCommand} · {selectedInstallation.gatewaySetupCommand}
+                  模型、provider、凭证、通道和 toolsets 优先在结构化页面里治理，不再把常用接管动作丢给命令行向导。
                 </p>
                 <Toolbar>
                   <Button
                     kind="primary"
-                    onClick={() => void openInTerminal(selectedProfile.name, 'profile:setup', '全量 Setup', selectedInstallation.setupCommand)}
-                    disabled={runningAction !== null || !selectedInstallation.binaryFound}
+                    onClick={() => void enterProfileWorkbench('config', {
+                      actionKey: 'profile:goto-config-model',
+                      intent: configModelIntent,
+                    })}
+                    disabled={runningAction !== null || !configModelIntent}
                   >
-                    {runningAction === 'profile:setup' ? '全量 Setup…' : '全量 Setup'}
+                    {runningAction === 'profile:goto-config-model' ? '进入配置中心…' : '模型配置'}
                   </Button>
                   <Button
-                    onClick={() => void openInTerminal(selectedProfile.name, 'profile:model', '模型 / Provider', selectedInstallation.modelCommand)}
-                    disabled={runningAction !== null || !selectedInstallation.binaryFound}
+                    onClick={() => void enterProfileWorkbench('config', {
+                      actionKey: 'profile:goto-config-credentials',
+                      intent: configCredentialsIntent,
+                    })}
+                    disabled={runningAction !== null || !configCredentialsIntent}
                   >
-                    {runningAction === 'profile:model' ? '模型 / Provider…' : '模型 / Provider'}
+                    {runningAction === 'profile:goto-config-credentials' ? '进入配置中心…' : '凭证 / 通道'}
                   </Button>
                   <Button
-                    onClick={() => void openInTerminal(selectedProfile.name, 'profile:gateway-setup', 'Gateway Setup', selectedInstallation.gatewaySetupCommand)}
-                    disabled={runningAction !== null || !selectedInstallation.binaryFound}
+                    onClick={() => void enterProfileWorkbench('gateway', {
+                      actionKey: 'profile:goto-gateway',
+                      intent: gatewayWorkbenchIntent,
+                    })}
+                    disabled={runningAction !== null || !gatewayWorkbenchIntent}
                   >
-                    {runningAction === 'profile:gateway-setup' ? 'Gateway Setup…' : 'Gateway Setup'}
+                    {runningAction === 'profile:goto-gateway' ? '进入 Gateway…' : 'Gateway 工作台'}
                   </Button>
-                  <Button onClick={() => void refreshProfileWorkspace(selectedProfile.name)} disabled={runningAction !== null || selectedRuntimeLoading}>
-                    刷新实例
+                  <Button
+                    onClick={() => void enterProfileWorkbench('extensions', {
+                      actionKey: 'profile:goto-extensions',
+                      intent: extensionsWorkbenchIntent,
+                    })}
+                    disabled={runningAction !== null || !extensionsWorkbenchIntent}
+                  >
+                    {runningAction === 'profile:goto-extensions' ? '进入扩展页…' : '扩展工作台'}
                   </Button>
                 </Toolbar>
               </section>
@@ -750,42 +853,51 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles }: Pag
                 <div className="action-card-header">
                   <div>
                     <p className="eyebrow">Capability</p>
-                    <h3 className="action-card-title">Tools / Skills / Memory / Plugins</h3>
+                    <h3 className="action-card-title">技能 / 记忆 / 诊断 / 日志</h3>
                   </div>
-                  <Pill tone={selectedRuntime && enabledToolCount(selectedRuntime) > 0 ? 'good' : 'warn'}>
-                    {selectedRuntime ? `${enabledToolCount(selectedRuntime)} 个工具` : '待接管'}
+                  <Pill tone={selectedRuntime && selectedRuntime.extensions.runtimeSkills.length > 0 ? 'good' : 'warn'}>
+                    {selectedRuntime ? `${selectedRuntime.extensions.runtimeSkills.length} 个运行时技能` : '能力面待读取'}
                   </Pill>
                 </div>
                 <p className="action-card-copy">
-                  Hermes 的差异化能力面主要就在这里，尤其适合多 profile 环境下快速切换与验证。
-                </p>
-                <p className="command-line">
-                  {selectedInstallation.toolsSetupCommand} · {selectedInstallation.skillsConfigCommand} · hermes memory setup · hermes plugins
+                  把技能安装态、记忆文件、系统诊断和日志追踪都收进客户端闭环，异常再顺着页面间 intent 继续追。
                 </p>
                 <Toolbar>
                   <Button
-                    onClick={() => void openInTerminal(selectedProfile.name, 'profile:tools-setup', '工具选择', selectedInstallation.toolsSetupCommand)}
-                    disabled={runningAction !== null || !selectedInstallation.binaryFound}
+                    kind="primary"
+                    onClick={() => void enterProfileWorkbench('skills', {
+                      actionKey: 'profile:goto-skills',
+                    })}
+                    disabled={runningAction !== null}
                   >
-                    {runningAction === 'profile:tools-setup' ? '工具选择…' : '工具选择'}
+                    {runningAction === 'profile:goto-skills' ? '进入技能页…' : '技能工作台'}
                   </Button>
                   <Button
-                    onClick={() => void openInTerminal(selectedProfile.name, 'profile:skills-config', '技能开关', selectedInstallation.skillsConfigCommand)}
-                    disabled={runningAction !== null || !selectedInstallation.binaryFound}
+                    onClick={() => void enterProfileWorkbench('memory', {
+                      actionKey: 'profile:goto-memory',
+                      intent: memoryWorkbenchIntent,
+                    })}
+                    disabled={runningAction !== null || !memoryWorkbenchIntent}
                   >
-                    {runningAction === 'profile:skills-config' ? '技能开关…' : '技能开关'}
+                    {runningAction === 'profile:goto-memory' ? '进入记忆页…' : '记忆工作台'}
                   </Button>
                   <Button
-                    onClick={() => void openInTerminal(selectedProfile.name, 'profile:memory-setup', '记忆 Provider', 'hermes memory setup')}
-                    disabled={runningAction !== null || !selectedInstallation.binaryFound}
+                    onClick={() => void enterProfileWorkbench('diagnostics', {
+                      actionKey: 'profile:goto-diagnostics',
+                      intent: diagnosticsWorkbenchIntent,
+                    })}
+                    disabled={runningAction !== null || !diagnosticsWorkbenchIntent}
                   >
-                    {runningAction === 'profile:memory-setup' ? '记忆 Provider…' : '记忆 Provider'}
+                    {runningAction === 'profile:goto-diagnostics' ? '进入诊断页…' : '系统诊断'}
                   </Button>
                   <Button
-                    onClick={() => void openInTerminal(selectedProfile.name, 'profile:plugins', '插件与 Context Engine', 'hermes plugins')}
-                    disabled={runningAction !== null || !selectedInstallation.binaryFound}
+                    onClick={() => void enterProfileWorkbench('logs', {
+                      actionKey: 'profile:goto-logs',
+                      intent: logsWorkbenchIntent,
+                    })}
+                    disabled={runningAction !== null || !logsWorkbenchIntent}
                   >
-                    {runningAction === 'profile:plugins' ? '插件与 Context Engine…' : '插件与 Context Engine'}
+                    {runningAction === 'profile:goto-logs' ? '进入日志页…' : '日志查看'}
                   </Button>
                 </Toolbar>
               </section>
@@ -804,39 +916,45 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles }: Pag
                   当某个实例状态漂移时，优先确认核心文件和运行物料是否齐全，再决定是否导出、迁移或回滚。
                 </p>
                 <div className="pill-row">
-                  <Pill tone={selectedInstallation.configExists ? 'good' : 'warn'}>config.yaml</Pill>
-                  <Pill tone={selectedInstallation.envExists ? 'good' : 'warn'}>.env</Pill>
-                  <Pill tone={selectedInstallation.stateDbExists ? 'good' : 'warn'}>state.db</Pill>
-                  <Pill tone={selectedInstallation.gatewayStateExists ? 'good' : 'warn'}>gateway_state.json</Pill>
-                  <Pill tone={selectedInstallation.logsDirExists ? 'good' : 'warn'}>logs</Pill>
+                  <Pill tone={selectedInstallation?.configExists ? 'good' : 'warn'}>config.yaml</Pill>
+                  <Pill tone={selectedInstallation?.envExists ? 'good' : 'warn'}>.env</Pill>
+                  <Pill tone={selectedInstallation?.stateDbExists ? 'good' : 'warn'}>state.db</Pill>
+                  <Pill tone={selectedInstallation?.gatewayStateExists ? 'good' : 'warn'}>gateway_state.json</Pill>
+                  <Pill tone={selectedInstallation?.logsDirExists ? 'good' : 'warn'}>logs</Pill>
                 </div>
                 <Toolbar>
                   <Button
                     onClick={() => void openInFinder(`${selectedProfile.homePath}/state.db`, `${selectedProfile.name} state.db`, true)}
-                    disabled={runningAction !== null || !selectedInstallation.stateDbExists}
+                    disabled={runningAction !== null || !selectedInstallation?.stateDbExists}
                   >
                     定位 state.db
                   </Button>
                   <Button
                     onClick={() => void openInFinder(`${selectedProfile.homePath}/gateway_state.json`, `${selectedProfile.name} gateway_state.json`, true)}
-                    disabled={runningAction !== null || !selectedInstallation.gatewayStateExists}
+                    disabled={runningAction !== null || !selectedInstallation?.gatewayStateExists}
                   >
                     定位网关状态
                   </Button>
                   <Button
                     onClick={() => void openInFinder(`${selectedProfile.homePath}/logs`, `${selectedProfile.name} logs`)}
-                    disabled={runningAction !== null || !selectedInstallation.logsDirExists}
+                    disabled={runningAction !== null || !selectedInstallation?.logsDirExists}
                   >
                     打开 logs
                   </Button>
-                  <Button onClick={() => void openInTerminal(selectedProfile.name, 'profile:status', '查看实例状态', 'hermes status --all')} disabled={runningAction !== null || !selectedInstallation.binaryFound}>
-                    查看实例状态
+                  <Button
+                    onClick={() => void enterProfileWorkbench('diagnostics', {
+                      actionKey: 'profile:goto-artifact-diagnostics',
+                      intent: diagnosticsWorkbenchIntent,
+                    })}
+                    disabled={runningAction !== null || !diagnosticsWorkbenchIntent}
+                  >
+                    {runningAction === 'profile:goto-artifact-diagnostics' ? '进入诊断页…' : '进入诊断页'}
                   </Button>
                 </Toolbar>
               </section>
             </div>
           ) : (
-            <EmptyState title="请选择 profile" description="选中一个 profile 后，这里会显示它的接管动作、运行物料和实例级治理入口。" />
+            <EmptyState title="请选择 profile" description="选中一个 profile 后，这里会显示它的客户端治理入口、运行物料和实例级工作台。" />
           )}
         </Panel>
 
@@ -1342,11 +1460,11 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles }: Pag
           )}
         </Panel>
 
-        <Panel title="命令输出" className="panel-nested">
+        <Panel title="动作回执" className="panel-nested">
           {lastCommand ? (
             <>
               <div className="detail-list compact">
-                <KeyValueRow label="动作类型" value={lastCommandLabel || '治理动作'} />
+                <KeyValueRow label="动作" value={lastCommandLabel || '治理动作'} />
                 <KeyValueRow label="命令" value={lastCommand.command} />
                 <KeyValueRow label="退出码" value={lastCommand.exitCode} />
                 <KeyValueRow label="结果" value={<Pill tone={lastCommand.success ? 'good' : 'bad'}>{String(lastCommand.success)}</Pill>} />
@@ -1354,7 +1472,7 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles }: Pag
               <pre className="code-block">{lastCommand.stdout || lastCommand.stderr || '无输出'}</pre>
             </>
           ) : (
-            <EmptyState title="尚未执行命令" description="这里会显示 profile create / alias / rename / export / import / delete 的 Hermes CLI 输出。" />
+            <EmptyState title="尚无动作回执" description="这里会显示创建、重命名、导入导出、Alias 管理和桌面文件动作的执行结果。" />
           )}
         </Panel>
       </div>

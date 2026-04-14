@@ -378,7 +378,8 @@ async function runDiagnostic(view, kind, options = {}) {
   }
 }
 
-async function saveGatewayWorkspace(view) {
+async function saveGatewayWorkspace(view, options = {}) {
+  const { restart = false } = options;
   if (!view.gatewayDraft) {
     return;
   }
@@ -390,6 +391,20 @@ async function saveGatewayWorkspace(view) {
     notify('success', 'Gateway 策略已保存到 config.yaml 和 .env。');
     view.config = nextConfig;
     view.gatewayDraft = cloneGatewayWorkspace(nextConfig.gatewayWorkspace);
+
+    if (restart) {
+      if (!view.installation?.binaryFound) {
+        notify('info', '已保存 Gateway 策略，但当前未检测到 Hermes 可执行组件，暂未执行 Gateway 重启。');
+      } else {
+        const gatewayRunning = view.dashboard?.gateway?.gatewayState === 'running';
+        const action = gatewayRunning ? 'restart' : 'start';
+        const label = gatewayRunning ? '重启 Gateway' : '启动 Gateway';
+        const result = await api.runGatewayAction(action, view.profile);
+        view.lastResult = { label, result };
+        notify(result.success ? 'success' : 'error', `${label} 已执行。`);
+      }
+    }
+
     await Promise.all([
       loadShell(view.profile, { silent: true }),
       loadData(view, { silent: true }),
@@ -652,6 +667,9 @@ function bindEvents(view, logsIntent) {
           return;
         case 'save-gateway-workspace':
           await saveGatewayWorkspace(view);
+          return;
+        case 'save-gateway-workspace-restart':
+          await saveGatewayWorkspace(view, { restart: true });
           return;
         case 'save-env-workspace':
           await saveEnvWorkspace(view);

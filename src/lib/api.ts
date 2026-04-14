@@ -19,8 +19,16 @@ import type {
   LogReadResult,
   MemoryFileDetail,
   MemoryFileSummary,
+  PluginCreateRequest,
+  PluginCreateResult,
+  PluginDeleteRequest,
+  PluginDeleteResult,
   PluginImportRequest,
   PluginImportResult,
+  PluginManifestDetail,
+  PluginManifestSaveRequest,
+  PluginReadmeDetail,
+  PluginReadmeSaveRequest,
   ProfileAliasCreateRequest,
   ProfileAliasDeleteRequest,
   ProfileCreateRequest,
@@ -32,7 +40,10 @@ import type {
   SessionDetail,
   SessionRecord,
   SkillCreateRequest,
+  SkillDeleteRequest,
+  SkillDeleteResult,
   SkillFileDetail,
+  SkillFrontmatterSaveRequest,
   SkillImportRequest,
   SkillImportResult,
   SkillItem,
@@ -103,8 +114,20 @@ export const api = {
     call<CommandRunResult>('run_tool_action', withProfile(profile, { action, platform, names })),
   runPluginAction: (action: 'enable' | 'disable' | 'install' | 'update' | 'remove', name: string, profile?: string) =>
     call<CommandRunResult>('run_plugin_action', withProfile(profile, { action, name })),
+  createPlugin: (request: PluginCreateRequest, profile?: string) =>
+    call<PluginCreateResult>('create_plugin', withProfile(profile, { request })),
   importPlugin: (request: PluginImportRequest, profile?: string) =>
     call<PluginImportResult>('import_plugin', withProfile(profile, { request })),
+  readPluginManifest: (manifestPath: string, profile?: string) =>
+    call<PluginManifestDetail>('read_plugin_manifest', withProfile(profile, { manifestPath })),
+  savePluginManifest: (request: PluginManifestSaveRequest, profile?: string) =>
+    call<PluginManifestDetail>('save_plugin_manifest', withProfile(profile, { request })),
+  readPluginReadme: (directoryPath: string, profile?: string) =>
+    call<PluginReadmeDetail>('read_plugin_readme', withProfile(profile, { directoryPath })),
+  savePluginReadme: (request: PluginReadmeSaveRequest, profile?: string) =>
+    call<PluginReadmeDetail>('save_plugin_readme', withProfile(profile, { request })),
+  deleteLocalPlugin: (request: PluginDeleteRequest, profile?: string) =>
+    call<PluginDeleteResult>('delete_local_plugin', withProfile(profile, { request })),
   saveConfigYaml: (content: string, profile?: string) =>
     call<void>('save_config_yaml', withProfile(profile, { content })),
   saveEnvFile: (content: string, profile?: string) =>
@@ -126,10 +149,14 @@ export const api = {
     call<SkillFileDetail>('read_skill_file', withProfile(profile, { filePath })),
   saveSkillFile: (request: SkillSaveRequest, profile?: string) =>
     call<SkillFileDetail>('save_skill_file', withProfile(profile, { request })),
+  saveSkillFrontmatter: (request: SkillFrontmatterSaveRequest, profile?: string) =>
+    call<SkillFileDetail>('save_skill_frontmatter', withProfile(profile, { request })),
   createSkill: (request: SkillCreateRequest, profile?: string) =>
     call<SkillFileDetail>('create_skill', withProfile(profile, { request })),
   importSkill: (request: SkillImportRequest, profile?: string) =>
     call<SkillImportResult>('import_skill', withProfile(profile, { request })),
+  deleteLocalSkill: (request: SkillDeleteRequest, profile?: string) =>
+    call<SkillDeleteResult>('delete_local_skill', withProfile(profile, { request })),
   runSkillAction: (action: string, value?: string | null, profile?: string) =>
     call<CommandRunResult>('run_skill_action', withProfile(profile, { action, value: value || null })),
   getCronJobs: (profile?: string) =>

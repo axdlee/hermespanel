@@ -7,7 +7,7 @@
 <p align="center">
   面向 <a href="https://github.com/nousresearch/hermes-agent">hermes-agent</a> 的桌面管理客户端
   <br>
-  0 侵入封装安装、配置、诊断、网关、扩展、技能与运行闭环
+  聚焦 Hermes 的安装、配置、网关、扩展、技能与运行闭环
 </p>
 
 <p align="center">
@@ -22,65 +22,91 @@
   </a>
 </p>
 
----
+<p align="center">
+  <img src="docs/screenshots/dashboard-workbench.png" alt="HermesPanel Dashboard" width="96%">
+</p>
 
-## 项目定位
+<table>
+  <tr>
+    <td width="50%">
+      <img src="docs/screenshots/config-workbench.png" alt="HermesPanel Config Workbench">
+    </td>
+    <td width="50%">
+      <img src="docs/screenshots/gateway-workbench.png" alt="HermesPanel Gateway Workbench">
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2">
+      <img src="docs/screenshots/extensions-workbench.png" alt="HermesPanel Extensions Workbench">
+    </td>
+  </tr>
+</table>
 
-HermesPanel 的目标不是重做 Hermes 本体，而是提供一层更接近 `clawpanel` 体验的本地桌面封装：
+## 这是什么
+
+HermesPanel 不是 Hermes 的替代品，也不是重写 Hermes 后端。
+
+它做的事情很明确：
 
 - 不修改 `hermes-agent` 源码
-- 不侵入 Hermes 的运行时协议
-- 不自建另一套后端服务替代 Hermes
-- 只围绕 `hermes` CLI、`~/.hermes`、`state.db`、日志和 `gateway_state.json` 做治理
+- 不接管 Hermes 运行协议
+- 不额外起一套常驻服务替代 Hermes
+- 只围绕 `hermes` CLI、`~/.hermes`、`config.yaml`、`.env`、`state.db`、`gateway_state.json` 和日志做桌面治理
 
-它是 **Hermes 的管理客户端**，不是 Hermes 的替代品。
+目标是把原本散落在 CLI、配置文件、日志目录和运行状态里的动作，尽量收成一个更像产品的桌面客户端。
 
-## 当前方向
-
-这版已经不再停留在“读配置”和“跳终端”的层面，核心工作区正在往真正的客户端闭环推进：
+## 当前已经收回客户端内的能力
 
 - 配置中心
-  - 结构化接管模型、Provider、Base URL、Toolsets、Terminal Backend、Memory、消息通道和凭证
-  - 直接写回 `config.yaml` / `.env`
-  - 历史迁移动作由客户端后端执行，不再默认 handoff 到 Terminal
-- 诊断工作台
-  - 直接执行安装、升级、配置体检、Memory 状态、Gateway 状态、Doctor 等动作
-  - 统一保留原始 stdout / stderr 和关联日志
+  - 模型、Provider、Base URL、Toolsets、Terminal、Memory、消息通道、凭证
+  - 结构化写回 `config.yaml` / `.env`
 - Gateway 工作台
-  - 管理 Gateway Service 生命周期
-  - 在客户端内接管 Telegram / Discord / Slack / WhatsApp 通道配置
-  - 保存后直接回写配置并验证运行态
-- 扩展与技能
-  - 管理 Tools、Plugins、Skills、Memory Runtime、平台能力暴露
-  - 对比“本地文件态”和“Hermes 运行态”
-- Profile / Session / Cron / Logs / Memory
-  - 围绕 Hermes 的真实目录、会话数据库和调度文件做闭环治理
+  - Service 启停
+  - 通道接入治理
+  - Gateway 策略保存后直接启动 / 重启
+- 扩展工作台
+  - Tools 平台暴露治理
+  - 插件目录、manifest、README、本地导入与删除
+  - Memory runtime 对照
+- 技能工作台
+  - 本地 skill 创建、导入、frontmatter 编辑、正文编辑、删除
+  - skill 搜索、预检、安装、更新、审计通过桌面端后端执行
+- 诊断 / 日志 / Session / Cron / Memory
+  - 统一保留最近回执、日志下钻和运行材料
 
-## 为什么是桌面客户端
+## 设计方向
 
-HermesPanel 明确选择 **Tauri 桌面端**，而不是纯 Web UI：
+当前明确坚持这些约束：
 
-- 要直接治理本机 `~/.hermes`、日志、`state.db`、`config.yaml`、`.env`
-- 要以 0 侵入方式调用 Hermes 官方 CLI，同时保持页面级别的结构化体验
-- 要在 Finder、文件定位、打包分发和本地安装体验上更接近 `clawpanel`
+- 少页面，优先做页内主工作台和折叠子模块
+- 主操作前置，说明文案弱化
+- 配置态和运行态分开摆，不在多个区块重复出现同一组表单
+- 能结构化直写的优先结构化直写，不默认把用户甩回命令行
+- 真正触及系统边界的动作单独弱化收纳，例如安装、卸载、系统 Service 管理
 
-## 工作台总览
+## 工作台一览
 
 | 工作区 | 主要职责 | 当前状态 |
-|------|------|------|
-| Dashboard | 总览、安装生命周期、快捷闭环、最近输出 | 已形成控制台风格主入口 |
-| Config | 模型、Provider、Toolsets、Memory、凭证、通道、历史迁移 | 已大幅收回客户端内 |
-| Gateway | Service、平台链路、Gateway 策略、远端作业 | 已具备结构化接管 |
-| Extensions | Plugins、Tools、运行态能力面 | 已支持安装/启停/更新类动作 |
-| Skills | 本地技能目录、安装治理、文件编辑 | 已形成双栏工作台 |
-| Diagnostics | 体检、原始输出、日志联动、修复入口 | 已减少 Terminal 心智 |
-| Profiles / Sessions / Cron / Logs / Memory | 运行期治理与回放 | 可用，持续压缩 UI 复杂度 |
+| --- | --- | --- |
+| Dashboard | 总览、入口分发、最近回执、运行材料 | 已形成客户端控制台首页 |
+| Config | 模型、Provider、Toolsets、记忆、凭证、通道、迁移 | 高频配置已大幅收回客户端 |
+| Gateway | Service、通道、策略、作业、诊断 | 已具备结构化接管和保存后重启闭环 |
+| Extensions | Tools、Plugins、Provider、运行对照 | 正在向“治理主卡 + 对照副卡”收敛 |
+| Skills | 本地目录、安装治理、文件编辑 | 已形成本地治理 + 安装治理双工作面 |
+| Diagnostics / Logs / Sessions / Cron / Memory | 运行排障与材料回放 | 可用，持续压缩层级噪音 |
+
+## 为什么是 Tauri 桌面端
+
+- 需要直接治理本机 `~/.hermes`
+- 需要处理 Finder 打开、终端目录、日志目录、状态文件等桌面动作
+- 需要打包成真正可分发的安装包，而不是只做浏览器壳
+- 需要在不侵入 Hermes 的前提下保留本地管理体验
 
 ## 架构
 
 ```mermaid
 flowchart LR
-  UI["pages/*.js<br/>桌面工作台"] --> API["src/lib/api.ts<br/>Tauri invoke 封装"]
+  UI["src/pages/*.js<br/>桌面工作台"] --> API["src/lib/api.ts<br/>Tauri invoke 封装"]
   API --> CMD["src-tauri/src/commands/*<br/>命令入口层"]
   CMD --> APP["src-tauri/src/application/hermes_manager.rs<br/>用例编排层"]
   APP --> INFRA["src-tauri/src/infrastructure/hermes.rs<br/>CLI / 文件 / SQLite / 日志"]
@@ -92,12 +118,28 @@ flowchart LR
 
 这样可以保证：
 
-- UI 不直接知道 `~/.hermes` 的目录细节
-- 命令层不直接关心文件读写、SQLite 查询和 CLI 输出解析
-- 对 Hermes 的侵入始终收敛在最底层封装
-- 后续如果补更多本地治理能力，页面不需要知道 Hermes 内部结构
+- UI 不直接知道 `~/.hermes` 目录细节
+- 命令层不直接关心文件写入、SQLite 查询或 CLI 输出解析
+- 对 Hermes 的侵入始终收敛在底层封装
+- 页面改版时不需要碰 Hermes 具体实现
 
-## 开发
+## 下载与发布
+
+Release 工作流已经补到多平台自动构建：
+
+- macOS Apple Silicon
+- macOS Intel
+- Linux
+- Windows 标准包
+- Windows 完整包
+  - 带离线 WebView2 安装器，适合内网或目标机器缺失 WebView2 的场景
+
+触发方式：
+
+- 推送 `v*` 标签自动发布
+- GitHub Actions 手动触发 `Release` 工作流
+
+## 本地开发
 
 ### 前置条件
 
@@ -117,11 +159,6 @@ npm install
 npm run tauri:dev
 ```
 
-开发链路已经做了端口复用处理：
-
-- 如果 `127.0.0.1:1420` 上已经是当前仓库的 Vite 开发服务，`tauri:dev` 会直接复用，不再因为端口被自己占用而启动失败
-- 如果该端口被其他项目占用，会直接报错并提示当前占用进程，避免误连到错误的前端壳
-
 ### 常用命令
 
 ```bash
@@ -131,16 +168,13 @@ npm run build
 # 前后端快速校验
 npm run check
 
-# Rust 测试
-cargo test --manifest-path src-tauri/Cargo.toml
-
 # 本地调试打包
 npm run tauri:build:debug
 ```
 
-## 打包与自动发布
+## GitHub Actions
 
-项目已经补上了参考 `clawpanel` 的 GitHub Actions 基础链路：
+仓库已包含：
 
 - `.github/workflows/ci.yml`
   - macOS / Linux / Windows 三平台检查
@@ -149,53 +183,36 @@ npm run tauri:build:debug
   - `cargo test`
   - `npm run build`
 - `.github/workflows/release.yml`
-  - 推送 `v*` 标签自动构建
-  - 自动生成并上传 Tauri 安装包
-  - 覆盖 macOS Apple Silicon / Intel、Windows、Linux
+  - `v*` 标签自动发布
+  - Tauri 多平台打包
+  - Windows 标准包与 Windows 完整包双产物
+  - Release Notes 自动更新
 
-### 本地构建产物
+## README 截图
 
-当前 `src-tauri/tauri.conf.json` 已开启 bundle，发布时会生成对应平台安装包。
+本仓库当前 README 展示图位于：
 
-常见产物包括：
+- `docs/screenshots/dashboard-workbench.png`
+- `docs/screenshots/config-workbench.png`
+- `docs/screenshots/gateway-workbench.png`
+- `docs/screenshots/extensions-workbench.png`
 
-- macOS: `.app` / `.dmg`
-- Windows: `nsis` / `msi`
-- Linux: `AppImage` / `deb` / `rpm`
-
-## 截图与 README 资源
-
-为了把 README 做成更接近 `clawpanel` 的展示面，仓库里补了一个 macOS 截图脚本：
+macOS 下也保留了一个直接抓取桌面窗口的脚本：
 
 ```bash
 npm run docs:capture:mac
 ```
 
-脚本会尝试：
-
-1. 自动定位 HermesPanel 窗口
-2. 抓取当前窗口区域
-3. 输出到 `docs/screenshots/hermespanel-window.png`
-
-如果失败，通常是因为 macOS 没给当前终端开启“屏幕与系统音频录制”权限。
-
-建议在截图前先切到这些页面再抓图：
-
-1. Dashboard
-2. Config
-3. Gateway
-4. Extensions
-5. Diagnostics
+如果脚本失败，通常是终端还没有获得“屏幕与系统音频录制”权限。
 
 ## 当前限制
 
-- 某些 Hermes 官方交互式能力仍然只能通过底层 CLI 封装完成，但目标页已经尽量把它们收回客户端内
-- 真实 README 截图自动化依赖 macOS 屏幕录制权限；当前仓库已补脚本，但截图本身可能因系统权限而暂时无法生成
-- 少数大页仍偏重，当前策略是优雅拆分为子模块，不继续增加页面数量
+- 少数 Hermes 官方交互式能力仍然依赖底层 CLI 能力执行，但正在逐步收回到桌面端后端封装
+- README 展示图当前以工作台页面为主，后续还可以继续补充多实例、技能、诊断等场景
+- 部分大页仍在持续收敛，当前策略是优雅拆成页内子模块，而不是继续增加新页面
 
-## 下一步
+## 接下来
 
-- 继续压缩 `gateway / extensions / diagnostics` 的文案和层级噪音
-- 把更高频的大页拆成页面内子模块，而不是继续膨胀单文件
-- 继续把能结构化接管的 Hermes 设置收回客户端，而不是把用户送回命令行
-- 补齐更完整的 README 截图与发布说明
+- 继续收薄 `Extensions / Diagnostics / Skills` 的层级和重复露出
+- 把更多“配置态 + 运行态 + 日志态”的闭环动作合并成单个工作台路径
+- 持续补 README 展示面、发布说明和多平台安装体验

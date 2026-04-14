@@ -6,7 +6,7 @@ import {
   buildExtensionsDrilldownIntent,
   buildLogsDrilldownIntent,
 } from '../lib/drilldown';
-import { getPanelState, navigate, notify, subscribePanelState } from '../lib/panel-state';
+import { getPanelState, loadShell, navigate, notify, subscribePanelState } from '../lib/panel-state';
 import {
   buttonHtml,
   emptyStateHtml,
@@ -26,6 +26,80 @@ function directoryOf(path) {
   const normalized = String(path ?? '').trim();
   const index = normalized.lastIndexOf('/');
   return index > 0 ? normalized.slice(0, index) : normalized;
+}
+
+function currentSkill(view) {
+  return view.skills.find((item) => item.filePath === view.selectedPath)
+    ?? view.skills[0]
+    ?? null;
+}
+
+function selectedJobs(view, skill = currentSkill(view)) {
+  if (!skill || !view.cron) {
+    return [];
+  }
+
+  return view.cron.jobs.filter((job) => job.skills.includes(skill.name));
+}
+
+function createSkillFrontmatterDraft(detail) {
+  if (!detail) {
+    return null;
+  }
+
+  return {
+    category: detail.category || '',
+    description: detail.description || '',
+    filePath: detail.filePath || '',
+    name: detail.name || '',
+    relativePath: detail.relativePath || '',
+  };
+}
+
+function applySkillFileDetail(view, detail) {
+  view.skillFile = detail;
+  view.skillFileSavedContent = detail.content;
+  view.skillFrontmatterDraft = createSkillFrontmatterDraft(detail);
+  view.skillDeleteConfirm = '';
+}
+
+function syncSkillInlineControls(view) {
+  const skill = currentSkill(view);
+  const jobs = selectedJobs(view, skill);
+  const frontmatterDraft = view.skillFrontmatterDraft;
+  const frontmatterDirty = Boolean(
+    skill
+    && frontmatterDraft
+    && frontmatterDraft.filePath === skill.filePath
+    && (
+      frontmatterDraft.name.trim() !== String(view.skillFile?.name || skill.name || '').trim()
+      || frontmatterDraft.description.trim() !== String(view.skillFile?.description || skill.description || '').trim()
+    ),
+  );
+  const fileDirty = Boolean(view.skillFile && view.skillFile.content !== view.skillFileSavedContent);
+  const deleteReady = Boolean(skill && view.skillDeleteConfirm.trim() === skill.name && jobs.length === 0);
+
+  const frontmatterPill = view.page.querySelector('#skill-frontmatter-dirty-pill');
+  const filePill = view.page.querySelector('#skill-file-dirty-pill');
+  const frontmatterSave = view.page.querySelector('#skill-frontmatter-save');
+  const fileSave = view.page.querySelector('#skill-file-save');
+  const deleteButton = view.page.querySelector('#skill-delete-submit');
+
+  if (frontmatterPill) {
+    frontmatterPill.innerHTML = pillHtml(frontmatterDirty ? '未保存' : '已同步', frontmatterDirty ? 'warn' : 'good');
+  }
+  if (filePill) {
+    filePill.innerHTML = pillHtml(fileDirty ? '未保存' : '已同步', fileDirty ? 'warn' : 'good');
+  }
+  if (frontmatterSave) {
+    frontmatterSave.disabled = Boolean(view.runningAction) || !frontmatterDraft?.name?.trim() || !frontmatterDirty;
+  }
+  if (fileSave) {
+    fileSave.disabled = Boolean(view.runningAction) || !view.skillFile || !fileDirty;
+  }
+  if (deleteButton) {
+    deleteButton.disabled = Boolean(view.runningAction) || !deleteReady;
+  }
 }
 
 function renderSkeleton(view) {
@@ -174,7 +248,9 @@ async function loadData(view, options = {}) {
       await loadSkillFile(view, view.selectedPath, { silent: true });
     } else {
       view.skillFile = null;
+      view.skillFrontmatterDraft = null;
       view.skillFileSavedContent = '';
+      view.skillDeleteConfirm = '';
     }
   } catch (reason) {
     if (view.destroyed) {
@@ -195,7 +271,9 @@ async function loadSkillFile(view, filePath, options = {}) {
   const { silent = false } = options;
   if (!filePath) {
     view.skillFile = null;
+    view.skillFrontmatterDraft = null;
     view.skillFileSavedContent = '';
+    view.skillDeleteConfirm = '';
     renderPage(view);
     return;
   }
@@ -212,8 +290,7 @@ async function loadSkillFile(view, filePath, options = {}) {
     if (filePath !== view.selectedPath) {
       return;
     }
-    view.skillFile = detail;
-    view.skillFileSavedContent = detail.content;
+    applySkillFileDetail(view, detail);
   } catch (reason) {
     if (!silent) {
       notify('error', String(reason));
@@ -297,9 +374,40 @@ async function saveSkillFile(view) {
       content: view.skillFile.content,
       filePath: view.skillFile.filePath,
     }, view.profile);
-    view.skillFile = detail;
-    view.skillFileSavedContent = detail.content;
+    applySkillFileDetail(view, detail);
     notify('success', `${detail.name} 已保存。`);
+    await loadData(view, { silent: true });
+  } catch (reason) {
+    notify('error', String(reason));
+  } finally {
+    view.runningAction = null;
+    renderPage(view);
+  }
+}
+
+async function saveSkillFrontmatter(view) {
+  const skill = currentSkill(view);
+  const draft = view.skillFrontmatterDraft;
+  if (!skill || !draft || draft.filePath !== skill.filePath) {
+    notify('error', '请先选择要接管的技能。');
+    return;
+  }
+
+  if (!draft.name.trim()) {
+    notify('error', '技能名称不能为空。');
+    return;
+  }
+
+  view.runningAction = 'skills:save-frontmatter';
+  renderPage(view);
+  try {
+    const detail = await api.saveSkillFrontmatter({
+      description: draft.description.trim(),
+      filePath: draft.filePath,
+      name: draft.name.trim(),
+    }, view.profile);
+    applySkillFileDetail(view, detail);
+    notify('success', `${detail.name} 的 frontmatter 已保存。`);
     await loadData(view, { silent: true });
   } catch (reason) {
     notify('error', String(reason));
@@ -375,6 +483,52 @@ async function importLocalSkill(view) {
   }
 }
 
+async function deleteLocalSkill(view) {
+  const skill = currentSkill(view);
+  if (!skill) {
+    notify('error', '请先选择要删除的技能。');
+    return;
+  }
+
+  if (selectedJobs(view, skill).length > 0) {
+    notify('error', '当前技能仍被 cron 作业引用，请先解除编排绑定。');
+    return;
+  }
+
+  if (view.skillDeleteConfirm.trim() !== skill.name) {
+    notify('error', `请输入 ${skill.name} 以确认删除。`);
+    return;
+  }
+
+  view.runningAction = 'skills:delete-local';
+  renderPage(view);
+  try {
+    const result = await api.deleteLocalSkill({
+      filePath: skill.filePath,
+      name: skill.name,
+    }, view.profile);
+    storeResult(view, `删除本地技能 · ${result.name}`, {
+      command: 'local://skills/delete',
+      exitCode: 0,
+      stderr: '',
+      stdout: `name: ${result.name}\ndirectory: ${result.directoryPath}\nfiles: ${result.removedFiles}`,
+      success: true,
+    });
+    notify('success', `${result.name} 已从当前 profile 删除。`);
+    view.selectedPath = null;
+    view.skillFile = null;
+    view.skillFrontmatterDraft = null;
+    view.skillDeleteConfirm = '';
+    view.skillFileSavedContent = '';
+    await loadData(view, { silent: true });
+  } catch (reason) {
+    notify('error', String(reason));
+  } finally {
+    view.runningAction = null;
+    renderPage(view);
+  }
+}
+
 function syncWithPanelState(view) {
   const nextProfile = getPanelState().selectedProfile;
   if (nextProfile !== view.profile) {
@@ -389,7 +543,9 @@ function syncWithPanelState(view) {
     view.lastResult = null;
     view.lastImportedSkill = null;
     view.skillFile = null;
+    view.skillFrontmatterDraft = null;
     view.skillFileSavedContent = '';
+    view.skillDeleteConfirm = '';
     void loadData(view);
     return;
   }
@@ -402,6 +558,12 @@ function bindEvents(view, intents = {}) {
   const categorySelect = view.page.querySelector('#skills-category-filter');
   const registryInput = view.page.querySelector('#skills-registry-query');
   const installInput = view.page.querySelector('#skills-install-target');
+  const skillFrontmatterDisclosure = view.page.querySelector('#skills-frontmatter-disclosure');
+  const skillFrontmatterName = view.page.querySelector('#skill-frontmatter-name');
+  const skillFrontmatterDescription = view.page.querySelector('#skill-frontmatter-description');
+  const skillContentDisclosure = view.page.querySelector('#skills-content-disclosure');
+  const skillLocalOpsDisclosure = view.page.querySelector('#skills-localops-disclosure');
+  const skillDeleteConfirm = view.page.querySelector('#skill-delete-confirm');
 
   if (queryInput) {
     queryInput.oninput = (event) => {
@@ -449,6 +611,44 @@ function bindEvents(view, intents = {}) {
     };
   }
 
+  if (skillFrontmatterDisclosure) {
+    skillFrontmatterDisclosure.ontoggle = () => {
+      view.skillFrontmatterExpanded = skillFrontmatterDisclosure.open;
+    };
+  }
+
+  if (skillContentDisclosure) {
+    skillContentDisclosure.ontoggle = () => {
+      view.skillContentExpanded = skillContentDisclosure.open;
+    };
+  }
+
+  if (skillLocalOpsDisclosure) {
+    skillLocalOpsDisclosure.ontoggle = () => {
+      view.skillLocalOpsExpanded = skillLocalOpsDisclosure.open;
+    };
+  }
+
+  if (skillFrontmatterName) {
+    skillFrontmatterName.oninput = (event) => {
+      if (!view.skillFrontmatterDraft) {
+        return;
+      }
+      view.skillFrontmatterDraft.name = event.target.value;
+      syncSkillInlineControls(view);
+    };
+  }
+
+  if (skillFrontmatterDescription) {
+    skillFrontmatterDescription.oninput = (event) => {
+      if (!view.skillFrontmatterDraft) {
+        return;
+      }
+      view.skillFrontmatterDraft.description = event.target.value;
+      syncSkillInlineControls(view);
+    };
+  }
+
   view.page.querySelector('#skill-create-name')?.addEventListener('input', (event) => {
     view.createDraft.name = event.target.value;
     const submit = view.page.querySelector('#skill-create-submit');
@@ -481,12 +681,15 @@ function bindEvents(view, intents = {}) {
   view.page.querySelector('#skill-content-editor')?.addEventListener('input', (event) => {
     if (view.skillFile) {
       view.skillFile.content = event.target.value;
-      const dirtyPill = view.page.querySelector('#skill-file-dirty-pill');
-      if (dirtyPill) {
-        dirtyPill.innerHTML = pillHtml(view.skillFile.content !== view.skillFileSavedContent ? '未保存' : '已同步', view.skillFile.content !== view.skillFileSavedContent ? 'warn' : 'good');
-      }
+      syncSkillInlineControls(view);
     }
   });
+  skillDeleteConfirm?.addEventListener('input', (event) => {
+    view.skillDeleteConfirm = event.target.value;
+    syncSkillInlineControls(view);
+  });
+
+  syncSkillInlineControls(view);
 
   view.page.querySelectorAll('[data-action]').forEach((element) => {
     element.onclick = async () => {
@@ -525,11 +728,21 @@ function bindEvents(view, intents = {}) {
           view.importDraft = cloneSkillImportDraft();
           renderPage(view);
           return;
+        case 'save-skill-frontmatter':
+          await saveSkillFrontmatter(view);
+          return;
+        case 'reset-skill-frontmatter':
+          view.skillFrontmatterDraft = createSkillFrontmatterDraft(view.skillFile);
+          renderPage(view);
+          return;
         case 'save-skill-file':
           await saveSkillFile(view);
           return;
         case 'reload-skill-file':
           await loadSkillFile(view, view.selectedPath);
+          return;
+        case 'delete-local-skill':
+          await deleteLocalSkill(view);
           return;
         case 'skills-check':
           await executeSkillAction(view, 'check', null, {
@@ -647,13 +860,18 @@ export async function render() {
     registryQuery: '',
     runningAction: null,
     selectedPath: null,
+    skillContentExpanded: true,
+    skillDeleteConfirm: '',
     skillFile: null,
     skillFileLoading: false,
     skillFileSavedContent: '',
+    skillFrontmatterDraft: null,
+    skillFrontmatterExpanded: true,
+    skillLocalOpsExpanded: false,
     skills: [],
     installTarget: '',
     unsubscribe: null,
-    workspaceTab: 'overview',
+    workspaceTab: 'studio',
   };
 
   activeView.unsubscribe = subscribePanelState(() => {

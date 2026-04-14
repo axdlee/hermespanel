@@ -794,7 +794,7 @@ export function DashboardPage({ notify, profile, profiles, refreshProfiles, navi
 
         <Panel
           title="日志尾部预览"
-          subtitle="保留 ClawPanel 那种首页先看日志尾部的节奏，先做判断，再决定是否切到日志页深挖。"
+          subtitle="保留首页先看日志尾部的节奏，先做判断，再决定是否切到日志页深挖。"
           aside={(
             <Toolbar>
               <select

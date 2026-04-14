@@ -197,7 +197,7 @@ function renderPage(view) {
     <div class="page-header page-header-compact">
       <div class="panel-title-row">
         <h1 class="page-title">日志查看</h1>
-        ${infoTipHtml('参考 clawpanel 的标签式日志页，主区域只保留日志切换、过滤和排障联动，不再用大段说明占位置。')}
+        ${infoTipHtml('标签式日志页，主区域只保留日志切换、过滤和排障联动，不再用大段说明占位置。')}
       </div>
       <p class="page-desc">把日志切换、过滤、自动刷新和跨页排障联动压成一个紧凑工作台。</p>
     </div>

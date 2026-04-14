@@ -259,9 +259,87 @@ pub struct PluginCatalogItem {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct PluginManifestDetail {
+    pub name: String,
+    pub category: String,
+    pub relative_path: String,
+    pub directory_path: String,
+    pub manifest_path: String,
+    pub description: String,
+    pub requires_env: Vec<String>,
+    pub pip_dependencies: Vec<String>,
+    pub external_dependencies: Vec<PluginExternalDependency>,
+    pub raw_yaml: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginManifestSaveRequest {
+    pub manifest_path: String,
+    pub name: String,
+    pub description: String,
+    pub requires_env: Vec<String>,
+    pub pip_dependencies: Vec<String>,
+    pub external_dependencies: Vec<PluginExternalDependency>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginReadmeDetail {
+    pub name: String,
+    pub category: String,
+    pub relative_path: String,
+    pub directory_path: String,
+    pub file_path: String,
+    pub exists: bool,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginReadmeSaveRequest {
+    pub file_path: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginDeleteRequest {
+    pub directory_path: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginDeleteResult {
+    pub name: String,
+    pub directory_path: String,
+    pub removed_files: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct PluginImportRequest {
     pub source_path: String,
     pub category: String,
+    pub overwrite: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginCreateRequest {
+    pub name: String,
+    pub category: String,
+    pub description: String,
+    pub overwrite: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginCreateResult {
+    pub created: PluginCatalogItem,
+    pub target_directory: String,
+    pub created_files: usize,
     pub overwrite: bool,
 }
 
@@ -337,6 +415,7 @@ pub struct SkillItem {
 #[serde(rename_all = "camelCase")]
 pub struct SkillFileDetail {
     pub name: String,
+    pub description: String,
     pub category: String,
     pub relative_path: String,
     pub file_path: String,
@@ -348,6 +427,14 @@ pub struct SkillFileDetail {
 pub struct SkillSaveRequest {
     pub file_path: String,
     pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillFrontmatterSaveRequest {
+    pub file_path: String,
+    pub name: String,
+    pub description: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -376,6 +463,21 @@ pub struct SkillImportResult {
     pub target_directory: String,
     pub copied_files: usize,
     pub overwrite: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillDeleteRequest {
+    pub file_path: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillDeleteResult {
+    pub name: String,
+    pub directory_path: String,
+    pub removed_files: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

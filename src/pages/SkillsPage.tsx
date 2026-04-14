@@ -205,7 +205,7 @@ export function SkillsPage({ notify, profile, navigate }: PageProps) {
 
       <Panel
         title="技能运营与安装"
-        subtitle="参考 ClawPanel 的闭环思路，把 skills 的浏览、搜索、安装、检查、更新和开关都拉进同一页。"
+        subtitle="把 skills 的浏览、搜索、安装、检查、更新和开关都拉进同一页。"
       >
         <div className="control-card-grid">
           <section className="action-card action-card-compact">

@@ -4,11 +4,14 @@ use crate::models::{
     CommandRunResult, ConfigDocuments, ConfigWorkspace, CronCreateRequest, CronDeleteRequest,
     CronJobsSnapshot, CronUpdateRequest, DashboardSnapshot, EnvWorkspace, ExtensionsSnapshot,
     GatewayWorkspace, HermesHome, InstallationSnapshot, LogReadResult, MemoryFileDetail,
-    MemoryFileSummary, PluginImportRequest, PluginImportResult, ProfileAliasCreateRequest,
-    ProfileAliasDeleteRequest, ProfileCreateRequest, ProfileDeleteRequest, ProfileExportRequest,
-    ProfileImportRequest, ProfileRenameRequest, ProfilesSnapshot, SessionDetail, SessionRecord,
-    SkillCreateRequest, SkillFileDetail, SkillImportRequest, SkillImportResult, SkillItem,
-    SkillSaveRequest,
+    MemoryFileSummary, PluginCreateRequest, PluginCreateResult, PluginImportRequest,
+    PluginImportResult, PluginManifestDetail, PluginManifestSaveRequest, PluginReadmeDetail,
+    PluginReadmeSaveRequest, PluginDeleteRequest, PluginDeleteResult,
+    ProfileAliasCreateRequest, ProfileAliasDeleteRequest, ProfileCreateRequest,
+    ProfileDeleteRequest, ProfileExportRequest, ProfileImportRequest, ProfileRenameRequest,
+    ProfilesSnapshot, SessionDetail, SessionRecord, SkillCreateRequest, SkillFileDetail,
+    SkillDeleteRequest, SkillDeleteResult, SkillFrontmatterSaveRequest, SkillImportRequest,
+    SkillImportResult, SkillItem, SkillSaveRequest,
 };
 
 pub struct HermesManager {
@@ -83,6 +86,39 @@ impl HermesManager {
         hermes::import_plugin(&self.home, request)
     }
 
+    pub fn create_plugin(&self, request: &PluginCreateRequest) -> AppResult<PluginCreateResult> {
+        hermes::create_plugin(&self.home, request)
+    }
+
+    pub fn read_plugin_manifest(&self, manifest_path: &str) -> AppResult<PluginManifestDetail> {
+        hermes::read_plugin_manifest(&self.home, manifest_path)
+    }
+
+    pub fn save_plugin_manifest(
+        &self,
+        request: &PluginManifestSaveRequest,
+    ) -> AppResult<PluginManifestDetail> {
+        hermes::write_plugin_manifest(&self.home, request)
+    }
+
+    pub fn read_plugin_readme(&self, directory_path: &str) -> AppResult<PluginReadmeDetail> {
+        hermes::read_plugin_readme(&self.home, directory_path)
+    }
+
+    pub fn save_plugin_readme(
+        &self,
+        request: &PluginReadmeSaveRequest,
+    ) -> AppResult<PluginReadmeDetail> {
+        hermes::write_plugin_readme(&self.home, request)
+    }
+
+    pub fn delete_local_plugin(
+        &self,
+        request: &PluginDeleteRequest,
+    ) -> AppResult<PluginDeleteResult> {
+        hermes::delete_local_plugin(&self.home, request)
+    }
+
     pub fn run_skill_action(
         &self,
         action: &str,
@@ -138,12 +174,26 @@ impl HermesManager {
         hermes::write_skill_file(&self.home, &request.file_path, &request.content)
     }
 
+    pub fn save_skill_frontmatter(
+        &self,
+        request: &SkillFrontmatterSaveRequest,
+    ) -> AppResult<SkillFileDetail> {
+        hermes::write_skill_frontmatter(&self.home, request)
+    }
+
     pub fn create_skill(&self, request: &SkillCreateRequest) -> AppResult<SkillFileDetail> {
         hermes::create_skill_file(&self.home, request)
     }
 
     pub fn import_skill(&self, request: &SkillImportRequest) -> AppResult<SkillImportResult> {
         hermes::import_skill(&self.home, request)
+    }
+
+    pub fn delete_local_skill(
+        &self,
+        request: &SkillDeleteRequest,
+    ) -> AppResult<SkillDeleteResult> {
+        hermes::delete_local_skill(&self.home, request)
     }
 
     pub fn read_log(

@@ -373,7 +373,7 @@ export function CronPage({ notify, profile, navigate }: PageProps) {
       </Panel>
 
       <div className="two-column wide-left">
-        <Panel title="闭环健康" subtitle="参考 ClawPanel 的工作台摘要，但把健康判断收敛到 Hermes 自动化链路本身。">
+        <Panel title="闭环健康" subtitle="工作台摘要，但把健康判断收敛到 Hermes 自动化链路本身。">
           <div className="health-grid">
             <section className="health-card">
               <div className="health-card-header">

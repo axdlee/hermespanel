@@ -344,7 +344,7 @@ export function DiagnosticsPage({ notify, profile, navigate, pageIntent, consume
 
       <Panel
         title="修复动作台"
-        subtitle="参考 ClawPanel 的闭环思路，先诊断，再把你送到真正能修问题的 Hermes 官方入口，而不是只给一堆只读摘要。"
+        subtitle="先诊断，再把你送到真正能修问题的 Hermes 官方入口，而不是只给一堆只读摘要。"
       >
         <div className="control-card-grid">
           <section className="action-card action-card-compact">

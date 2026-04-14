@@ -205,6 +205,57 @@ export function countConfiguredPlatformDrafts(draft) {
   return PLATFORM_WORKSPACE_PRESETS.filter((preset) => platformDraftReady(preset, draft)).length;
 }
 
+function optionLabel(options, value, fallback = '未设置') {
+  return options.find((item) => item.key === value)?.label || fallback;
+}
+
+function gatewayResetSummary(draft) {
+  const pieces = [];
+  if (draft.sessionResetMode !== 'none') {
+    if (draft.sessionResetAtHour !== null && draft.sessionResetAtHour !== undefined) {
+      pieces.push(`${draft.sessionResetAtHour} 点`);
+    }
+    if (draft.sessionResetIdleMinutes !== null && draft.sessionResetIdleMinutes !== undefined) {
+      pieces.push(`idle ${draft.sessionResetIdleMinutes} 分钟`);
+    }
+  }
+  pieces.push(`${draft.resetTriggers.length} 个触发词`);
+  return pieces.join(' · ');
+}
+
+function gatewayIsolationSummary(draft) {
+  return [
+    draft.groupSessionsPerUser ? '群聊按用户隔离' : '群聊共享会话',
+    draft.threadSessionsPerUser ? '线程按用户隔离' : '线程共享会话',
+  ].join(' · ');
+}
+
+function gatewayFeatureSummary(draft) {
+  return [
+    draft.alwaysLogLocal ? '本地日志保留' : '按策略落盘',
+    draft.sttEnabled ? '语音转写开启' : '语音转写关闭',
+  ].join(' · ');
+}
+
+function renderGatewayPolicyDisclosure({ title, summary, pills = '', body, open = false }) {
+  return `
+    <details class="compact-disclosure"${open ? ' open' : ''}>
+      <summary class="compact-disclosure-summary">
+        <div class="compact-disclosure-head">
+          <div class="compact-disclosure-copy">
+            <strong class="compact-disclosure-title">${escapeHtml(title)}</strong>
+            <p class="platform-workspace-copy">${escapeHtml(summary)}</p>
+          </div>
+          ${pills ? `<div class="pill-row">${pills}</div>` : ''}
+        </div>
+      </summary>
+      <div class="compact-disclosure-body">
+        ${body}
+      </div>
+    </details>
+  `;
+}
+
 function runtimePillTone(snapshot, ready) {
   if (snapshot?.state) {
     const tone = platformTone(snapshot.state);
@@ -351,11 +402,11 @@ function statusToneToDot(tone) {
 
 export function renderGatewayTabs(view) {
   const tabs = [
-    { key: 'control', label: '策略接管' },
-    { key: 'platforms', label: '平台连接' },
-    { key: 'jobs', label: '远端作业' },
-    { key: 'diagnostics', label: '网关诊断' },
-    { key: 'runtime', label: '最新输出' },
+    { key: 'control', label: '策略' },
+    { key: 'platforms', label: '平台' },
+    { key: 'jobs', label: '作业' },
+    { key: 'diagnostics', label: '诊断' },
+    { key: 'runtime', label: '输出' },
   ];
 
   return `
@@ -401,7 +452,6 @@ export function renderGatewayRail(view, context) {
     <div class="workspace-rail-header">
       <div>
         <strong>工作台摘要</strong>
-        <p class="helper-text">主区做接管，侧栏只做导航、运行动作和系统边界收纳。</p>
       </div>
       ${workspaceDirty ? pillHtml('待保存', 'warn') : pillHtml('已同步', 'good')}
     </div>
@@ -411,7 +461,7 @@ export function renderGatewayRail(view, context) {
       { label: '已配通道', value: `${configuredPlatforms}/${PLATFORM_WORKSPACE_PRESETS.length}` },
       { label: 'Remote Jobs', value: `${remoteJobs.length} / 失败 ${failingRemoteJobs.length}` },
       { label: '会话模式', value: draft.threadSessionsPerUser ? '线程隔离' : '线程共享' },
-      { label: 'Gateway Token', value: tokenPreview(draft.hermesGatewayToken) },
+      { label: '私聊准入', value: optionLabel(DM_BEHAVIOR_OPTIONS, draft.unauthorizedDmBehavior, '未设置') },
     ])}
     ${warnings.length > 0
       ? `<div class="warning-stack top-gap">${warnings.slice(0, 3).map((warning) => `<div class="warning-item">${escapeHtml(warning)}</div>`).join('')}</div>`
@@ -464,7 +514,7 @@ export function renderGatewayRail(view, context) {
         <span class="workspace-rail-section-title">联动导航</span>
         ${view.workspaceTab === 'platforms'
           ? pillHtml(envDirty ? '通道待保存' : '通道已同步', envDirty ? 'warn' : 'good')
-          : pillHtml(gatewayRunning ? 'Service Running' : 'Service Idle', gatewayRunning ? 'good' : 'warn')}
+          : pillHtml(gatewayRunning ? '服务联机' : '服务待机', gatewayRunning ? 'good' : 'warn')}
       </div>
       <div class="workspace-rail-toolbar workspace-rail-toolbar-grid">
         ${view.workspaceTab === 'platforms'
@@ -503,7 +553,7 @@ export function renderGatewayRail(view, context) {
         <span class="workspace-rail-section-title">系统边界动作</span>
         ${buttonHtml({ action: 'toggle-service-actions', label: view.showServiceActions ? '收起' : '展开' })}
       </div>
-      <p class="helper-text">安装和卸载 service 会改系统侧状态，所以默认弱化，不抢策略接管主区。</p>
+      <p class="helper-text">安装和卸载 Service 会改系统状态，因此保留在弱化区。</p>
       ${view.showServiceActions ? `
         <div class="workspace-compat-panel">
           ${buttonHtml({ action: 'gateway-install', label: '安装 Service', kind: 'primary', disabled: Boolean(view.runningAction) || !installation.binaryFound })}
@@ -542,12 +592,30 @@ function renderChannelHealthItem(label, envValue, homeChannel, replyMode, platfo
   `;
 }
 
+function renderChannelBridgePills(env, platformStates) {
+  return PLATFORM_WORKSPACE_PRESETS.map((preset) => {
+    if (preset.toggleKey) {
+      const enabled = Boolean(env[preset.toggleKey]);
+      return pillHtml(`${preset.label} ${enabled ? '已启用' : '未启用'}`, enabled ? 'good' : 'neutral');
+    }
+
+    const ready = channelReadiness(env[preset.tokenKey]);
+    const state = platformStates.get(preset.runtimeName) || (ready ? '待验证' : '未配置');
+    const tone = ready
+      ? (platformTone(state) === 'good' ? 'good' : platformTone(state) === 'bad' ? 'warn' : 'neutral')
+      : 'warn';
+    return pillHtml(`${preset.label} ${ready ? '已配' : '未配'}`, tone);
+  }).join('');
+}
+
 export function renderControlWorkspace(view, context) {
   const { config, gateway, gatewayRunning, installation, remoteJobs, unhealthyPlatforms } = context;
   const draft = view.gatewayDraft ?? cloneGatewayWorkspace(config?.gatewayWorkspace);
   const env = view.envDraft ?? cloneEnvWorkspace(config?.envWorkspace);
   const platformStates = new Map((gateway?.platforms ?? []).map((item) => [item.name, item.state]));
   const dirty = gatewayWorkspaceDirty(view);
+  const resetModeLabel = optionLabel(RESET_MODE_OPTIONS, draft.sessionResetMode, '未设置');
+  const dmBehaviorLabel = optionLabel(DM_BEHAVIOR_OPTIONS, draft.unauthorizedDmBehavior, '未设置');
 
   return `
     <div class="compact-overview-grid compact-overview-grid-dense">
@@ -579,16 +647,19 @@ export function renderControlWorkspace(view, context) {
         <div class="shell-card-header">
           <div>
             <div class="panel-title-row">
-              <strong>通道桥接</strong>
-              ${infoTipHtml('平台 token、home channel 和 reply mode 已收回当前页的平台连接标签，不再强依赖跳到凭证页。')}
+              <strong>平台接入摘要</strong>
+              ${infoTipHtml('控制面只保留平台接入摘要和跳转入口，完整字段编辑收进“平台”标签，避免同一组通道表单在两个区域重复出现。')}
             </div>
           </div>
-          ${buttonHtml({ action: 'switch-workspace-tab', label: '进入平台连接', attrs: { 'data-tab': 'platforms' } })}
+          ${buttonHtml({ action: 'switch-workspace-tab', label: '进入平台', attrs: { 'data-tab': 'platforms' } })}
         </div>
-        <div class="service-stack">
-          ${renderChannelHealthItem('Telegram', env.telegramBotToken, env.telegramHomeChannel, env.telegramReplyToMode, platformStates.get('telegram'))}
-          ${renderChannelHealthItem('Discord', env.discordBotToken, env.discordHomeChannel, env.discordReplyToMode, platformStates.get('discord'))}
-          ${renderChannelHealthItem('Slack', env.slackBotToken, '', '', platformStates.get('slack'))}
+        <div class="platform-bridge-pill-row">
+          ${renderChannelBridgePills(env, platformStates)}
+        </div>
+        <p class="helper-text">这里只看接入骨架和运行状态，具体 token / home / reply 细项统一到平台标签继续编辑。</p>
+        <div class="toolbar top-gap">
+          ${buttonHtml({ action: 'switch-workspace-tab', label: '平台连接', kind: 'primary', attrs: { 'data-tab': 'platforms' } })}
+          ${buttonHtml({ action: 'goto-logs', label: '查看日志' })}
         </div>
       </section>
     </div>
@@ -597,96 +668,135 @@ export function renderControlWorkspace(view, context) {
       <div class="shell-card-header">
         <div>
           <div class="panel-title-row">
-            <strong>Gateway 策略</strong>
-            ${infoTipHtml('这里接管的是 Hermes 原生网关策略字段：gateway token、会话隔离、自动重置、语音转写和未授权私聊策略。避免和模型/插件/技能页重复。')}
+            <strong>策略治理</strong>
+            ${infoTipHtml('这里集中接管 Gateway token、会话重置、私聊准入和运行特性；保存后直接写回 config.yaml 和 .env。')}
           </div>
-          <p class="shell-card-copy">保存后直接写回 config.yaml 和 .env，不再依赖 gateway setup。</p>
+          <p class="shell-card-copy">主区只保留策略主控和闭环动作，细项收进折叠子模块，避免和平台连接表单混排。</p>
         </div>
         <div class="toolbar">
           ${dirty ? pillHtml('待保存', 'warn') : pillHtml('已同步', 'good')}
-          ${pillHtml(draft.sessionResetMode, 'neutral')}
+          ${pillHtml(resetModeLabel, 'neutral')}
         </div>
       </div>
 
-      <div class="top-gap">
-        <div class="panel-title-row">
-          <strong>自动重置模式</strong>
-          ${infoTipHtml('Hermes 原生支持按天、按闲置或双重重置，适合让群聊/线程会话保持可控，不必频繁手动 /new。')}
-        </div>
-        <div class="selection-chip-grid top-gap">
-          ${RESET_MODE_OPTIONS.map((item) => buttonHtml({
-            action: 'set-reset-mode',
-            label: item.label,
-            className: `selection-chip${draft.sessionResetMode === item.key ? ' selection-chip-active' : ''}`,
-            kind: draft.sessionResetMode === item.key ? 'primary' : 'secondary',
-            attrs: { 'data-value': item.key },
-          })).join('')}
-        </div>
-      </div>
-
-      <div class="top-gap">
-        <div class="panel-title-row">
-          <strong>未授权私聊</strong>
-          ${infoTipHtml('Hermes 原生只支持配对后放行或直接忽略，客户端这里做成显式开关，不再埋在 YAML 里。')}
-        </div>
-        <div class="selection-chip-grid top-gap">
-          ${DM_BEHAVIOR_OPTIONS.map((item) => buttonHtml({
-            action: 'set-dm-behavior',
-            label: item.label,
-            className: `selection-chip${draft.unauthorizedDmBehavior === item.key ? ' selection-chip-active' : ''}`,
-            kind: draft.unauthorizedDmBehavior === item.key ? 'primary' : 'secondary',
-            attrs: { 'data-value': item.key },
-          })).join('')}
-        </div>
-      </div>
-
-      <div class="form-grid top-gap">
-        <label class="field-stack">
-          <span>Gateway Token</span>
-          <input class="search-input" id="gateway-token" value="${escapeHtml(draft.hermesGatewayToken)}" placeholder="HERMES_GATEWAY_TOKEN">
-        </label>
-        <label class="field-stack">
-          <span>Reset Hour</span>
-          <input class="search-input" id="gateway-reset-hour" type="number" min="0" max="23" value="${escapeHtml(draft.sessionResetAtHour ?? '')}" placeholder="4">
-        </label>
-        <label class="field-stack">
-          <span>Idle Minutes</span>
-          <input class="search-input" id="gateway-reset-idle" type="number" min="1" value="${escapeHtml(draft.sessionResetIdleMinutes ?? '')}" placeholder="1440">
-        </label>
-        <label class="field-stack">
-          <span>Reset Triggers</span>
-          <input class="search-input" id="gateway-reset-triggers" value="${escapeHtml(draft.resetTriggers.join(', '))}" placeholder="/new, /reset">
-        </label>
-      </div>
-
-      <div class="checkbox-row top-gap">
-        <label>
-          <input type="checkbox" id="gateway-always-log-local" ${draft.alwaysLogLocal ? 'checked' : ''}>
-          <span>始终保留本地日志</span>
-        </label>
-        <label>
-          <input type="checkbox" id="gateway-stt-enabled" ${draft.sttEnabled ? 'checked' : ''}>
-          <span>启用语音转写</span>
-        </label>
-        <label>
-          <input type="checkbox" id="gateway-group-sessions" ${draft.groupSessionsPerUser ? 'checked' : ''}>
-          <span>群聊按用户隔离</span>
-        </label>
-        <label>
-          <input type="checkbox" id="gateway-thread-sessions" ${draft.threadSessionsPerUser ? 'checked' : ''}>
-          <span>线程按用户隔离</span>
-        </label>
-        <label>
-          <input type="checkbox" id="gateway-reset-notify" ${draft.sessionResetNotify ? 'checked' : ''}>
-          <span>自动重置时通知</span>
-        </label>
-      </div>
+      <section class="workspace-summary-strip workspace-summary-strip-dense">
+        <section class="summary-mini-card">
+          <span class="summary-mini-label">Gateway Token</span>
+          <strong class="summary-mini-value">${escapeHtml(draft.hermesGatewayToken.trim() ? '已写入' : '未写入')}</strong>
+          <span class="summary-mini-meta">${escapeHtml(tokenPreview(draft.hermesGatewayToken))}</span>
+        </section>
+        <section class="summary-mini-card">
+          <span class="summary-mini-label">自动重置</span>
+          <strong class="summary-mini-value">${escapeHtml(resetModeLabel)}</strong>
+          <span class="summary-mini-meta">${escapeHtml(gatewayResetSummary(draft))}</span>
+        </section>
+        <section class="summary-mini-card">
+          <span class="summary-mini-label">私聊准入</span>
+          <strong class="summary-mini-value">${escapeHtml(dmBehaviorLabel)}</strong>
+          <span class="summary-mini-meta">${escapeHtml(gatewayIsolationSummary(draft))}</span>
+        </section>
+        <section class="summary-mini-card">
+          <span class="summary-mini-label">运行特性</span>
+          <strong class="summary-mini-value">${escapeHtml(draft.sttEnabled ? '语音转写开启' : '语音转写关闭')}</strong>
+          <span class="summary-mini-meta">${escapeHtml(gatewayFeatureSummary(draft))}</span>
+        </section>
+      </section>
 
       <div class="toolbar top-gap">
-        ${buttonHtml({ action: 'save-gateway-workspace', label: view.savingGateway ? '保存中…' : '保存并应用', kind: 'primary', disabled: view.savingGateway })}
+        ${buttonHtml({ action: 'save-gateway-workspace', label: view.savingGateway ? '保存中…' : '保存策略', disabled: view.savingGateway })}
+        ${buttonHtml({ action: 'save-gateway-workspace-restart', label: view.savingGateway ? '处理中…' : (gatewayRunning ? '保存并重启 Gateway' : '保存并启动 Gateway'), kind: 'primary', disabled: Boolean(view.savingGateway || view.runningAction || !installation.binaryFound) })}
         ${buttonHtml({ action: 'diagnostic-gateway-status', label: '网关状态', disabled: Boolean(view.runningAction) || !installation.binaryFound })}
         ${buttonHtml({ action: 'diagnostic-gateway-status-deep', label: '网关深检', disabled: Boolean(view.runningAction) || !installation.binaryFound })}
         ${buttonHtml({ action: 'switch-workspace-tab', label: '平台连接', attrs: { 'data-tab': 'platforms' } })}
+      </div>
+
+      <div class="compact-disclosure-stack top-gap">
+        ${renderGatewayPolicyDisclosure({
+          title: '会话重置',
+          summary: `${resetModeLabel} · ${gatewayResetSummary(draft)}`,
+          pills: `${pillHtml(resetModeLabel, 'neutral')}${pillHtml(draft.sessionResetNotify ? '重置通知' : '静默重置', draft.sessionResetNotify ? 'good' : 'neutral')}`,
+          open: true,
+          body: `
+            <div class="selection-chip-grid">
+              ${RESET_MODE_OPTIONS.map((item) => buttonHtml({
+                action: 'set-reset-mode',
+                label: item.label,
+                className: `selection-chip${draft.sessionResetMode === item.key ? ' selection-chip-active' : ''}`,
+                kind: draft.sessionResetMode === item.key ? 'primary' : 'secondary',
+                attrs: { 'data-value': item.key },
+              })).join('')}
+            </div>
+            <div class="form-grid">
+              <label class="field-stack">
+                <span>Reset Hour</span>
+                <input class="search-input" id="gateway-reset-hour" type="number" min="0" max="23" value="${escapeHtml(draft.sessionResetAtHour ?? '')}" placeholder="4">
+              </label>
+              <label class="field-stack">
+                <span>Idle Minutes</span>
+                <input class="search-input" id="gateway-reset-idle" type="number" min="1" value="${escapeHtml(draft.sessionResetIdleMinutes ?? '')}" placeholder="1440">
+              </label>
+              <label class="field-stack">
+                <span>Reset Triggers</span>
+                <input class="search-input" id="gateway-reset-triggers" value="${escapeHtml(draft.resetTriggers.join(', '))}" placeholder="/new, /reset">
+              </label>
+            </div>
+            <div class="checkbox-row">
+              <label>
+                <input type="checkbox" id="gateway-reset-notify" ${draft.sessionResetNotify ? 'checked' : ''}>
+                <span>自动重置时通知</span>
+              </label>
+            </div>
+          `,
+        })}
+        ${renderGatewayPolicyDisclosure({
+          title: '准入与隔离',
+          summary: `${dmBehaviorLabel} · ${gatewayIsolationSummary(draft)}`,
+          pills: `${pillHtml(dmBehaviorLabel, 'neutral')}${pillHtml(draft.groupSessionsPerUser || draft.threadSessionsPerUser ? '按用户隔离' : '共享会话', draft.groupSessionsPerUser || draft.threadSessionsPerUser ? 'good' : 'neutral')}`,
+          body: `
+            <div class="selection-chip-grid">
+              ${DM_BEHAVIOR_OPTIONS.map((item) => buttonHtml({
+                action: 'set-dm-behavior',
+                label: item.label,
+                className: `selection-chip${draft.unauthorizedDmBehavior === item.key ? ' selection-chip-active' : ''}`,
+                kind: draft.unauthorizedDmBehavior === item.key ? 'primary' : 'secondary',
+                attrs: { 'data-value': item.key },
+              })).join('')}
+            </div>
+            <div class="checkbox-row">
+              <label>
+                <input type="checkbox" id="gateway-group-sessions" ${draft.groupSessionsPerUser ? 'checked' : ''}>
+                <span>群聊按用户隔离</span>
+              </label>
+              <label>
+                <input type="checkbox" id="gateway-thread-sessions" ${draft.threadSessionsPerUser ? 'checked' : ''}>
+                <span>线程按用户隔离</span>
+              </label>
+            </div>
+          `,
+        })}
+        ${renderGatewayPolicyDisclosure({
+          title: '令牌与运行特性',
+          summary: `${draft.hermesGatewayToken.trim() ? 'Gateway Token 已写入' : 'Gateway Token 未写入'} · ${gatewayFeatureSummary(draft)}`,
+          pills: `${pillHtml(draft.hermesGatewayToken.trim() ? 'Token 已写' : '缺 Token', draft.hermesGatewayToken.trim() ? 'good' : 'warn')}${pillHtml(draft.sttEnabled ? 'STT On' : 'STT Off', draft.sttEnabled ? 'good' : 'neutral')}`,
+          body: `
+            <div class="form-grid">
+              <label class="field-stack">
+                <span>Gateway Token</span>
+                <input class="search-input" id="gateway-token" value="${escapeHtml(draft.hermesGatewayToken)}" placeholder="HERMES_GATEWAY_TOKEN">
+              </label>
+            </div>
+            <div class="checkbox-row">
+              <label>
+                <input type="checkbox" id="gateway-always-log-local" ${draft.alwaysLogLocal ? 'checked' : ''}>
+                <span>始终保留本地日志</span>
+              </label>
+              <label>
+                <input type="checkbox" id="gateway-stt-enabled" ${draft.sttEnabled ? 'checked' : ''}>
+                <span>启用语音转写</span>
+              </label>
+            </div>
+          `,
+        })}
       </div>
     </section>
   `;
@@ -827,6 +937,7 @@ export function renderPlatformsWorkspace(view, context) {
   const dirty = envWorkspaceDirty(view);
   const focusId = view.activePlatformFocus || defaultPlatformFocusId(draft, platforms);
   const focusedPreset = PLATFORM_WORKSPACE_PRESETS.find((preset) => preset.id === focusId) || null;
+  const focusedSnapshot = focusedPreset ? findPlatformSnapshot(platforms, focusedPreset.runtimeName) : null;
   const incompletePlatforms = PLATFORM_WORKSPACE_PRESETS.filter((preset) => {
     const hasValue = platformDraftHasValue(preset, draft);
     return hasValue && platformMissingFields(preset, draft).length > 0;
@@ -898,13 +1009,27 @@ export function renderPlatformsWorkspace(view, context) {
         </div>
       </section>
 
-      <div class="platform-disclosure-stack top-gap">
-        ${PLATFORM_WORKSPACE_PRESETS.map((preset) => renderPlatformWorkspaceCard(
-          { ...view, activePlatformFocus: focusId },
-          preset,
-          findPlatformSnapshot(platforms, preset.runtimeName),
-        )).join('')}
-      </div>
+      <section class="panel panel-nested top-gap">
+        <div class="workspace-main-header">
+          <div>
+            <strong>${escapeHtml(focusedPreset?.label || '当前平台')} 细项</strong>
+            <p class="workspace-main-copy">下方只展开当前聚焦平台，其他平台通过上面的治理卡切换，不再把四个平台表单同时摊开。</p>
+          </div>
+          <div class="pill-row">
+            ${focusedSnapshot?.state ? pillHtml(focusedSnapshot.state, runtimePillTone(focusedSnapshot, true)) : ''}
+            ${focusedPreset ? pillHtml(focusedPreset.label, 'neutral') : ''}
+          </div>
+        </div>
+        <div class="platform-disclosure-stack">
+          ${focusedPreset
+            ? renderPlatformWorkspaceCard(
+              { ...view, activePlatformFocus: focusId },
+              focusedPreset,
+              focusedSnapshot,
+            )
+            : emptyStateHtml('暂无可编辑平台', '当前还没有可聚焦的平台配置。')}
+        </div>
+      </section>
     </div>
   `;
 }

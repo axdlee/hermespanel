@@ -116,7 +116,7 @@ function investigationPrimaryAction(view) {
         action: 'focus-workspace',
         label: '定位模型面',
         kind: 'primary',
-        attrs: { 'data-tab': 'control', 'data-section': 'model-presets' },
+        attrs: { 'data-tab': 'control', 'data-section': 'model-governance' },
       });
     case 'toolsets':
       return buttonHtml({ action: 'goto-extensions', label: '继续到扩展页', kind: 'primary' });
@@ -136,7 +136,7 @@ function investigationPrimaryAction(view) {
         action: 'focus-workspace',
         label: '回到控制面',
         kind: 'primary',
-        attrs: { 'data-tab': 'control', 'data-section': 'model-presets' },
+        attrs: { 'data-tab': 'control', 'data-section': 'model-governance' },
       });
   }
 }
@@ -144,7 +144,7 @@ function investigationPrimaryAction(view) {
 function workspaceSectionFromFocus(focus) {
   switch (focus) {
     case 'model':
-      return { tab: 'control', sectionId: 'model-presets' };
+      return { tab: 'control', sectionId: 'model-governance' };
     case 'credentials':
       return { tab: 'credentials', sectionId: 'provider-credentials' };
     case 'toolsets':
@@ -363,7 +363,7 @@ function renderPage(view) {
     <div class="quick-actions">
       ${buttonHtml({ action: 'refresh', label: view.refreshing ? '同步中…' : '重新读取', kind: 'primary', disabled: view.refreshing })}
       ${buttonHtml({ action: 'diagnostic-config-check', label: view.runningDiagnostic === 'config-check' ? '配置体检…' : '配置体检', disabled: actionBusy })}
-      ${buttonHtml({ action: 'focus-workspace', label: '模型工作台', attrs: { 'data-tab': 'control', 'data-section': 'model-presets' } })}
+      ${buttonHtml({ action: 'focus-workspace', label: '模型工作台', attrs: { 'data-tab': 'control', 'data-section': 'model-governance' } })}
       ${buttonHtml({ action: 'focus-workspace', label: '凭证 / 通道', attrs: { 'data-tab': 'credentials', 'data-section': 'provider-credentials' } })}
     </div>
 

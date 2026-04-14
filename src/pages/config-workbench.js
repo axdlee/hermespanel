@@ -842,6 +842,138 @@ function renderModelPresetChips(view, preset, draft) {
   `;
 }
 
+function renderProviderPresetGrid(view, draft) {
+  return `
+    <div class="preset-card-grid workspace-preset-grid workspace-preset-grid-compact">
+      ${MODEL_PROVIDER_PRESETS.map((preset) => `
+        <section class="preset-card preset-card-compact${draft.modelProvider === preset.provider ? ' provider-preset-card-active' : ''}">
+          <div class="preset-card-head">
+            <div class="preset-card-heading">
+              <strong>${escapeHtml(preset.label)}</strong>
+              <span class="preset-card-caption">${escapeHtml(preset.provider)}</span>
+            </div>
+            <div class="pill-row">
+              ${draft.modelProvider === preset.provider ? pillHtml('当前', 'good') : ''}
+              ${preset.envKey ? pillHtml(envPresetReady(view, preset.envKey) ? '密钥就绪' : '缺密钥', envPresetReady(view, preset.envKey) ? 'good' : 'warn') : pillHtml('自定义', 'neutral')}
+            </div>
+          </div>
+          <p class="preset-card-copy">${escapeHtml(preset.copy)}</p>
+          <code class="preset-inline-code">${escapeHtml(preset.baseUrl || '保留当前 Base URL')}</code>
+          ${renderModelPresetChips(view, preset, draft)}
+          <div class="toolbar top-gap">
+            ${buttonHtml({ action: 'apply-provider-preset', label: '应用', kind: 'primary', attrs: { 'data-preset': preset.id } })}
+          </div>
+        </section>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderToolsetPresetGrid(draft) {
+  return `
+    <div class="preset-card-grid">
+      ${TOOLSET_WORKSPACE_PRESETS.map((preset) => `
+        <section class="preset-card preset-card-compact">
+          <div class="preset-card-head">
+            <div class="preset-card-heading">
+              <strong>${escapeHtml(preset.label)}</strong>
+              <span class="preset-card-caption">${escapeHtml(previewJoined(preset.toolsets, '—', 4))}</span>
+            </div>
+            <div class="pill-row">
+              ${toolsetPresetActive(draft, preset) ? pillHtml('当前方案', 'good') : ''}
+              ${pillHtml(`${preset.toolsets.length} 组`, 'neutral')}
+              ${pillHtml(`${preset.platformToolsets.length} 平台`, preset.platformToolsets.length ? 'neutral' : 'warn')}
+            </div>
+          </div>
+          <p class="preset-card-copy">${escapeHtml(preset.copy)}</p>
+          <code class="preset-inline-code">${escapeHtml(platformBindingsPreview(preset.platformToolsets, '只写顶层 toolsets', 2))}</code>
+          <div class="toolbar top-gap">
+            ${buttonHtml({ action: 'apply-toolset-preset', label: '应用能力面', kind: 'primary', attrs: { 'data-preset': preset.id } })}
+          </div>
+        </section>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderMemoryPresetGrid(view, presets) {
+  return `
+    <div class="preset-card-grid">
+      ${presets.map((preset) => `
+        <section class="preset-card preset-card-compact">
+          <div class="preset-card-head">
+            <div class="preset-card-heading">
+              <strong>${escapeHtml(preset.label)}</strong>
+              <span class="preset-card-caption">${escapeHtml(preset.availability)}</span>
+            </div>
+            <div class="pill-row">
+              ${memoryPresetActive(view, preset) ? pillHtml('当前', 'good') : ''}
+              ${pillHtml(preset.memoryEnabled ? '记忆开启' : '记忆关闭', preset.memoryEnabled ? 'neutral' : 'warn')}
+            </div>
+          </div>
+          <p class="preset-card-copy">${escapeHtml(preset.copy)}</p>
+          <code class="preset-inline-code">${escapeHtml(preset.provider || 'builtin-file')}</code>
+          <div class="toolbar top-gap">
+            ${buttonHtml({ action: 'apply-memory-preset', label: preset.memoryEnabled ? '设为默认' : '关闭记忆', kind: preset.memoryEnabled ? 'primary' : 'secondary', attrs: { 'data-preset': preset.id } })}
+          </div>
+        </section>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderTerminalPresetGrid(view) {
+  return `
+    <div class="preset-card-grid">
+      ${TERMINAL_BACKEND_PRESETS.map((preset) => `
+        <section class="preset-card preset-card-compact">
+          <div class="preset-card-head">
+            <div class="preset-card-heading">
+              <strong>${escapeHtml(preset.label)}</strong>
+              <span class="preset-card-caption">${escapeHtml(preset.backend)}</span>
+            </div>
+            <div class="pill-row">
+              ${terminalPresetActive(view, preset) ? pillHtml('当前后端', 'good') : ''}
+              ${preset.partial ? pillHtml('可继续精修', 'warn') : pillHtml('结构化可配', 'neutral')}
+            </div>
+          </div>
+          <p class="preset-card-copy">${escapeHtml(preset.copy)}</p>
+          <code class="preset-inline-code">${escapeHtml(`${preset.cwd} · timeout ${preset.terminalTimeout}s${preset.terminalModalImage ? ` · ${preset.terminalModalImage}` : ''}`)}</code>
+          <div class="toolbar top-gap">
+            ${buttonHtml({ action: 'apply-terminal-preset', label: '应用后端', kind: 'primary', attrs: { 'data-preset': preset.id } })}
+          </div>
+        </section>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderChannelPresetGrid(view) {
+  return `
+    <div class="preset-card-grid">
+      ${CHANNEL_PRESETS.map((preset) => `
+        <section class="preset-card preset-card-compact">
+          <div class="preset-card-head">
+            <div class="preset-card-heading">
+              <strong>${escapeHtml(preset.label)}</strong>
+              <span class="preset-card-caption">${escapeHtml(preset.tokenLabel)}</span>
+            </div>
+            <div class="pill-row">
+              ${pillHtml(envPresetReady(view, preset.tokenKey) ? 'Token 已填' : '待填 Token', envPresetReady(view, preset.tokenKey) ? 'good' : 'warn')}
+              ${preset.modeKey ? pillHtml(view.envDraft?.[preset.modeKey]?.trim() ? view.envDraft[preset.modeKey] : '模式待写入', view.envDraft?.[preset.modeKey]?.trim() ? 'neutral' : 'warn') : pillHtml('仅 Token', 'neutral')}
+            </div>
+          </div>
+          <p class="preset-card-copy">${escapeHtml(preset.copy)}</p>
+          <code class="preset-inline-code">${escapeHtml(preset.modeKey ? `${preset.modeKey} = ${preset.modeDefault}` : `${preset.tokenLabel} = ...`)}</code>
+          <div class="toolbar top-gap">
+            ${buttonHtml({ action: 'apply-channel-preset', label: '应用骨架', kind: 'primary', attrs: { 'data-preset': preset.id } })}
+          </div>
+        </section>
+      `).join('')}
+    </div>
+  `;
+}
+
 function activeModelProviderPreset(draft) {
   return MODEL_PROVIDER_PRESETS.find((preset) => preset.provider === String(draft?.modelProvider || '').trim()) || null;
 }
@@ -895,7 +1027,7 @@ function renderModelGovernanceWorkbench(view, draft) {
               <strong>模型接入治理</strong>
               ${infoTipHtml('先看接入信号，再决定 provider、默认模型、endpoint 和上下文引擎。这样主链路会比散落在多个表单里更清楚。')}
             </div>
-            <p class="shell-card-copy">这里优先解决“能不能用、缺什么、接到了哪一层”，再往下细调模型和表单字段。</p>
+            <p class="shell-card-copy">先确认主链路能否保存，再下钻细调。</p>
           </div>
           <div class="model-focus-title">
             <div class="model-focus-title-copy">
@@ -984,8 +1116,8 @@ function renderModelGovernanceWorkbench(view, draft) {
         })}
         ${buttonHtml({
           action: 'focus-workspace',
-          label: '进入细项',
-          attrs: { 'data-tab': 'control', 'data-section': 'model-detail' },
+          label: '展开模型设置',
+          attrs: { 'data-tab': 'control', 'data-section': 'model-presets' },
         })}
         ${buttonHtml({ action: 'goto-gateway', label: '去看 Gateway' })}
       </div>
@@ -1020,12 +1152,19 @@ function approvalModeLabel(value) {
   }
 }
 
-function disclosureOpen(view, sectionIds = [], fallback = false) {
+function workspaceSectionActive(view, sectionIds = []) {
   const current = String(view?.activeWorkspaceSection ?? '').trim();
   if (!current) {
-    return fallback;
+    return false;
   }
   return sectionIds.includes(current);
+}
+
+function disclosureOpen(view, sectionIds = [], fallback = false) {
+  if (!String(view?.activeWorkspaceSection ?? '').trim()) {
+    return fallback;
+  }
+  return workspaceSectionActive(view, sectionIds);
 }
 
 function disclosureHtml({ sectionId, open = false, eyebrow, title, metaHtml = '', body }) {
@@ -1146,21 +1285,21 @@ export function renderConfigRail(view, context) {
           action: 'focus-workspace',
           label: '模型',
           meta: `${data.summary.modelProvider || 'provider 待配'} · ${data.summary.modelDefault || '默认模型待配'}`,
-          active: view.activeWorkspaceSection === 'model-presets',
-          attrs: { 'data-tab': 'control', 'data-section': 'model-presets' },
+          active: workspaceSectionActive(view, ['model-governance', 'model-presets']),
+          attrs: { 'data-tab': 'control', 'data-section': 'model-governance' },
         })}
         ${shortcutCardHtml({
           action: 'focus-workspace',
           label: '能力面',
           meta: `${data.summary.toolsets.length} 组能力集 · ${enabledTools} 个工具`,
-          active: view.activeWorkspaceSection === 'toolsets-presets',
+          active: workspaceSectionActive(view, ['toolsets-presets', 'toolsets-detail']),
           attrs: { 'data-tab': 'control', 'data-section': 'toolsets-presets' },
         })}
         ${shortcutCardHtml({
           action: 'focus-workspace',
           label: '记忆',
           meta: data.summary.memoryEnabled ? (data.summary.memoryProvider || 'builtin-file') : '记忆已关闭',
-          active: view.activeWorkspaceSection === 'memory-presets',
+          active: workspaceSectionActive(view, ['memory-presets', 'memory-detail']),
           attrs: { 'data-tab': 'control', 'data-section': 'memory-presets' },
         })}
         ${shortcutCardHtml({
@@ -1275,155 +1414,20 @@ export function renderStructuredControls(view) {
           </section>
         </section>
 
-        <section class="preset-strip workspace-section-anchor" data-workspace-section="model-presets">
-          <div class="preset-strip-header">
-            <div>
-              <div class="panel-title-row">
-                <strong>模型工作台</strong>
-                ${infoTipHtml('像 clawpanel 一样先决定 provider，再直接点选常用 model。这里会同时改 provider、base URL 和默认模型。')}
-              </div>
-            </div>
-          </div>
+        <section class="workspace-section-anchor" data-workspace-section="model-governance">
           ${renderModelGovernanceWorkbench(view, draft)}
-          <div class="preset-card-grid workspace-preset-grid">
-            ${MODEL_PROVIDER_PRESETS.map((preset) => `
-              <section class="preset-card">
-                <div class="preset-card-head">
-                  <div class="preset-card-heading">
-                    <strong>${escapeHtml(preset.label)}</strong>
-                    <span class="preset-card-caption">${escapeHtml(preset.provider)}</span>
-                  </div>
-                  <div class="pill-row">
-                    ${draft.modelProvider === preset.provider ? pillHtml('当前使用', 'good') : ''}
-                    ${preset.envKey ? pillHtml(envPresetReady(view, preset.envKey) ? '密钥已就绪' : '缺少密钥', envPresetReady(view, preset.envKey) ? 'good' : 'warn') : pillHtml('自定义', 'neutral')}
-                  </div>
-                </div>
-                <p class="preset-card-copy">${escapeHtml(preset.copy)}</p>
-                <code class="preset-inline-code">${escapeHtml(preset.baseUrl || '保留当前 Base URL，适合本地兼容端点')}</code>
-                ${renderModelPresetChips(view, preset, draft)}
-                <div class="preset-card-foot">
-                  <div class="toolbar top-gap">
-                    ${buttonHtml({ action: 'apply-provider-preset', label: '应用 Provider', kind: 'primary', attrs: { 'data-preset': preset.id } })}
-                  </div>
-                </div>
-              </section>
-            `).join('')}
-          </div>
-        </section>
-
-        <section class="preset-strip workspace-section-anchor" data-workspace-section="toolsets-presets">
-          <div class="preset-strip-header">
-            <div>
-              <div class="panel-title-row">
-                <strong>能力预设</strong>
-                ${infoTipHtml('直接写入 toolsets 和 platform_toolsets，用预设替代大部分“工具选择”命令行向导。')}
-              </div>
-            </div>
-          </div>
-          <div class="preset-card-grid">
-            ${TOOLSET_WORKSPACE_PRESETS.map((preset) => `
-              <section class="preset-card">
-                <div class="preset-card-head">
-                  <div class="preset-card-heading">
-                    <strong>${escapeHtml(preset.label)}</strong>
-                    <span class="preset-card-caption">${escapeHtml(previewJoined(preset.toolsets, '—', 4))}</span>
-                  </div>
-                  <div class="pill-row">
-                    ${toolsetPresetActive(draft, preset) ? pillHtml('当前方案', 'good') : ''}
-                    ${pillHtml(`${preset.toolsets.length} 组`, 'neutral')}
-                    ${pillHtml(`${preset.platformToolsets.length} 平台`, preset.platformToolsets.length ? 'neutral' : 'warn')}
-                  </div>
-                </div>
-                <p class="preset-card-copy">${escapeHtml(preset.copy)}</p>
-                <code class="preset-inline-code">${escapeHtml(platformBindingsPreview(preset.platformToolsets, '只写顶层 toolsets', 2))}</code>
-                <div class="preset-card-foot">
-                  <div class="toolbar top-gap">
-                    ${buttonHtml({ action: 'apply-toolset-preset', label: '应用能力面', kind: 'primary', attrs: { 'data-preset': preset.id } })}
-                  </div>
-                </div>
-              </section>
-            `).join('')}
-          </div>
-        </section>
-
-        <section class="preset-strip workspace-section-anchor" data-workspace-section="memory-presets">
-          <div class="preset-strip-header">
-            <div>
-              <div class="panel-title-row">
-                <strong>记忆 Provider</strong>
-                ${infoTipHtml('直接切换默认 memory provider，并同步打开或关闭 memory / user profile。')}
-              </div>
-            </div>
-            ${buttonHtml({ action: 'goto-memory', label: '记忆页' })}
-          </div>
-          <div class="preset-card-grid">
-            ${memoryPresets.map((preset) => `
-              <section class="preset-card">
-                <div class="preset-card-head">
-                  <div class="preset-card-heading">
-                    <strong>${escapeHtml(preset.label)}</strong>
-                    <span class="preset-card-caption">${escapeHtml(preset.availability)}</span>
-                  </div>
-                  <div class="pill-row">
-                    ${memoryPresetActive(view, preset) ? pillHtml('当前使用', 'good') : ''}
-                    ${pillHtml(preset.memoryEnabled ? '记忆开启' : '记忆关闭', preset.memoryEnabled ? 'neutral' : 'warn')}
-                  </div>
-                </div>
-                <p class="preset-card-copy">${escapeHtml(preset.copy)}</p>
-                <code class="preset-inline-code">${escapeHtml(preset.provider || 'builtin-file')}</code>
-                <div class="preset-card-foot">
-                  <div class="toolbar top-gap">
-                    ${buttonHtml({ action: 'apply-memory-preset', label: preset.memoryEnabled ? '设为默认' : '关闭记忆', kind: preset.memoryEnabled ? 'primary' : 'secondary', attrs: { 'data-preset': preset.id } })}
-                  </div>
-                </div>
-              </section>
-            `).join('')}
-          </div>
-        </section>
-
-        <section class="preset-strip workspace-section-anchor" data-workspace-section="runtime-presets">
-          <div class="preset-strip-header">
-            <div>
-              <div class="panel-title-row">
-                <strong>终端后端</strong>
-                ${infoTipHtml('先用常见 backend 预设把 backend、cwd 和基础 timeout 写好，确实需要更细参数时再进 YAML 精修。')}
-              </div>
-            </div>
-          </div>
-          <div class="preset-card-grid">
-            ${TERMINAL_BACKEND_PRESETS.map((preset) => `
-              <section class="preset-card">
-                <div class="preset-card-head">
-                  <div class="preset-card-heading">
-                    <strong>${escapeHtml(preset.label)}</strong>
-                    <span class="preset-card-caption">${escapeHtml(preset.backend)}</span>
-                  </div>
-                  <div class="pill-row">
-                    ${terminalPresetActive(view, preset) ? pillHtml('当前后端', 'good') : ''}
-                    ${preset.partial ? pillHtml('可继续精修', 'warn') : pillHtml('结构化可配', 'neutral')}
-                  </div>
-                </div>
-                <p class="preset-card-copy">${escapeHtml(preset.copy)}</p>
-                <code class="preset-inline-code">${escapeHtml(`${preset.cwd} · timeout ${preset.terminalTimeout}s${preset.terminalModalImage ? ` · ${preset.terminalModalImage}` : ''}`)}</code>
-                <div class="preset-card-foot">
-                  <div class="toolbar top-gap">
-                    ${buttonHtml({ action: 'apply-terminal-preset', label: '应用后端', kind: 'primary', attrs: { 'data-preset': preset.id } })}
-                  </div>
-                </div>
-              </section>
-            `).join('')}
-          </div>
         </section>
 
         <div class="compact-disclosure-stack">
           ${disclosureHtml({
-            sectionId: 'model-detail',
-            open: disclosureOpen(view, ['model-detail', 'model-presets'], true),
+            sectionId: 'model-presets',
+            open: disclosureOpen(view, ['model-governance', 'model-presets', 'model-detail'], true),
             eyebrow: '模型',
-            title: '模型与上下文细项',
+            title: '模型 / Provider',
             metaHtml: `${pillHtml(draft.modelProvider || '待补 provider', draft.modelProvider ? 'good' : 'warn')}${pillHtml(draft.streamingEnabled ? '流式输出' : '静态输出', draft.streamingEnabled ? 'neutral' : 'warn')}`,
             body: `
-            <div class="form-grid">
+              ${renderProviderPresetGrid(view, draft)}
+              <div class="form-grid">
                 <label class="field-stack">
                   <span>默认模型</span>
                   <input class="search-input" id="control-model-default" value="${escapeHtml(draft.modelDefault)}" placeholder="gpt-5.4">
@@ -1454,23 +1458,25 @@ export function renderStructuredControls(view) {
             `,
           })}
           ${disclosureHtml({
-            sectionId: 'toolsets-detail',
+            sectionId: 'toolsets-presets',
             open: disclosureOpen(view, ['toolsets-detail', 'toolsets-presets']),
             eyebrow: '能力集',
-            title: '能力暴露与平台绑定',
+            title: '能力面 / Toolsets',
             metaHtml: `${pillHtml(draft.toolsets.length ? `${draft.toolsets.length} 组` : '待补齐', draft.toolsets.length ? 'good' : 'warn')}${pillHtml(normalizedBindings.length ? `${normalizedBindings.length} 平台` : '无平台绑定', normalizedBindings.length ? 'neutral' : 'warn')}`,
             body: `
+              ${renderToolsetPresetGrid(draft)}
               ${renderTopLevelToolsetManager(view, draft)}
               ${renderPlatformBindingManager(view, draft)}
             `,
           })}
           ${disclosureHtml({
-            sectionId: 'memory-detail',
+            sectionId: 'memory-presets',
             open: disclosureOpen(view, ['memory-detail', 'memory-presets']),
             eyebrow: '记忆',
-            title: '记忆与 Skills 目录',
+            title: '记忆 / 外部 Skills',
             metaHtml: `${pillHtml(draft.memoryEnabled ? '记忆开启' : '记忆关闭', draft.memoryEnabled ? 'good' : 'warn')}${pillHtml(draft.userProfileEnabled ? '画像开启' : '画像关闭', draft.userProfileEnabled ? 'neutral' : 'warn')}${pillHtml(draft.skillsExternalDirs.length ? `${draft.skillsExternalDirs.length} 外部目录` : '无外部目录', draft.skillsExternalDirs.length ? 'neutral' : 'warn')}`,
             body: `
+              ${renderMemoryPresetGrid(view, memoryPresets)}
               <div class="form-grid">
                 <label class="field-stack">
                   <span>记忆 Provider</span>
@@ -1499,12 +1505,13 @@ export function renderStructuredControls(view) {
             `,
           })}
           ${disclosureHtml({
-            sectionId: 'runtime-detail',
+            sectionId: 'runtime-presets',
             open: disclosureOpen(view, ['runtime-detail', 'runtime-presets']),
             eyebrow: '运行时',
-            title: '终端、审批与 Discord 路由',
+            title: '运行时 / 终端 / Discord 路由',
             metaHtml: `${pillHtml(draft.terminalBackend || '未配后端', draft.terminalBackend ? 'good' : 'warn')}${pillHtml(approvalModeLabel(draft.approvalsMode), 'neutral')}`,
             body: `
+              ${renderTerminalPresetGrid(view)}
               <div class="form-grid">
                 <label class="field-stack">
                   <span>终端后端</span>
@@ -1622,35 +1629,6 @@ export function renderStructuredEnvControls(view) {
           </section>
         </section>
 
-        <section class="preset-strip workspace-section-anchor" data-workspace-section="channel-presets">
-          <div class="preset-strip-header">
-            <div>
-              <div class="panel-title-row">
-                <strong>通道骨架</strong>
-                ${infoTipHtml('为 Telegram、Discord、Slack 预填推荐的 reply mode 和最小通道骨架，后续只需要补 token / channel id 即可。')}
-              </div>
-            </div>
-          </div>
-          <div class="preset-card-grid">
-            ${CHANNEL_PRESETS.map((preset) => `
-              <section class="preset-card">
-                <div class="preset-card-head">
-                  <strong>${escapeHtml(preset.label)}</strong>
-                  <div class="pill-row">
-                    ${pillHtml(envPresetReady(view, preset.tokenKey) ? 'Token 已填' : '待填 Token', envPresetReady(view, preset.tokenKey) ? 'good' : 'warn')}
-                    ${preset.modeKey ? pillHtml(view.envDraft?.[preset.modeKey]?.trim() ? view.envDraft[preset.modeKey] : '默认模式未写入', view.envDraft?.[preset.modeKey]?.trim() ? 'neutral' : 'warn') : pillHtml('仅 Token', 'neutral')}
-                  </div>
-                </div>
-                <p>${escapeHtml(preset.copy)}</p>
-                <code class="preset-inline-code">${escapeHtml(preset.modeKey ? `${preset.modeKey} = ${preset.modeDefault}` : `${preset.tokenLabel} = ...`)}</code>
-                <div class="toolbar top-gap">
-                  ${buttonHtml({ action: 'apply-channel-preset', label: '应用骨架', kind: 'primary', attrs: { 'data-preset': preset.id } })}
-                </div>
-              </section>
-            `).join('')}
-          </div>
-        </section>
-
         <div class="compact-disclosure-stack">
           ${disclosureHtml({
             sectionId: 'provider-credentials',
@@ -1702,6 +1680,7 @@ export function renderStructuredEnvControls(view) {
             title: '网关与消息通道',
             metaHtml: `${pillHtml(draft.hermesGatewayToken ? '网关 token 已填' : '网关 token 待补', draft.hermesGatewayToken ? 'good' : 'warn')}${pillHtml(channelCount ? `${channelCount} 项通道参数` : '通道参数待补', channelCount ? 'neutral' : 'warn')}`,
             body: `
+              ${renderChannelPresetGrid(view)}
               <div class="form-grid">
                 <label class="field-stack">
                   <span>Hermes Gateway Token</span>

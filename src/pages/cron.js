@@ -590,7 +590,7 @@ function renderPage(view) {
       <div class="config-section-header">
         <div>
           <h2 class="config-section-title">自动化总览</h2>
-          <p class="config-section-desc">参考 clawpanel 的总控视图，但内容完全围绕 Hermes 的自动化链路来组织。</p>
+          <p class="config-section-desc">总控视图，但内容完全围绕 Hermes 的自动化链路来组织。</p>
         </div>
       </div>
       <div class="compact-overview-grid">

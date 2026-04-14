@@ -330,7 +330,7 @@ export function MemoryPage({ notify, profile, navigate, pageIntent, consumePageI
         title="记忆接管动作"
         subtitle="setup、off、plugins、Finder"
         tip={(
-          <InfoTip content="参考 clawpanel 的做法，这里只保留闭环动作，不在页内重复摆满跨页导航。真正需要的说明交给悬浮提示和命令回显。"/>
+          <InfoTip content="只保留闭环动作，不在页内重复摆满跨页导航。真正需要的说明交给悬浮提示和命令回显。"/>
         )}
       >
         <div className="control-card-grid">

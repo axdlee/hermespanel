@@ -7,7 +7,7 @@ use std::process::{Command, Output};
 use chrono::{DateTime, Local};
 use regex::Regex;
 use rusqlite::Connection;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 use walkdir::WalkDir;
 
@@ -18,13 +18,16 @@ use crate::models::{
     DashboardCounts, DashboardSnapshot, EnvWorkspace, ExtensionsSnapshot, GatewayPlatformState,
     GatewayStateSnapshot, GatewayWorkspace, HermesHome, InstallationSnapshot, LogReadResult,
     MemoryFileDetail, MemoryFileSummary, MemoryProviderOption, MemoryRuntimeSnapshot, NamedCount,
-    PlatformToolsetBinding, PluginCatalogItem, PluginExternalDependency, PluginRuntimeSnapshot,
-    PluginImportRequest, PluginImportResult, ProfileAliasCreateRequest, ProfileAliasDeleteRequest,
-    ProfileAliasItem, ProfileCreateRequest, ProfileDeleteRequest, ProfileExportRequest,
-    ProfileImportRequest, ProfileRenameRequest, ProfileSummary, ProfilesSnapshot,
-    RuntimeSkillItem, SessionDetail, SessionMessage, SessionRecord, SkillCreateRequest,
-    SkillFileDetail, SkillFrontmatter, SkillImportRequest, SkillImportResult, SkillItem,
-    ToolPlatformInventory, ToolPlatformSummary, ToolRuntimeItem,
+    PlatformToolsetBinding, PluginCatalogItem, PluginCreateRequest, PluginCreateResult,
+    PluginDeleteRequest, PluginDeleteResult, PluginExternalDependency, PluginImportRequest,
+    PluginImportResult, PluginManifestDetail, PluginManifestSaveRequest, PluginReadmeDetail,
+    PluginReadmeSaveRequest, PluginRuntimeSnapshot, ProfileAliasCreateRequest,
+    ProfileAliasDeleteRequest, ProfileAliasItem, ProfileCreateRequest, ProfileDeleteRequest,
+    ProfileExportRequest, ProfileImportRequest, ProfileRenameRequest, ProfileSummary,
+    ProfilesSnapshot, RuntimeSkillItem, SessionDetail, SessionMessage, SessionRecord,
+    SkillCreateRequest, SkillDeleteRequest, SkillDeleteResult, SkillFileDetail,
+    SkillFrontmatter, SkillFrontmatterSaveRequest, SkillImportRequest, SkillImportResult,
+    SkillItem, ToolPlatformInventory, ToolPlatformSummary, ToolRuntimeItem,
 };
 
 const QUICK_INSTALL_COMMAND: &str =
@@ -72,6 +75,13 @@ struct RawPluginExternalDependency {
     name: Option<String>,
     install: Option<String>,
     check: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct PluginSkeletonManifest<'a> {
+    name: &'a str,
+    version: &'a str,
+    description: &'a str,
 }
 
 pub fn resolve_default_hermes_root(explicit_root: Option<&Path>) -> AppResult<PathBuf> {
@@ -1321,13 +1331,19 @@ fn profile_plugin_catalog_root(home: &HermesHome) -> PathBuf {
     home.root.join("hermes-agent").join("plugins")
 }
 
-fn plugin_catalog_root(home: &HermesHome) -> Option<PathBuf> {
-    let mut candidates = vec![profile_plugin_catalog_root(home)];
+fn plugin_catalog_roots(home: &HermesHome) -> Vec<PathBuf> {
+    let mut roots = vec![profile_plugin_catalog_root(home)];
     if let Ok(default_root) = resolve_default_hermes_root(None) {
-        candidates.push(default_root.join("hermes-agent").join("plugins"));
+        let shared_root = default_root.join("hermes-agent").join("plugins");
+        if !roots.iter().any(|item| item == &shared_root) {
+            roots.push(shared_root);
+        }
     }
+    roots
+}
 
-    candidates
+fn plugin_catalog_root(home: &HermesHome) -> Option<PathBuf> {
+    plugin_catalog_roots(home)
         .into_iter()
         .find(|candidate| candidate.exists() && candidate.is_dir())
 }
@@ -1366,12 +1382,45 @@ fn add_plugin_aliases(aliases: &mut BTreeSet<String>, value: &str) {
     }
 }
 
-fn parse_plugin_catalog_item(
+fn normalize_plugin_string_list(values: &[String]) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    let mut normalized = Vec::new();
+
+    for value in values {
+        let item = value.trim();
+        if item.is_empty() || !seen.insert(item.to_string()) {
+            continue;
+        }
+        normalized.push(item.to_string());
+    }
+
+    normalized
+}
+
+fn normalize_plugin_external_dependencies(
+    items: Vec<RawPluginExternalDependency>,
+) -> Vec<PluginExternalDependency> {
+    items.into_iter()
+        .filter_map(|item| {
+            let name = item.name.unwrap_or_default().trim().to_string();
+            if name.is_empty() {
+                return None;
+            }
+            Some(PluginExternalDependency {
+                name,
+                install: item.install.unwrap_or_default().trim().to_string(),
+                check: item.check.unwrap_or_default().trim().to_string(),
+            })
+        })
+        .collect()
+}
+
+fn build_plugin_manifest_detail(
     root: &Path,
     manifest_path: &Path,
-    installed_aliases: &BTreeSet<String>,
-) -> AppResult<PluginCatalogItem> {
-    let manifest: RawPluginManifest = serde_yaml::from_str(&read_text_file(manifest_path)?)?;
+) -> AppResult<PluginManifestDetail> {
+    let content = read_text_file(manifest_path)?;
+    let manifest: RawPluginManifest = serde_yaml::from_str(&content)?;
     let directory = manifest_path
         .parent()
         .ok_or_else(|| AppError::Message("plugin.yaml 缺少父目录".into()))?;
@@ -1390,44 +1439,178 @@ fn parse_plugin_catalog_item(
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or("unknown-plugin");
-    let name = manifest
-        .name
-        .unwrap_or_else(|| fallback_name.to_string())
-        .trim()
-        .to_string();
+
+    Ok(PluginManifestDetail {
+        name: manifest
+            .name
+            .unwrap_or_else(|| fallback_name.to_string())
+            .trim()
+            .to_string(),
+        category,
+        relative_path,
+        directory_path: directory.display().to_string(),
+        manifest_path: manifest_path.display().to_string(),
+        description: manifest.description.unwrap_or_default().trim().to_string(),
+        requires_env: normalize_plugin_string_list(&manifest.requires_env.unwrap_or_default()),
+        pip_dependencies: normalize_plugin_string_list(
+            &manifest.pip_dependencies.unwrap_or_default(),
+        ),
+        external_dependencies: normalize_plugin_external_dependencies(
+            manifest.external_dependencies.unwrap_or_default(),
+        ),
+        raw_yaml: content,
+    })
+}
+
+fn parse_plugin_catalog_item(
+    root: &Path,
+    manifest_path: &Path,
+    installed_aliases: &BTreeSet<String>,
+) -> AppResult<PluginCatalogItem> {
+    let manifest = build_plugin_manifest_detail(root, manifest_path)?;
+    let name = manifest.name.clone();
     let mut aliases = BTreeSet::new();
     add_plugin_aliases(&mut aliases, &name);
-    add_plugin_aliases(&mut aliases, &relative_path);
-    add_plugin_aliases(&mut aliases, &format!("{category}/{name}"));
+    add_plugin_aliases(&mut aliases, &manifest.relative_path);
+    add_plugin_aliases(&mut aliases, &format!("{}/{}", manifest.category, name));
     let installed = aliases
         .iter()
         .any(|alias| installed_aliases.contains(alias.as_str()));
 
     Ok(PluginCatalogItem {
         name,
+        category: manifest.category,
+        relative_path: manifest.relative_path,
+        directory_path: manifest.directory_path,
+        description: manifest.description,
+        requires_env: manifest.requires_env,
+        pip_dependencies: manifest.pip_dependencies,
+        external_dependencies: manifest.external_dependencies,
+        installed,
+    })
+}
+
+fn ensure_plugin_manifest_within_home(
+    home: &HermesHome,
+    manifest_path: &str,
+) -> AppResult<(PathBuf, PathBuf)> {
+    let candidate = PathBuf::from(manifest_path);
+    let resolved = if candidate.is_absolute() {
+        candidate
+    } else {
+        profile_plugin_catalog_root(home).join(candidate)
+    };
+    let manifest = if resolved.is_dir() {
+        resolved.join("plugin.yaml")
+    } else {
+        resolved
+    };
+
+    if manifest.file_name() != Some(std::ffi::OsStr::new("plugin.yaml")) {
+        return Err(AppError::Message("插件 manifest 必须是 plugin.yaml".into()));
+    }
+
+    let canonical_manifest = fs::canonicalize(&manifest)?;
+
+    for root in plugin_catalog_roots(home) {
+        let canonical_root = fs::canonicalize(&root).unwrap_or(root.clone());
+        if canonical_manifest.starts_with(&canonical_root) {
+            return Ok((canonical_manifest, canonical_root));
+        }
+    }
+
+    Err(AppError::Message(
+        "只能读取或保存 Hermes plugin 目录内的 plugin.yaml".into(),
+    ))
+}
+
+fn ensure_plugin_directory_within_home(
+    home: &HermesHome,
+    directory_path: &str,
+) -> AppResult<(PathBuf, PathBuf)> {
+    let candidate = PathBuf::from(directory_path);
+    let resolved = if candidate.is_absolute() {
+        candidate
+    } else {
+        profile_plugin_catalog_root(home).join(candidate)
+    };
+    let directory = if resolved.is_dir() {
+        resolved
+    } else {
+        resolved
+            .parent()
+            .ok_or_else(|| AppError::Message("无法解析插件目录".into()))?
+            .to_path_buf()
+    };
+
+    let canonical_directory = fs::canonicalize(&directory)?;
+    for root in plugin_catalog_roots(home) {
+        let canonical_root = fs::canonicalize(&root).unwrap_or(root.clone());
+        if canonical_directory.starts_with(&canonical_root) {
+            return Ok((canonical_directory, canonical_root));
+        }
+    }
+
+    Err(AppError::Message(
+        "只能读取或删除 Hermes plugin 目录内的本地插件".into(),
+    ))
+}
+
+pub fn read_plugin_manifest(
+    home: &HermesHome,
+    manifest_path: &str,
+) -> AppResult<PluginManifestDetail> {
+    let (canonical_manifest, catalog_root) =
+        ensure_plugin_manifest_within_home(home, manifest_path)?;
+    build_plugin_manifest_detail(&catalog_root, &canonical_manifest)
+}
+
+pub fn read_plugin_readme(
+    home: &HermesHome,
+    directory_path: &str,
+) -> AppResult<PluginReadmeDetail> {
+    let (canonical_directory, catalog_root) =
+        ensure_plugin_directory_within_home(home, directory_path)?;
+    let relative_path = canonical_directory
+        .strip_prefix(&catalog_root)
+        .unwrap_or(canonical_directory.as_path())
+        .to_string_lossy()
+        .replace('\\', "/");
+    let category = relative_path
+        .split('/')
+        .next()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("uncategorized")
+        .to_string();
+    let fallback_name = canonical_directory
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("unknown-plugin")
+        .to_string();
+    let manifest_path = canonical_directory.join("plugin.yaml");
+    let name = if manifest_path.is_file() {
+        build_plugin_manifest_detail(&catalog_root, &manifest_path)
+            .map(|item| item.name)
+            .unwrap_or(fallback_name.clone())
+    } else {
+        fallback_name.clone()
+    };
+    let readme_path = canonical_directory.join("README.md");
+    let exists = readme_path.is_file();
+    let content = if exists {
+        read_text_file(&readme_path)?
+    } else {
+        String::new()
+    };
+
+    Ok(PluginReadmeDetail {
+        name,
         category,
         relative_path,
-        directory_path: directory.display().to_string(),
-        description: manifest.description.unwrap_or_default().trim().to_string(),
-        requires_env: manifest.requires_env.unwrap_or_default(),
-        pip_dependencies: manifest.pip_dependencies.unwrap_or_default(),
-        external_dependencies: manifest
-            .external_dependencies
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|item| {
-                let name = item.name.unwrap_or_default().trim().to_string();
-                if name.is_empty() {
-                    return None;
-                }
-                Some(PluginExternalDependency {
-                    name,
-                    install: item.install.unwrap_or_default().trim().to_string(),
-                    check: item.check.unwrap_or_default().trim().to_string(),
-                })
-            })
-            .collect(),
-        installed,
+        directory_path: canonical_directory.display().to_string(),
+        file_path: readme_path.display().to_string(),
+        exists,
+        content,
     })
 }
 
@@ -1507,6 +1690,157 @@ pub fn import_plugin(home: &HermesHome, request: &PluginImportRequest) -> AppRes
     })
 }
 
+pub fn create_plugin(home: &HermesHome, request: &PluginCreateRequest) -> AppResult<PluginCreateResult> {
+    let plugin_name = request.name.trim();
+    if plugin_name.is_empty() {
+        return Err(AppError::Message("请先填写插件名称".into()));
+    }
+
+    let fallback_slug = normalize_skill_segment(plugin_name, "new-plugin");
+    let category = normalize_skill_segment(&request.category, "custom");
+    let catalog_root = profile_plugin_catalog_root(home);
+    let target_directory = catalog_root.join(&category).join(&fallback_slug);
+    let manifest_path = target_directory.join("plugin.yaml");
+    let readme_path = target_directory.join("README.md");
+
+    if target_directory.exists() {
+        if !request.overwrite {
+            return Err(AppError::Message(format!(
+                "目标插件已存在：{}/{}",
+                category, fallback_slug
+            )));
+        }
+
+        fs::remove_dir_all(&target_directory)?;
+    }
+
+    fs::create_dir_all(&target_directory)?;
+    fs::write(
+        &manifest_path,
+        build_plugin_manifest(plugin_name, request.description.trim())?,
+    )?;
+    fs::write(
+        &readme_path,
+        build_plugin_readme(plugin_name, request.description.trim()),
+    )?;
+
+    let created = parse_plugin_catalog_item(&catalog_root, &manifest_path, &BTreeSet::new())?;
+
+    Ok(PluginCreateResult {
+        created,
+        target_directory: target_directory.display().to_string(),
+        created_files: 2,
+        overwrite: request.overwrite,
+    })
+}
+
+pub fn write_plugin_manifest(
+    home: &HermesHome,
+    request: &PluginManifestSaveRequest,
+) -> AppResult<PluginManifestDetail> {
+    let plugin_name = request.name.trim();
+    if plugin_name.is_empty() {
+        return Err(AppError::Message("插件名称不能为空".into()));
+    }
+
+    let (canonical_manifest, catalog_root) =
+        ensure_plugin_manifest_within_home(home, &request.manifest_path)?;
+    let current = read_text_file(&canonical_manifest)?;
+    let mut value = if current.trim().is_empty() {
+        Value::Mapping(Default::default())
+    } else {
+        serde_yaml::from_str::<Value>(&current)?
+    };
+
+    if !matches!(value, Value::Mapping(_)) {
+        return Err(AppError::Message("plugin.yaml 根节点必须是 mapping".into()));
+    }
+
+    set_yaml_string(&mut value, &["name"], plugin_name);
+    set_yaml_optional_string(&mut value, &["description"], &request.description);
+    set_yaml_string_array_or_remove(&mut value, &["requires_env"], &request.requires_env);
+    set_yaml_string_array_or_remove(
+        &mut value,
+        &["pip_dependencies"],
+        &request.pip_dependencies,
+    );
+    set_yaml_external_dependencies(
+        &mut value,
+        &["external_dependencies"],
+        &request.external_dependencies,
+    );
+
+    let content = serde_yaml::to_string(&value)?;
+    fs::write(&canonical_manifest, content)?;
+    build_plugin_manifest_detail(&catalog_root, &canonical_manifest)
+}
+
+pub fn write_plugin_readme(
+    home: &HermesHome,
+    request: &PluginReadmeSaveRequest,
+) -> AppResult<PluginReadmeDetail> {
+    let candidate = PathBuf::from(&request.file_path);
+    let directory_hint = candidate
+        .parent()
+        .ok_or_else(|| AppError::Message("README 文件路径无效".into()))?;
+    let (canonical_directory, _catalog_root) =
+        ensure_plugin_directory_within_home(home, &directory_hint.display().to_string())?;
+    let readme_path = canonical_directory.join("README.md");
+    fs::write(&readme_path, request.content.trim_end())?;
+    read_plugin_readme(home, &canonical_directory.display().to_string())
+}
+
+pub fn delete_local_plugin(
+    home: &HermesHome,
+    request: &PluginDeleteRequest,
+) -> AppResult<PluginDeleteResult> {
+    let expected_name = request.name.trim();
+    if expected_name.is_empty() {
+        return Err(AppError::Message("删除本地插件前必须提供插件名称确认".into()));
+    }
+
+    let (canonical_directory, catalog_root) =
+        ensure_plugin_directory_within_home(home, &request.directory_path)?;
+    let manifest_path = canonical_directory.join("plugin.yaml");
+    let actual_name = if manifest_path.is_file() {
+        build_plugin_manifest_detail(&catalog_root, &manifest_path)
+            .map(|item| item.name)
+            .unwrap_or_else(|_| {
+                canonical_directory
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or_default()
+                    .to_string()
+            })
+    } else {
+        canonical_directory
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+
+    if actual_name.trim() != expected_name {
+        return Err(AppError::Message(format!(
+            "插件确认名不匹配，期望 {expected_name}，实际为 {}",
+            actual_name
+        )));
+    }
+
+    let removed_files = WalkDir::new(&canonical_directory)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_file())
+        .count();
+    fs::remove_dir_all(&canonical_directory)?;
+
+    Ok(PluginDeleteResult {
+        name: actual_name,
+        directory_path: canonical_directory.display().to_string(),
+        removed_files,
+    })
+}
+
 pub fn list_skills(home: &HermesHome) -> AppResult<Vec<SkillItem>> {
     if !home.skills_dir.exists() {
         return Ok(Vec::new());
@@ -1551,12 +1885,83 @@ pub fn list_skills(home: &HermesHome) -> AppResult<Vec<SkillItem>> {
 
 pub fn read_skill_file(home: &HermesHome, file_path: &str) -> AppResult<SkillFileDetail> {
     let path = ensure_skill_file_within_home(home, file_path)?;
+    build_skill_file_detail(home, &path)
+}
+
+pub fn write_skill_frontmatter(
+    home: &HermesHome,
+    request: &SkillFrontmatterSaveRequest,
+) -> AppResult<SkillFileDetail> {
+    let skill_name = request.name.trim();
+    if skill_name.is_empty() {
+        return Err(AppError::Message("技能名称不能为空".into()));
+    }
+
+    let path = ensure_skill_file_within_home(home, &request.file_path)?;
+    let current = read_text_file(&path)?;
+    let (mut value, body) = split_markdown_frontmatter(&current)?;
+    set_yaml_string(&mut value, &["name"], skill_name);
+    set_yaml_optional_string(&mut value, &["description"], &request.description);
+    let content = build_markdown_with_frontmatter(&value, &body)?;
+    fs::write(&path, content)?;
+    build_skill_file_detail(home, &path)
+}
+
+pub fn delete_local_skill(
+    home: &HermesHome,
+    request: &SkillDeleteRequest,
+) -> AppResult<SkillDeleteResult> {
+    let expected_name = request.name.trim();
+    if expected_name.is_empty() {
+        return Err(AppError::Message("删除本地技能前必须提供技能名称确认".into()));
+    }
+
+    let path = ensure_skill_file_within_home(home, &request.file_path)?;
+    if path.file_name() != Some(std::ffi::OsStr::new("SKILL.md")) {
+        return Err(AppError::Message("只能删除本地 skills 目录内的 SKILL.md".into()));
+    }
+
+    let actual_name = build_skill_file_detail(home, &path)
+        .map(|detail| detail.name)
+        .unwrap_or_else(|_| {
+            path.parent()
+                .and_then(|value| value.file_name())
+                .and_then(|value| value.to_str())
+                .unwrap_or_default()
+                .to_string()
+        });
+
+    if actual_name.trim() != expected_name {
+        return Err(AppError::Message(format!(
+            "技能确认名不匹配，期望 {expected_name}，实际为 {}",
+            actual_name
+        )));
+    }
+
+    let directory = path.parent().ok_or_else(|| {
+        AppError::Message("无法解析技能目录".into())
+    })?;
+    let removed_files = WalkDir::new(directory)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_file())
+        .count();
+    fs::remove_dir_all(directory)?;
+
+    Ok(SkillDeleteResult {
+        name: actual_name,
+        directory_path: directory.display().to_string(),
+        removed_files,
+    })
+}
+
+fn build_skill_file_detail(home: &HermesHome, path: &Path) -> AppResult<SkillFileDetail> {
     let skills_root =
         fs::canonicalize(&home.skills_dir).unwrap_or_else(|_| home.skills_dir.clone());
-    let content = read_text_file(&path)?;
+    let content = read_text_file(path)?;
     let relative = path
         .strip_prefix(&skills_root)
-        .unwrap_or(path.as_path())
+        .unwrap_or(path)
         .to_string_lossy()
         .replace('\\', "/");
     let meta = parse_skill_frontmatter(&content, &relative);
@@ -1564,6 +1969,7 @@ pub fn read_skill_file(home: &HermesHome, file_path: &str) -> AppResult<SkillFil
     Ok(SkillFileDetail {
         category: meta.category,
         content,
+        description: meta.description,
         file_path: path.display().to_string(),
         name: meta.name,
         relative_path: meta.relative_path,
@@ -1577,7 +1983,7 @@ pub fn write_skill_file(
 ) -> AppResult<SkillFileDetail> {
     let path = ensure_skill_file_within_home(home, file_path)?;
     fs::write(&path, content)?;
-    read_skill_file(home, &path.display().to_string())
+    build_skill_file_detail(home, &path)
 }
 
 pub fn create_skill_file(
@@ -2606,8 +3012,39 @@ fn set_yaml_value(root: &mut Value, path: &[&str], value: Value) {
     }
 }
 
+fn remove_yaml_path(root: &mut Value, path: &[&str]) {
+    if path.is_empty() {
+        return;
+    }
+
+    let mut current = root;
+    for segment in &path[..path.len() - 1] {
+        let Some(mapping) = current.as_mapping_mut() else {
+            return;
+        };
+        let key = Value::String((*segment).to_string());
+        let Some(next) = mapping.get_mut(&key) else {
+            return;
+        };
+        current = next;
+    }
+
+    if let Some(mapping) = current.as_mapping_mut() {
+        let key = Value::String(path[path.len() - 1].to_string());
+        mapping.remove(&key);
+    }
+}
+
 fn set_yaml_string(root: &mut Value, path: &[&str], value: &str) {
     set_yaml_value(root, path, Value::String(value.trim().to_string()));
+}
+
+fn set_yaml_optional_string(root: &mut Value, path: &[&str], value: &str) {
+    if value.trim().is_empty() {
+        remove_yaml_path(root, path);
+        return;
+    }
+    set_yaml_string(root, path, value);
 }
 
 fn set_yaml_bool(root: &mut Value, path: &[&str], value: bool) {
@@ -2628,6 +3065,59 @@ fn set_yaml_string_array(root: &mut Value, path: &[&str], values: &[String]) {
         .filter(|item| !item.is_empty())
         .map(|item| Value::String(item.to_string()))
         .collect();
+    set_yaml_value(root, path, Value::Sequence(sequence));
+}
+
+fn set_yaml_string_array_or_remove(root: &mut Value, path: &[&str], values: &[String]) {
+    let normalized = normalize_plugin_string_list(values);
+    if normalized.is_empty() {
+        remove_yaml_path(root, path);
+        return;
+    }
+    set_yaml_string_array(root, path, &normalized);
+}
+
+fn set_yaml_external_dependencies(
+    root: &mut Value,
+    path: &[&str],
+    dependencies: &[PluginExternalDependency],
+) {
+    let sequence = dependencies
+        .iter()
+        .filter_map(|item| {
+            let name = item.name.trim();
+            if name.is_empty() {
+                return None;
+            }
+
+            let mut mapping = serde_yaml::Mapping::new();
+            mapping.insert(
+                Value::String("name".into()),
+                Value::String(name.to_string()),
+            );
+
+            if !item.install.trim().is_empty() {
+                mapping.insert(
+                    Value::String("install".into()),
+                    Value::String(item.install.trim().to_string()),
+                );
+            }
+            if !item.check.trim().is_empty() {
+                mapping.insert(
+                    Value::String("check".into()),
+                    Value::String(item.check.trim().to_string()),
+                );
+            }
+
+            Some(Value::Mapping(mapping))
+        })
+        .collect::<Vec<_>>();
+
+    if sequence.is_empty() {
+        remove_yaml_path(root, path);
+        return;
+    }
+
     set_yaml_value(root, path, Value::Sequence(sequence));
 }
 
@@ -2701,6 +3191,62 @@ fn normalize_skill_segment(value: &str, fallback: &str) -> String {
     }
 }
 
+fn split_markdown_frontmatter(markdown: &str) -> AppResult<(Value, String)> {
+    let mut lines = markdown.lines();
+    if !matches!(lines.next(), Some("---")) {
+        return Ok((Value::Mapping(Default::default()), markdown.to_string()));
+    }
+
+    let mut yaml_lines = Vec::new();
+    let mut found_closing = false;
+    for line in lines.by_ref() {
+        if line.trim() == "---" {
+            found_closing = true;
+            break;
+        }
+        yaml_lines.push(line);
+    }
+
+    if !found_closing {
+        return Err(AppError::Message(
+            "SKILL.md frontmatter 缺少结束分隔符，无法结构化保存".into(),
+        ));
+    }
+
+    let value = if yaml_lines.is_empty() {
+        Value::Mapping(Default::default())
+    } else {
+        serde_yaml::from_str::<Value>(&yaml_lines.join("\n"))?
+    };
+
+    if !matches!(value, Value::Mapping(_)) {
+        return Err(AppError::Message(
+            "SKILL.md frontmatter 根节点必须是 mapping".into(),
+        ));
+    }
+
+    let body = lines.collect::<Vec<_>>().join("\n");
+    if body.is_empty() {
+        return Ok((value, String::new()));
+    }
+
+    Ok((value, body.trim_start_matches('\n').to_string()))
+}
+
+fn build_markdown_with_frontmatter(frontmatter: &Value, body: &str) -> AppResult<String> {
+    let yaml = serde_yaml::to_string(frontmatter)?;
+    let normalized_yaml = yaml.trim_end();
+    let normalized_body = body.trim_end();
+
+    if normalized_body.is_empty() {
+        return Ok(format!("---\n{normalized_yaml}\n---\n"));
+    }
+
+    Ok(format!(
+        "---\n{normalized_yaml}\n---\n\n{normalized_body}\n"
+    ))
+}
+
 fn build_skill_markdown(name: &str, description: &str, body: &str) -> String {
     let fallback_body = format!(
         "# {}\n\n## 目标\n\n在这里描述这个 skill 解决的问题。\n\n## 用法\n\n补充你的执行步骤、约束和示例。\n",
@@ -2717,6 +3263,31 @@ fn build_skill_markdown(name: &str, description: &str, body: &str) -> String {
         name.trim(),
         description.trim(),
         content.trim()
+    )
+}
+
+fn build_plugin_manifest(name: &str, description: &str) -> AppResult<String> {
+    let manifest = PluginSkeletonManifest {
+        name: name.trim(),
+        version: "0.1.0",
+        description: if description.trim().is_empty() {
+            "在这里描述这个 Hermes 插件的作用。"
+        } else {
+            description.trim()
+        },
+    };
+    Ok(serde_yaml::to_string(&manifest)?)
+}
+
+fn build_plugin_readme(name: &str, description: &str) -> String {
+    let summary = if description.trim().is_empty() {
+        "在这里描述插件能力、依赖和接入方式。"
+    } else {
+        description.trim()
+    };
+
+    format!(
+        "# {name}\n\n## 简介\n\n{summary}\n\n## 下一步\n\n1. 在 `plugin.yaml` 里补充 `requires_env`、`pip_dependencies` 或 `external_dependencies`\n2. 把运行脚本、资源文件或桥接逻辑放到当前目录\n3. 回到 HermesPanel，在插件工作台继续做安装、启停和 Provider 接管\n"
     )
 }
 
@@ -3243,10 +3814,12 @@ mod tests {
 
     use crate::models::{
         ConfigWorkspace, CronCreateRequest, CronDeleteRequest, CronUpdateRequest, EnvWorkspace,
-        GatewayWorkspace, PlatformToolsetBinding, PluginImportRequest, PluginRuntimeSnapshot,
-        ProfileAliasCreateRequest, ProfileAliasDeleteRequest, ProfileCreateRequest,
-        ProfileDeleteRequest, ProfileExportRequest, ProfileImportRequest, ProfileRenameRequest,
-        SkillCreateRequest, SkillImportRequest,
+        GatewayWorkspace, PlatformToolsetBinding, PluginCreateRequest, PluginDeleteRequest,
+        PluginExternalDependency, PluginImportRequest, PluginManifestSaveRequest,
+        PluginReadmeSaveRequest, PluginRuntimeSnapshot, ProfileAliasCreateRequest,
+        ProfileAliasDeleteRequest, ProfileCreateRequest, ProfileDeleteRequest,
+        ProfileExportRequest, ProfileImportRequest, ProfileRenameRequest, SkillCreateRequest,
+        SkillDeleteRequest, SkillFrontmatterSaveRequest, SkillImportRequest,
     };
 
     use super::{
@@ -3256,13 +3829,16 @@ mod tests {
         build_profile_create_args, build_profile_delete_args, build_profile_export_args,
         build_profile_import_args, build_profile_rename_args, build_skill_action_args,
         build_tool_action_args, compose_hermes_command_args, config_compat_action_args,
-        create_skill_file, get_active_profile, import_plugin, import_skill,
+        create_plugin, create_skill_file, get_active_profile, import_plugin, import_skill,
         installation_action_command, list_profile_aliases, list_profiles, load_recent_sessions,
         parse_memory_runtime, parse_plugin_runtime, parse_runtime_skills,
         parse_skill_frontmatter, parse_tool_inventory, parse_tool_inventory_line,
         parse_tool_summary, read_config_documents, read_cron_jobs, read_gateway_state,
-        resolve_hermes_home, set_active_profile, write_structured_config, write_structured_env,
-        write_structured_gateway, InstallationActionCommand, QUICK_INSTALL_COMMAND,
+        read_plugin_manifest, read_plugin_readme, resolve_hermes_home, set_active_profile,
+        write_plugin_manifest, write_plugin_readme, write_structured_config,
+        write_skill_frontmatter, write_structured_env, write_structured_gateway,
+        delete_local_plugin, delete_local_skill,
+        InstallationActionCommand, QUICK_INSTALL_COMMAND,
     };
 
     #[test]
@@ -3983,6 +4559,197 @@ pip_dependencies:
     }
 
     #[test]
+    fn creates_local_plugin_scaffold_inside_profile_catalog() {
+        let temp = tempdir().expect("创建临时目录失败");
+        let root = temp.path().join(".hermes");
+        seed_profile_root(&root, "gpt-5.4");
+        let home =
+            resolve_hermes_home(Some("default"), Some(&root)).expect("解析 Hermes Home 失败");
+
+        let result = create_plugin(
+            &home,
+            &PluginCreateRequest {
+                name: "Release Memory".into(),
+                category: "memory tools".into(),
+                description: "给发布流程准备一个本地记忆插件骨架".into(),
+                overwrite: false,
+            },
+        )
+        .expect("创建本地插件骨架失败");
+
+        assert_eq!(result.created.name, "Release Memory");
+        assert_eq!(result.created.category, "memory-tools");
+        assert!(result
+            .target_directory
+            .ends_with("plugins/memory-tools/release-memory"));
+        assert_eq!(result.created_files, 2);
+        assert!(PathBuf::from(&result.target_directory).join("plugin.yaml").is_file());
+        assert!(PathBuf::from(&result.target_directory).join("README.md").is_file());
+
+        let manifest =
+            fs::read_to_string(PathBuf::from(&result.target_directory).join("plugin.yaml"))
+                .expect("读取 plugin.yaml 失败");
+        assert!(manifest.contains("name: Release Memory"));
+        assert!(manifest.contains("version: 0.1.0"));
+        assert!(manifest.contains("description: 给发布流程准备一个本地记忆插件骨架"));
+    }
+
+    #[test]
+    fn reads_and_saves_plugin_manifest_without_losing_unknown_fields() {
+        let temp = tempdir().expect("创建临时目录失败");
+        let root = temp.path().join(".hermes");
+        seed_profile_root(&root, "gpt-5.4");
+        let manifest_path = root
+            .join("hermes-agent")
+            .join("plugins")
+            .join("memory")
+            .join("byterover")
+            .join("plugin.yaml");
+
+        fs::create_dir_all(
+            manifest_path
+                .parent()
+                .expect("解析插件目录失败"),
+        )
+        .expect("创建插件目录失败");
+        fs::write(
+            &manifest_path,
+            r#"name: byterover
+description: "ByteRover memory"
+requires_env:
+  - BYTEROVER_API_KEY
+custom_section:
+  owner: local
+  retries: 2
+external_dependencies:
+  - name: brv
+    install: "brew install brv"
+"#,
+        )
+        .expect("写入 plugin.yaml 失败");
+
+        let home =
+            resolve_hermes_home(Some("default"), Some(&root)).expect("解析 Hermes Home 失败");
+        let detail = read_plugin_manifest(&home, &manifest_path.display().to_string())
+            .expect("读取插件 manifest 失败");
+
+        assert_eq!(detail.name, "byterover");
+        assert_eq!(detail.category, "memory");
+        assert_eq!(detail.requires_env, vec!["BYTEROVER_API_KEY"]);
+        assert_eq!(detail.external_dependencies.len(), 1);
+
+        let saved = write_plugin_manifest(
+            &home,
+            &PluginManifestSaveRequest {
+                manifest_path: manifest_path.display().to_string(),
+                name: "ByteRover Memory".into(),
+                description: "updated description".into(),
+                requires_env: vec!["BYTEROVER_API_KEY".into(), "BYTEROVER_REGION".into()],
+                pip_dependencies: vec!["requests".into()],
+                external_dependencies: vec![PluginExternalDependency {
+                    name: "brv".into(),
+                    install: "brew install brv".into(),
+                    check: "brv --version".into(),
+                }],
+            },
+        )
+        .expect("保存插件 manifest 失败");
+
+        assert_eq!(saved.name, "ByteRover Memory");
+        assert_eq!(saved.requires_env, vec!["BYTEROVER_API_KEY", "BYTEROVER_REGION"]);
+        assert_eq!(saved.pip_dependencies, vec!["requests"]);
+        assert_eq!(saved.external_dependencies[0].check, "brv --version");
+
+        let written = fs::read_to_string(&manifest_path).expect("读取写回 manifest 失败");
+        assert!(written.contains("name: ByteRover Memory"));
+        assert!(written.contains("description: updated description"));
+        assert!(written.contains("BYTEROVER_REGION"));
+        assert!(written.contains("pip_dependencies:"));
+        assert!(written.contains("custom_section:"));
+        assert!(written.contains("owner: local"));
+    }
+
+    #[test]
+    fn reads_and_writes_plugin_readme_inside_profile_catalog() {
+        let temp = tempdir().expect("创建临时目录失败");
+        let root = temp.path().join(".hermes");
+        seed_profile_root(&root, "gpt-5.4");
+        let plugin_dir = root
+            .join("hermes-agent")
+            .join("plugins")
+            .join("memory")
+            .join("hindsight");
+
+        fs::create_dir_all(&plugin_dir).expect("创建插件目录失败");
+        fs::write(
+            plugin_dir.join("plugin.yaml"),
+            r#"name: hindsight
+description: "Hindsight memory plugin"
+"#,
+        )
+        .expect("写入 plugin.yaml 失败");
+
+        let home =
+            resolve_hermes_home(Some("default"), Some(&root)).expect("解析 Hermes Home 失败");
+        let detail = read_plugin_readme(&home, &plugin_dir.display().to_string())
+            .expect("读取插件 README 失败");
+        assert_eq!(detail.name, "hindsight");
+        assert!(!detail.exists);
+
+        let saved = write_plugin_readme(
+            &home,
+            &PluginReadmeSaveRequest {
+                file_path: detail.file_path.clone(),
+                content: "# Hindsight\n\n本地 README".into(),
+            },
+        )
+        .expect("写入插件 README 失败");
+        assert!(saved.exists);
+        assert!(saved.content.contains("本地 README"));
+        assert!(PathBuf::from(saved.file_path).is_file());
+    }
+
+    #[test]
+    fn deletes_local_plugin_directory_after_confirmation() {
+        let temp = tempdir().expect("创建临时目录失败");
+        let root = temp.path().join(".hermes");
+        seed_profile_root(&root, "gpt-5.4");
+        let plugin_dir = root
+            .join("hermes-agent")
+            .join("plugins")
+            .join("custom")
+            .join("release-memory");
+
+        fs::create_dir_all(plugin_dir.join("assets")).expect("创建插件目录失败");
+        fs::write(
+            plugin_dir.join("plugin.yaml"),
+            r#"name: Release Memory
+description: "release helper"
+"#,
+        )
+        .expect("写入 plugin.yaml 失败");
+        fs::write(plugin_dir.join("README.md"), "# Release Memory\n")
+            .expect("写入 README 失败");
+        fs::write(plugin_dir.join("assets").join("icon.txt"), "demo")
+            .expect("写入附属文件失败");
+
+        let home =
+            resolve_hermes_home(Some("default"), Some(&root)).expect("解析 Hermes Home 失败");
+        let result = delete_local_plugin(
+            &home,
+            &PluginDeleteRequest {
+                directory_path: plugin_dir.display().to_string(),
+                name: "Release Memory".into(),
+            },
+        )
+        .expect("删除本地插件失败");
+
+        assert_eq!(result.name, "Release Memory");
+        assert_eq!(result.removed_files, 3);
+        assert!(!plugin_dir.exists());
+    }
+
+    #[test]
     fn parses_tool_summary_output() {
         let output = r#"
 ⚕ Tool Summary
@@ -4091,6 +4858,40 @@ Memory status
     }
 
     #[test]
+    fn saves_skill_frontmatter_and_preserves_unknown_fields() {
+        let temp = tempdir().expect("创建临时目录失败");
+        let root = temp.path().join(".hermes");
+        let skill_dir = root.join("skills").join("qa").join("browser-qa");
+
+        seed_profile_root(&root, "gpt-5.4");
+        fs::create_dir_all(&skill_dir).expect("创建技能目录失败");
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: Browser QA\ndescription: 浏览器验收巡检\nowners:\n  - qa-team\n---\n\n# Browser QA\n\n检查关键页面。\n",
+        )
+        .expect("写入技能文件失败");
+
+        let home =
+            resolve_hermes_home(Some("default"), Some(&root)).expect("解析 Hermes Home 失败");
+        let detail = write_skill_frontmatter(
+            &home,
+            &SkillFrontmatterSaveRequest {
+                file_path: skill_dir.join("SKILL.md").display().to_string(),
+                name: "Browser QA Pro".into(),
+                description: "升级后的浏览器验收巡检".into(),
+            },
+        )
+        .expect("保存技能 frontmatter 失败");
+
+        assert_eq!(detail.name, "Browser QA Pro");
+        assert_eq!(detail.description, "升级后的浏览器验收巡检");
+        assert!(detail.content.contains("owners:"));
+        assert!(detail.content.contains("qa-team"));
+        assert!(detail.content.contains("# Browser QA"));
+        assert!(detail.content.contains("检查关键页面。"));
+    }
+
+    #[test]
     fn imports_skill_directory_into_current_profile() {
         let temp = tempdir().expect("创建临时目录失败");
         let root = temp.path().join(".hermes");
@@ -4164,6 +4965,38 @@ Memory status
             .file_path
             .ends_with("skills/quality-assurance/browser-qa/SKILL.md"));
         assert_eq!(result.copied_files, 1);
+    }
+
+    #[test]
+    fn deletes_local_skill_directory_after_name_confirmation() {
+        let temp = tempdir().expect("创建临时目录失败");
+        let root = temp.path().join(".hermes");
+        let skill_dir = root.join("skills").join("custom").join("release-notes");
+
+        seed_profile_root(&root, "gpt-5.4");
+        fs::create_dir_all(skill_dir.join("assets")).expect("创建技能目录失败");
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: Release Notes\ndescription: 生成版本摘要\n---\n\n# Release Notes\n",
+        )
+        .expect("写入技能文件失败");
+        fs::write(skill_dir.join("assets").join("notes.txt"), "demo")
+            .expect("写入附属文件失败");
+
+        let home =
+            resolve_hermes_home(Some("default"), Some(&root)).expect("解析 Hermes Home 失败");
+        let result = delete_local_skill(
+            &home,
+            &SkillDeleteRequest {
+                file_path: skill_dir.join("SKILL.md").display().to_string(),
+                name: "Release Notes".into(),
+            },
+        )
+        .expect("删除本地技能失败");
+
+        assert_eq!(result.name, "Release Notes");
+        assert_eq!(result.removed_files, 2);
+        assert!(!skill_dir.exists());
     }
 
     #[test]
