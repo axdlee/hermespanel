@@ -1,0 +1,1630 @@
+import {
+  buildConfigDrilldownIntent,
+  buildDiagnosticsDrilldownIntent,
+  buildLogsDrilldownIntent,
+} from '../lib/drilldown';
+import { truncate } from '../lib/format';
+import {
+  buttonHtml,
+  commandResultHtml,
+  emptyStateHtml,
+  escapeHtml,
+  keyValueRowsHtml,
+  pillHtml,
+} from './native-helpers';
+import { infoTipHtml } from './workbench-helpers';
+
+const EMPTY_PLUGIN_IMPORT_DRAFT = {
+  category: '',
+  overwrite: false,
+  sourcePath: '',
+};
+
+function countCategories(items) {
+  const counts = new Map();
+  items.forEach((item) => {
+    const key = item.category || '未分类';
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  });
+  return Array.from(counts.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((left, right) => right.count - left.count || left.name.localeCompare(right.name));
+}
+
+export function normalizeToolNames(value) {
+  const seen = new Set();
+  const result = [];
+  value.split(/[,\n，；;]/).forEach((item) => {
+    const normalized = item.trim();
+    if (!normalized || seen.has(normalized)) {
+      return;
+    }
+    seen.add(normalized);
+    result.push(normalized);
+  });
+  return result;
+}
+
+function matchingPlatformSummary(extensions, platformKey) {
+  return extensions.toolPlatforms.find((item) => item.name.trim().toLowerCase() === platformKey.trim().toLowerCase());
+}
+
+function inventoryMetrics(platform) {
+  if (!platform) {
+    return { enabled: 0, total: 0 };
+  }
+  return {
+    enabled: platform.items.filter((item) => item.enabled).length,
+    total: platform.items.length,
+  };
+}
+
+export function toolActionState(action, platformKey, names) {
+  return `tool:${action}:${platformKey}:${names.join(',')}`;
+}
+
+export function pluginActionState(action, name) {
+  return `plugin:${action}:${name.trim()}`;
+}
+
+export function providerActionState(mode, providerName) {
+  return `provider:${mode}:${providerName.trim() || 'builtin-file'}`;
+}
+
+function uniqueValues(items) {
+  return Array.from(new Set((items ?? []).map((item) => String(item ?? '').trim()).filter(Boolean)));
+}
+
+export function cloneConfigWorkspace(workspace = {}) {
+  return {
+    ...workspace,
+    toolsets: [...(workspace.toolsets ?? [])],
+    platformToolsets: (workspace.platformToolsets ?? []).map((item) => ({
+      ...item,
+      toolsets: [...(item.toolsets ?? [])],
+    })),
+    skillsExternalDirs: [...(workspace.skillsExternalDirs ?? [])],
+  };
+}
+
+export function clonePluginImportDraft(draft = EMPTY_PLUGIN_IMPORT_DRAFT) {
+  return {
+    category: draft.category || '',
+    overwrite: Boolean(draft.overwrite),
+    sourcePath: draft.sourcePath || '',
+  };
+}
+
+function normalizeLookupValue(value) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/^@/, '')
+    .replace(/[_\s]+/g, '-');
+}
+
+function lookupVariants(value) {
+  const raw = String(value ?? '').trim();
+  const variants = new Set();
+
+  [raw, ...raw.split(/[/:]/)].forEach((item) => {
+    const normalized = normalizeLookupValue(item);
+    if (!normalized) {
+      return;
+    }
+    variants.add(normalized);
+    variants.add(normalized.replace(/^hermes-/, ''));
+    variants.add(normalized.replace(/-plugin$/, ''));
+  });
+
+  return Array.from(variants).filter(Boolean);
+}
+
+function sameLookupTarget(left, right) {
+  const leftVariants = lookupVariants(left);
+  const rightVariants = lookupVariants(right);
+  return leftVariants.some((item) => rightVariants.includes(item));
+}
+
+function pluginMatchesProvider(pluginName, providerName) {
+  const pluginVariants = lookupVariants(pluginName);
+  const providerVariants = lookupVariants(providerName);
+  return pluginVariants.some((plugin) => providerVariants.some((provider) => (
+    plugin === provider
+    || plugin.endsWith(`-${provider}`)
+    || provider.endsWith(`-${plugin}`)
+  )));
+}
+
+function runtimeLooksBuiltinOnly(providerName) {
+  const normalized = String(providerName ?? '').trim().toLowerCase();
+  return normalized.includes('built-in') || normalized.includes('builtin') || normalized.includes('(none');
+}
+
+function categoryLabel(value) {
+  return value || '未分类';
+}
+
+function toolStateLabel(enabled) {
+  return enabled ? '已启用' : '已停用';
+}
+
+function pluginInstallLabel(installed) {
+  return installed ? '已安装' : '可安装';
+}
+
+function providerDisplayLabel(value) {
+  if (!value || value === 'builtin-file') {
+    return '内置文件';
+  }
+  if (value === 'off') {
+    return '已关闭';
+  }
+  return value;
+}
+
+function sourceLabel(value) {
+  switch (String(value ?? '').trim().toLowerCase()) {
+    case 'local':
+      return '本地';
+    case 'builtin':
+      return '内置';
+    default:
+      return value || '未知';
+  }
+}
+
+function trustLabel(value) {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (normalized === 'local') {
+    return '本地';
+  }
+  if (normalized === 'trusted') {
+    return '可信';
+  }
+  if (normalized === 'builtin') {
+    return '内置';
+  }
+  return value || '未知';
+}
+
+function providerButtonLabel(option) {
+  if (option.selected) {
+    return option.mode === 'off' ? '当前已关闭' : '当前配置';
+  }
+  if (option.mode === 'off') {
+    return '关闭记忆';
+  }
+  if (option.mode === 'builtin') {
+    return '切回内置';
+  }
+  return '设为 Provider';
+}
+
+function providerTone(option) {
+  if (option.selected && option.runtimeActive) {
+    return 'good';
+  }
+  if (option.selected || option.runtimeActive) {
+    return 'warn';
+  }
+  return 'neutral';
+}
+
+function providerCopy(option) {
+  if (option.mode === 'off') {
+    return '把 memory 和 user profile 一起关闭，适合临时排障或极简会话。';
+  }
+  if (option.mode === 'builtin') {
+    return '回退到 Hermes 内置文件记忆，最稳妥，也最适合桌面端默认闭环。';
+  }
+  return option.availability
+    ? `${option.availability}，可直接写回为默认 provider。`
+    : '运行态已检测到该 provider，可直接接管到配置里。';
+}
+
+function buildProviderOptions(view, pluginCatalog) {
+  const workspace = view.configDocs?.workspace ?? {};
+  const memoryEnabled = workspace.memoryEnabled ?? view.dashboard?.config?.memoryEnabled ?? false;
+  const configuredProvider = String(workspace.memoryProvider ?? view.dashboard?.config?.memoryProvider ?? '').trim();
+  const runtimeProvider = view.extensions?.memoryRuntime?.provider ?? '';
+  const runtimeInstalled = view.extensions?.memoryRuntime?.installedPlugins ?? [];
+  const installedCatalog = (pluginCatalog ?? []).filter((item) => item.installed);
+  const options = [];
+
+  options.push({
+    availability: '关闭',
+    dependencyCount: 0,
+    key: 'provider:off',
+    label: '关闭记忆',
+    matchedPluginName: '',
+    mode: 'off',
+    providerName: '',
+    requiresEnv: [],
+    runtimeActive: !memoryEnabled && runtimeLooksBuiltinOnly(runtimeProvider),
+    selected: !memoryEnabled,
+  });
+
+  options.push({
+    availability: '内置',
+    dependencyCount: 0,
+    key: 'provider:builtin',
+    label: '内置文件',
+    matchedPluginName: '',
+    mode: 'builtin',
+    providerName: '',
+    requiresEnv: [],
+    runtimeActive: runtimeLooksBuiltinOnly(runtimeProvider),
+    selected: memoryEnabled && !configuredProvider,
+  });
+
+  const seen = new Set();
+  runtimeInstalled.forEach((item) => {
+    const key = normalizeLookupValue(item.name);
+    if (!key || seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    const matchedPlugin = installedCatalog.find((plugin) => pluginMatchesProvider(plugin.name, item.name));
+    options.push({
+      availability: item.availability || '已检测',
+      dependencyCount: (matchedPlugin?.pipDependencies.length ?? 0) + (matchedPlugin?.externalDependencies.length ?? 0),
+      key: `provider:${item.name}`,
+      label: item.name,
+      matchedPluginName: matchedPlugin?.name || '',
+      mode: 'plugin',
+      providerName: item.name,
+      requiresEnv: matchedPlugin?.requiresEnv ?? [],
+      runtimeActive: sameLookupTarget(runtimeProvider, item.name),
+      selected: memoryEnabled && sameLookupTarget(configuredProvider, item.name),
+    });
+  });
+
+  return options;
+}
+
+function providerOptionForPlugin(state, pluginName) {
+  return (state.providerOptions ?? []).find((item) => item.mode === 'plugin' && pluginMatchesProvider(pluginName, item.providerName)) ?? null;
+}
+
+function pluginDependencySummary(item) {
+  const parts = [];
+  if (item.pipDependencies.length > 0) {
+    parts.push(`pip ${item.pipDependencies.join(', ')}`);
+  }
+  if (item.externalDependencies.length > 0) {
+    parts.push(`bin ${item.externalDependencies.map((dependency) => dependency.name).join(', ')}`);
+  }
+  return parts.join(' · ') || '无';
+}
+
+function parseConfiguredEnvKeys(content) {
+  const configured = new Set();
+  String(content ?? '')
+    .split(/\r?\n/)
+    .forEach((line) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) {
+        return;
+      }
+
+      const normalized = trimmed.startsWith('export ')
+        ? trimmed.slice('export '.length).trim()
+        : trimmed;
+      const separatorIndex = normalized.indexOf('=');
+      if (separatorIndex <= 0) {
+        return;
+      }
+
+      const key = normalized.slice(0, separatorIndex).trim();
+      const rawValue = normalized.slice(separatorIndex + 1).trim();
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+        return;
+      }
+
+      const value = rawValue.replace(/^['"]|['"]$/g, '').trim();
+      if (!value) {
+        return;
+      }
+      configured.add(key);
+    });
+
+  return configured;
+}
+
+function pluginEnvStatus(view, item) {
+  const required = uniqueValues(item?.requiresEnv ?? []);
+  const configuredKeys = parseConfiguredEnvKeys(view.configDocs?.envFile ?? '');
+  const configured = required.filter((name) => configuredKeys.has(name));
+  const missing = required.filter((name) => !configuredKeys.has(name));
+
+  return {
+    configured,
+    configuredCount: configured.length,
+    missing,
+    totalCount: required.length,
+  };
+}
+
+function findMatchingPluginCatalogItem(pluginCatalog, pluginName) {
+  return (pluginCatalog ?? []).find((item) => (
+    sameLookupTarget(item.name, pluginName)
+    || sameLookupTarget(item.relativePath, pluginName)
+  )) ?? null;
+}
+
+function findMatchingRuntimePluginName(runtimePlugins, pluginName) {
+  return (runtimePlugins ?? []).find((item) => sameLookupTarget(item, pluginName)) ?? '';
+}
+
+function pluginLifecycleSummary(focus) {
+  if (!focus.name) {
+    return '等待选择治理目标';
+  }
+  if (focus.installed && focus.catalogItem) {
+    return '目录态与运行态均已接入';
+  }
+  if (focus.installed) {
+    return '当前只有运行态安装信息';
+  }
+  if (focus.catalogItem) {
+    return '目录已接入，尚未安装到运行态';
+  }
+  return '等待纳入治理';
+}
+
+function resolvePluginGovernanceTarget(view, state) {
+  const preferredName = [
+    view.pluginNameInput.trim(),
+    view.lastImportedPlugin?.imported?.name || '',
+    state.filteredPluginCatalog[0]?.name || '',
+    state.pluginCatalog[0]?.name || '',
+    state.filteredRuntimePlugins[0] || '',
+    view.extensions?.plugins.items?.[0] || '',
+  ].find((item) => String(item ?? '').trim()) || '';
+
+  const catalogItem = preferredName
+    ? findMatchingPluginCatalogItem(state.pluginCatalog, preferredName)
+    : null;
+  const runtimeName = preferredName
+    ? findMatchingRuntimePluginName(view.extensions?.plugins.items ?? [], preferredName)
+    : '';
+  const name = catalogItem?.name || runtimeName || preferredName;
+  const providerOption = name ? providerOptionForPlugin(state, name) : null;
+  const envStatus = catalogItem
+    ? pluginEnvStatus(view, catalogItem)
+    : {
+        configured: [],
+        configuredCount: 0,
+        missing: [],
+        totalCount: 0,
+      };
+  const isLastImported = Boolean(
+    name
+    && view.lastImportedPlugin?.imported?.name
+    && sameLookupTarget(view.lastImportedPlugin.imported.name, name)
+  );
+  const directoryPath = catalogItem?.directoryPath
+    || (isLastImported ? view.lastImportedPlugin?.targetDirectory || '' : '');
+
+  return {
+    catalogItem,
+    dependencyCount: (catalogItem?.pipDependencies.length ?? 0) + (catalogItem?.externalDependencies.length ?? 0),
+    directoryPath,
+    envStatus,
+    hasRuntimeRecord: Boolean(runtimeName),
+    installed: Boolean(catalogItem?.installed || runtimeName),
+    isLastImported,
+    lifecycleSummary: pluginLifecycleSummary({
+      catalogItem,
+      installed: Boolean(catalogItem?.installed || runtimeName),
+      name,
+    }),
+    name,
+    providerOption,
+    runtimeName,
+  };
+}
+
+function renderPluginSignalCard(label, value, meta, tone = 'neutral') {
+  return `
+    <section class="plugin-signal-card">
+      <span class="plugin-signal-label">${escapeHtml(label)}</span>
+      <strong class="plugin-signal-value">${escapeHtml(value)}</strong>
+      <span class="plugin-signal-meta plugin-signal-meta-${escapeHtml(tone)}">${escapeHtml(meta)}</span>
+    </section>
+  `;
+}
+
+function renderEnvChips(envStatus) {
+  if (!envStatus.totalCount) {
+    return '<div class="plugin-chip-row"><span class="plugin-focus-chip">当前插件未声明额外凭证</span></div>';
+  }
+
+  return `
+    <div class="plugin-chip-row">
+      ${envStatus.configured.map((name) => `<span class="plugin-focus-chip plugin-focus-chip-good">${escapeHtml(name)}</span>`).join('')}
+      ${envStatus.missing.map((name) => `<span class="plugin-focus-chip plugin-focus-chip-warn">${escapeHtml(name)}</span>`).join('')}
+    </div>
+  `;
+}
+
+function renderPluginDependencyDetails(item) {
+  if (!item) {
+    return '';
+  }
+
+  const rows = [];
+  if (item.pipDependencies.length > 0) {
+    rows.push(`
+      <div class="plugin-dependency-item">
+        <span>Python 依赖</span>
+        <code>${escapeHtml(item.pipDependencies.join(', '))}</code>
+      </div>
+    `);
+  }
+  item.externalDependencies.forEach((dependency) => {
+    rows.push(`
+      <div class="plugin-dependency-item">
+        <span>${escapeHtml(dependency.name)}</span>
+        <code>${escapeHtml(dependency.check || dependency.install || '待手工核对')}</code>
+      </div>
+    `);
+  });
+
+  if (!rows.length) {
+    return '<div class="plugin-chip-row"><span class="plugin-focus-chip">当前 manifest 未声明额外依赖</span></div>';
+  }
+
+  return `<div class="plugin-dependency-list compact">${rows.join('')}</div>`;
+}
+
+function pluginIcon(value) {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (normalized.includes('memory')) {
+    return '🧠';
+  }
+  if (normalized.includes('browser')) {
+    return '🌐';
+  }
+  if (normalized.includes('gateway') || normalized.includes('channel')) {
+    return '🔌';
+  }
+  if (normalized.includes('search')) {
+    return '🔎';
+  }
+  return '🧩';
+}
+
+function primaryInvestigationTool(investigation) {
+  return investigation?.context?.toolNames.find((item) => item.trim().length > 0) ?? '';
+}
+
+export function relaySeed(view) {
+  return view.investigation
+    ? {
+        sourcePage: 'extensions',
+        headline: view.investigation.headline,
+        description: view.investigation.description,
+        context: view.investigation.context,
+      }
+    : {
+        sourcePage: 'extensions',
+        headline: '来自扩展能力台的链路下钻',
+        description: '继续围绕 tools、skills、plugins 和 memory provider 做核对。',
+      };
+}
+
+export function derivedState(view) {
+  const extensions = view.extensions;
+  const dashboard = view.dashboard;
+  const configDocs = view.configDocs;
+  const installation = view.installation;
+  const skills = view.skills;
+  const runtimeSkills = extensions?.runtimeSkills ?? [];
+  const pluginCatalog = extensions?.pluginCatalog ?? [];
+  const installedCatalog = pluginCatalog.filter((item) => item.installed);
+  const pluginQuery = view.pluginQuery.trim().toLowerCase();
+  const pluginFilter = view.pluginFilter || 'all';
+  const toolsEnabled = extensions?.toolPlatforms.reduce((sum, item) => sum + item.enabledCount, 0) ?? 0;
+  const toolsTotal = extensions?.toolPlatforms.reduce((sum, item) => sum + item.totalCount, 0) ?? 0;
+  const toollessPlatforms = extensions?.toolPlatforms.filter((item) => item.enabledCount === 0) ?? [];
+  const sourceLocalCount = extensions?.skillSourceCounts.find((item) => item.name === 'local')?.count ?? 0;
+  const sourceBuiltinCount = extensions?.skillSourceCounts.find((item) => item.name === 'builtin')?.count ?? 0;
+  const runtimeSkillMismatch = sourceLocalCount !== skills.length;
+  const sourceOptions = ['all', ...Array.from(new Set(runtimeSkills.map((item) => item.source).filter(Boolean))).sort()];
+  const categoryCounts = countCategories(runtimeSkills);
+  const currentPlatform = extensions?.toolInventory.find((item) => item.platformKey === view.selectedPlatform)
+    ?? extensions?.toolInventory[0]
+    ?? null;
+  const batchToolNames = normalizeToolNames(view.toolNamesInput);
+  const providerOptions = buildProviderOptions(view, pluginCatalog);
+  const configuredProviderDisplay = !configDocs?.workspace?.memoryEnabled
+    ? 'off'
+    : (configDocs?.workspace?.memoryProvider || 'builtin-file');
+  const providerAligned = providerOptions.some((item) => item.selected && item.runtimeActive);
+  const filteredPluginCatalog = pluginCatalog.filter((item) => {
+    if (pluginFilter === 'installed' && !item.installed) {
+      return false;
+    }
+    if (pluginFilter === 'requires-env' && item.requiresEnv.length === 0) {
+      return false;
+    }
+    if (pluginFilter === 'dependencies' && item.externalDependencies.length === 0 && item.pipDependencies.length === 0) {
+      return false;
+    }
+    if (!pluginQuery) {
+      return true;
+    }
+    return [
+      item.name,
+      item.category,
+      item.description,
+      item.requiresEnv.join(' '),
+      item.pipDependencies.join(' '),
+      item.externalDependencies.map((dependency) => `${dependency.name} ${dependency.check || ''} ${dependency.install || ''}`).join(' '),
+    ]
+      .join(' ')
+      .toLowerCase()
+      .includes(pluginQuery);
+  });
+  const filteredRuntimePlugins = (extensions?.plugins.items ?? []).filter((item) => {
+    if (pluginFilter === 'requires-env' || pluginFilter === 'dependencies') {
+      return false;
+    }
+    if (pluginFilter === 'installed') {
+      return true;
+    }
+    if (!pluginQuery) {
+      return true;
+    }
+    return item.toLowerCase().includes(pluginQuery);
+  });
+  const filteredSkills = runtimeSkills.filter((item) => {
+    const term = view.query.trim().toLowerCase();
+    if (view.sourceFilter !== 'all' && item.source !== view.sourceFilter) {
+      return false;
+    }
+    if (!term) {
+      return true;
+    }
+    return [item.name, item.category, item.source, item.trust]
+      .join(' ')
+      .toLowerCase()
+      .includes(term);
+  });
+  const warnings = [];
+
+  if (!installation?.binaryFound) {
+    warnings.push('当前没有检测到 Hermes 可执行组件，扩展安装、技能配置和 memory provider 切换都无法真正执行。');
+  }
+  if (!extensions?.toolPlatforms.length) {
+    warnings.push('当前没有解析出任何 tools 平台摘要，Hermes 工具面摘要没有成功返回。');
+  }
+  if (toollessPlatforms.length > 0) {
+    warnings.push(`存在 ${toollessPlatforms.length} 个平台当前没有启用任何工具：${toollessPlatforms.map((item) => item.name).join('、')}。`);
+  }
+  if ((extensions?.plugins.installedCount ?? 0) === 0) {
+    warnings.push('当前运行态还没有检测到已安装插件，扩展层仍以 builtin 和 local skills 为主。');
+  }
+  if ((extensions?.plugins.installedCount ?? 0) > 0 && pluginCatalog.length === 0) {
+    warnings.push('插件运行态已检测到安装结果，但本地 plugin 目录还没扫描到 manifest，目录态信息不完整。');
+  }
+  if (configDocs?.workspace?.memoryEnabled && !(configDocs.workspace.toolsets ?? []).includes('memory')) {
+    warnings.push('Memory 已开启，但顶层 toolsets 里没有 memory，建议顺手补齐，避免能力暴露不稳定。');
+  }
+  if (providerOptions.length > 0 && !providerAligned) {
+    warnings.push(`当前配置 provider 为「${configuredProviderDisplay}」，运行态回报为「${extensions?.memoryRuntime.provider || 'unknown'}」。`);
+  }
+  if (runtimeSkillMismatch) {
+    warnings.push(`运行态识别到 ${sourceLocalCount} 个 local 技能，而本地目录扫描到 ${skills.length} 个，说明安装态和文件态存在差异。`);
+  }
+  if (dashboard?.gateway?.gatewayState !== 'running' && (dashboard?.counts.cronJobs ?? 0) > 0) {
+    warnings.push('当前 Gateway 未运行，如果 cron 作业里有远端交付目标，扩展能力没法在消息平台侧真正闭环验证。');
+  }
+
+  const rawOutput = view.rawKind === 'tools'
+    ? extensions?.toolsRawOutput
+    : view.rawKind === 'memory'
+      ? extensions?.memoryRuntime.rawOutput
+      : view.rawKind === 'plugins'
+        ? extensions?.plugins.rawOutput
+        : extensions?.skillsRawOutput;
+
+  const currentPlatformSummary = currentPlatform ? matchingPlatformSummary(extensions, currentPlatform.platformKey) : null;
+  const currentPlatformMetrics = inventoryMetrics(currentPlatform);
+  const seed = relaySeed(view);
+  const logsIntent = buildLogsDrilldownIntent(seed, {
+    description: '继续把当前工具、插件或 provider 线索带到日志页核对。',
+    logName: 'agent',
+    contains: batchToolNames[0] || primaryInvestigationTool(view.investigation) || view.query || currentPlatform?.platformKey || '',
+    limit: '160',
+  });
+  const diagnosticsIntent = buildDiagnosticsDrilldownIntent(seed, {
+    description: '继续做扩展层体检，确认 tools、skills、plugins 和 memory provider 是否一致。',
+    suggestedCommand: batchToolNames.length > 0 || primaryInvestigationTool(view.investigation) ? 'tools-summary' : 'plugins-list',
+    logName: 'agent',
+  });
+  const configIntent = buildConfigDrilldownIntent(seed, {
+    description: '带着当前扩展线索回到配置中心，核对 toolsets、context engine 与 memory provider。',
+    focus: currentPlatform ? 'toolsets' : 'memory',
+    suggestedCommand: 'config-check',
+  });
+
+  return {
+    batchToolNames,
+    categoryCounts,
+    configIntent,
+    configuredProviderDisplay,
+    currentPlatform,
+    currentPlatformMetrics,
+    currentPlatformSummary,
+    diagnosticsIntent,
+    filteredSkills,
+    filteredPluginCatalog,
+    filteredRuntimePlugins,
+    logsIntent,
+    pluginAvailableCount: pluginCatalog.length,
+    pluginCatalog,
+    pluginDependencyCount: pluginCatalog.filter((item) => item.externalDependencies.length > 0 || item.pipDependencies.length > 0).length,
+    pluginEnvRequiredCount: pluginCatalog.filter((item) => item.requiresEnv.length > 0).length,
+    pluginInstalledCount: Math.max(installedCatalog.length, extensions?.plugins.installedCount ?? 0),
+    providerAligned,
+    providerOptions,
+    rawOutput,
+    runtimeSkillMismatch,
+    runtimeSkills,
+    sourceBuiltinCount,
+    sourceLocalCount,
+    sourceOptions,
+    toolsEnabled,
+    toolsTotal,
+    warnings,
+  };
+}
+
+function renderToolCards(view, state) {
+  if (!state.currentPlatform) {
+    return emptyStateHtml('暂无平台清单', '当前还没有返回可治理的平台内容。');
+  }
+
+  if (!state.currentPlatform.items.length) {
+    return emptyStateHtml('平台下暂无工具', '当前平台还没有返回可治理工具项。');
+  }
+
+  return `
+    <div class="list-stack">
+      ${state.currentPlatform.items.map((item) => {
+        const enableActionId = toolActionState('enable', state.currentPlatform.platformKey, [item.name]);
+        const disableActionId = toolActionState('disable', state.currentPlatform.platformKey, [item.name]);
+        return `
+          <div class="list-card">
+            <div class="list-card-title">
+              <strong>${escapeHtml(item.name)}</strong>
+              <div class="pill-row">
+                ${pillHtml(toolStateLabel(item.enabled), item.enabled ? 'good' : 'warn')}
+              </div>
+            </div>
+            <p>${escapeHtml(item.description || '当前没有额外描述信息。')}</p>
+            <div class="toolbar">
+              ${buttonHtml({
+                action: 'tool-enable',
+                label: view.runningAction === enableActionId ? '启用中…' : '启用',
+                kind: 'primary',
+                disabled: Boolean(view.runningAction) || item.enabled,
+                attrs: { 'data-name': item.name },
+              })}
+              ${buttonHtml({
+                action: 'tool-disable',
+                label: view.runningAction === disableActionId ? '停用中…' : '停用',
+                disabled: Boolean(view.runningAction) || !item.enabled,
+                attrs: { 'data-name': item.name },
+              })}
+              ${buttonHtml({
+                action: 'tool-logs',
+                label: '查看日志',
+                attrs: { 'data-name': item.name },
+              })}
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
+function renderPluginCards(view, state) {
+  if (!state.pluginCatalog.length && !view.extensions?.plugins.items.length) {
+    return emptyStateHtml('尚未发现插件目录', '当前还没有扫描到可治理的 plugin manifest。你仍然可以在上方输入 owner/repo 或插件名直接安装。');
+  }
+
+  if (!state.pluginCatalog.length) {
+    if (!state.filteredRuntimePlugins.length) {
+      return emptyStateHtml('当前筛选下没有插件', '换一个插件关键词，或者切回“全部插件 / 已安装”继续查看。');
+    }
+
+    return `
+      <div class="plugin-grid">
+        ${state.filteredRuntimePlugins.map((item) => {
+          const providerOption = providerOptionForPlugin(state, item);
+          const statusTone = providerOption?.selected ? 'good' : 'neutral';
+          const updateActionId = pluginActionState('update', item);
+          return `
+            <article class="plugin-tile-card">
+              <div class="plugin-tile-head">
+                <div class="plugin-tile-title-wrap">
+                  <span class="plugin-card-icon">${pluginIcon(item)}</span>
+                  <div class="plugin-tile-title-block">
+                    <strong class="plugin-tile-name">${escapeHtml(item)}</strong>
+                    <div class="plugin-tile-badges">
+                      ${pillHtml('已安装', 'good')}
+                      ${providerOption ? pillHtml(providerOption.selected ? '当前 Provider' : '可设为 Provider', statusTone) : ''}
+                    </div>
+                  </div>
+                </div>
+                <span class="plugin-status-dot plugin-status-enabled" title="已安装"></span>
+              </div>
+              <p class="plugin-tile-desc">当前只有运行态，还没拿到本地 manifest。先设为治理目标，再在上方集中做启停、更新和 Provider 接管。</p>
+              <div class="plugin-tile-meta">
+                <span>运行态插件</span>
+                <span>manifest 缺失</span>
+                ${providerOption ? `<span>${escapeHtml(providerOption.selected ? 'Provider 已接管' : '可接管 Provider')}</span>` : ''}
+              </div>
+              <div class="plugin-tile-actions">
+                ${buttonHtml({
+                  action: 'plugin-fill',
+                  label: '设为治理目标',
+                  kind: 'primary',
+                  attrs: { 'data-name': item },
+                })}
+                ${buttonHtml({
+                  action: 'plugin-update-card',
+                  label: view.runningAction === updateActionId ? '更新中…' : '刷新安装',
+                  disabled: Boolean(view.runningAction) || !view.installation.binaryFound,
+                  attrs: { 'data-name': item },
+                })}
+              </div>
+              <div class="plugin-tile-actions plugin-tile-actions-secondary">
+                ${providerOption ? buttonHtml({
+                  action: 'provider-apply',
+                  label: providerButtonLabel(providerOption),
+                  kind: providerOption.selected ? 'secondary' : 'primary',
+                  disabled: Boolean(view.runningAction) || !view.configDocs || providerOption.selected,
+                  attrs: {
+                    'data-provider-mode': providerOption.mode,
+                    'data-provider-name': providerOption.providerName,
+                  },
+                }) : ''}
+              </div>
+            </article>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  if (!state.filteredPluginCatalog.length) {
+    return emptyStateHtml('当前筛选下没有插件', '可以切回“全部插件”，或者换一个关键词继续筛。');
+  }
+
+  return `
+      <div class="plugin-grid">
+        ${state.filteredPluginCatalog.map((item) => {
+          const installActionId = pluginActionState('install', item.name);
+          const updateActionId = pluginActionState('update', item.name);
+          const providerOption = providerOptionForPlugin(state, item.name);
+          const statusClass = item.installed ? 'plugin-status-enabled' : 'plugin-status-missing';
+          const envStatus = pluginEnvStatus(view, item);
+          return `
+          <article class="plugin-tile-card ${item.installed ? '' : 'plugin-tile-card-muted'}">
+            <div class="plugin-tile-head">
+              <div class="plugin-tile-title-wrap">
+                <span class="plugin-card-icon">${pluginIcon(item.category || item.name)}</span>
+                <div class="plugin-tile-title-block">
+                  <strong class="plugin-tile-name">${escapeHtml(item.name)}</strong>
+                  <div class="plugin-tile-badges">
+                    ${pillHtml(categoryLabel(item.category), 'neutral')}
+                    ${pillHtml(pluginInstallLabel(item.installed), item.installed ? 'good' : 'neutral')}
+                    ${item.requiresEnv.length ? pillHtml(`${item.requiresEnv.length} 个 ENV`, 'warn') : ''}
+                    ${providerOption ? pillHtml(providerOption.selected ? '当前 Provider' : '可设为 Provider', providerOption.selected ? 'good' : 'neutral') : ''}
+                  </div>
+                </div>
+              </div>
+              <span class="plugin-status-dot ${statusClass}" title="${escapeHtml(pluginInstallLabel(item.installed))}"></span>
+            </div>
+            <p class="plugin-tile-desc">${escapeHtml(truncate(item.description || '当前 manifest 没有提供额外说明。', 92))}</p>
+            <div class="plugin-tile-meta">
+              <span>${escapeHtml(
+                item.requiresEnv.length
+                  ? (envStatus.missing.length
+                    ? `凭证 ${envStatus.configuredCount}/${envStatus.totalCount} 已配`
+                    : `凭证 ${envStatus.totalCount}/${envStatus.totalCount} 已配`)
+                  : '无需凭证'
+              )}</span>
+              <span>${escapeHtml(item.externalDependencies.length || item.pipDependencies.length ? pluginDependencySummary(item) : '无额外依赖')}</span>
+              <span>${escapeHtml(truncate(item.relativePath || item.directoryPath || '—', 40))}</span>
+            </div>
+            <div class="plugin-tile-actions">
+              ${buttonHtml({
+                action: 'plugin-fill',
+                label: '设为治理目标',
+                kind: 'primary',
+                attrs: { 'data-name': item.name },
+              })}
+              ${buttonHtml({
+                action: item.installed ? 'plugin-update-card' : 'plugin-install-card',
+                label: item.installed
+                  ? (view.runningAction === updateActionId ? '更新中…' : '更新')
+                  : (view.runningAction === installActionId ? '安装中…' : '安装'),
+                disabled: Boolean(view.runningAction) || !view.installation.binaryFound,
+                attrs: { 'data-name': item.name },
+              })}
+            </div>
+            <div class="plugin-tile-actions plugin-tile-actions-secondary">
+              ${buttonHtml({
+                action: 'plugin-configure',
+                label: item.requiresEnv.length ? '配置凭证' : '查看配置',
+                attrs: { 'data-name': item.name },
+              })}
+              ${providerOption ? buttonHtml({
+                action: 'provider-apply',
+                label: providerButtonLabel(providerOption),
+                kind: providerOption.selected ? 'secondary' : 'primary',
+                disabled: Boolean(view.runningAction) || !view.configDocs || providerOption.selected,
+                attrs: {
+                  'data-provider-mode': providerOption.mode,
+                  'data-provider-name': providerOption.providerName,
+                  },
+                }) : ''}
+              ${buttonHtml({
+                action: 'plugin-open',
+                label: '打开目录',
+                attrs: { 'data-name': item.name, 'data-path': item.directoryPath },
+              })}
+            </div>
+          </article>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
+function renderPluginTargetWorkbench(view, state, focus) {
+  const installActionId = focus.name ? pluginActionState('install', focus.name) : '';
+  const updateActionId = focus.name ? pluginActionState('update', focus.name) : '';
+  const removeActionId = focus.name ? pluginActionState('remove', focus.name) : '';
+  const enableActionId = focus.name ? pluginActionState('enable', focus.name) : '';
+  const disableActionId = focus.name ? pluginActionState('disable', focus.name) : '';
+  const providerOption = focus.providerOption;
+
+  return `
+    <section class="shell-card shell-card-dense plugin-focus-card">
+      <div class="shell-card-header plugin-focus-head">
+        <div class="plugin-focus-title-wrap">
+          <div>
+            <div class="panel-title-row">
+              <strong>当前治理目标</strong>
+              ${infoTipHtml('生命周期动作集中在这里执行，目录卡只保留轻量治理入口，避免同一批动作在页面上反复出现。')}
+            </div>
+            <p class="shell-card-copy">这里负责安装、启停、移除、Provider 接管和依赖/凭证核对。</p>
+          </div>
+          ${focus.name ? `
+            <div class="plugin-focus-title">
+              <span class="plugin-card-icon">${pluginIcon(focus.catalogItem?.category || focus.name)}</span>
+              <div class="plugin-focus-title-copy">
+                <strong class="plugin-focus-name">${escapeHtml(focus.name)}</strong>
+                <div class="plugin-tile-badges">
+                  ${pillHtml(focus.installed ? '已安装' : '待安装', focus.installed ? 'good' : 'warn')}
+                  ${focus.catalogItem ? pillHtml(categoryLabel(focus.catalogItem.category), 'neutral') : pillHtml('仅运行态', 'neutral')}
+                  ${focus.isLastImported ? pillHtml('刚导入', 'good') : ''}
+                  ${providerOption ? pillHtml(providerOption.selected ? '当前 Provider' : '可设为 Provider', providerOption.selected ? 'good' : 'neutral') : ''}
+                </div>
+              </div>
+            </div>
+          ` : ''}
+        </div>
+        ${pillHtml(focus.name || '等待目标', focus.name ? 'good' : 'warn')}
+      </div>
+      <div class="form-grid">
+        <label class="field-stack">
+          <span>Plugin 名称</span>
+          <input class="search-input" id="extensions-plugin-input" placeholder="owner/repo 或 plugin 名称" ${view.runningAction ? 'disabled' : ''}>
+        </label>
+        <label class="field-stack">
+          <span>筛选关键词</span>
+          <input class="search-input" id="extensions-plugin-search" placeholder="名称、描述、ENV、依赖" ${view.runningAction ? 'disabled' : ''}>
+        </label>
+      </div>
+      ${view.lastImportedPlugin?.imported?.name && !focus.isLastImported ? `
+        <div class="plugin-chip-row top-gap">
+          <span class="plugin-focus-chip">最近导入 ${escapeHtml(view.lastImportedPlugin.imported.name)}</span>
+          ${buttonHtml({
+            action: 'plugin-fill',
+            label: '带入最近导入',
+            attrs: { 'data-name': view.lastImportedPlugin.imported.name },
+          })}
+        </div>
+      ` : ''}
+      ${focus.name ? `
+        <div class="plugin-signal-grid top-gap">
+          ${renderPluginSignalCard('状态', focus.installed ? '已纳入治理' : '等待安装', focus.lifecycleSummary, focus.installed ? 'good' : 'warn')}
+          ${renderPluginSignalCard(
+            '凭证',
+            focus.catalogItem?.requiresEnv.length
+              ? `${focus.envStatus.configuredCount}/${focus.envStatus.totalCount} 已配`
+              : '无需额外凭证',
+            focus.catalogItem?.requiresEnv.length
+              ? (focus.envStatus.missing.length ? `缺 ${focus.envStatus.missing.join(', ')}` : '当前所需 ENV 已齐')
+              : '无需额外 ENV',
+            focus.envStatus.missing.length ? 'warn' : 'good'
+          )}
+          ${renderPluginSignalCard(
+            '依赖',
+            focus.catalogItem
+              ? (focus.dependencyCount ? `${focus.dependencyCount} 项` : '无额外依赖')
+              : '未发现 manifest',
+            focus.catalogItem
+              ? (focus.dependencyCount ? pluginDependencySummary(focus.catalogItem) : '直接可用')
+              : '仅运行态，无法从本地目录解析依赖',
+            focus.dependencyCount ? 'warn' : 'good'
+          )}
+          ${renderPluginSignalCard(
+            '目录',
+            focus.catalogItem ? '已接管' : '未接管',
+            focus.catalogItem?.relativePath || focus.runtimeName || '先从目录卡选一个插件',
+            focus.catalogItem ? 'good' : 'neutral'
+          )}
+        </div>
+        ${focus.catalogItem ? `
+          <section class="plugin-focus-section top-gap">
+            <div class="plugin-focus-section-head">
+              <strong>凭证检查</strong>
+              <span>${escapeHtml(focus.envStatus.totalCount ? `${focus.envStatus.configuredCount}/${focus.envStatus.totalCount} 已配置` : '无需额外凭证')}</span>
+            </div>
+            ${renderEnvChips(focus.envStatus)}
+          </section>
+          <section class="plugin-focus-section">
+            <div class="plugin-focus-section-head">
+              <strong>依赖检查</strong>
+              <span>${escapeHtml(focus.dependencyCount ? `${focus.dependencyCount} 项待核对` : '无需额外依赖')}</span>
+            </div>
+            ${renderPluginDependencyDetails(focus.catalogItem)}
+          </section>
+        ` : `
+          <div class="plugin-focus-section top-gap">
+            <div class="plugin-focus-section-head">
+              <strong>目录状态</strong>
+              <span>仅运行态</span>
+            </div>
+            <p class="plugin-focus-note">当前插件只有运行态安装信息。若要补充目录、依赖和凭证细节，可以先导入本地插件目录，或者把它接回当前 profile 的插件仓库。</p>
+          </div>
+        `}
+        <div class="toolbar top-gap">
+          ${buttonHtml({
+            action: 'plugin-install',
+            label: view.runningAction === installActionId ? '安装插件…' : '安装插件',
+            kind: 'primary',
+            disabled: Boolean(view.runningAction) || !view.installation.binaryFound || !focus.name || focus.installed,
+          })}
+          ${buttonHtml({
+            action: 'plugin-update',
+            label: view.runningAction === updateActionId ? '更新插件…' : '更新插件',
+            disabled: Boolean(view.runningAction) || !view.installation.binaryFound || !focus.name,
+          })}
+          ${buttonHtml({
+            action: 'plugin-enable-current',
+            label: view.runningAction === enableActionId ? '启用中…' : '启用插件',
+            disabled: Boolean(view.runningAction) || !focus.name,
+          })}
+          ${buttonHtml({
+            action: 'plugin-disable-current',
+            label: view.runningAction === disableActionId ? '停用中…' : '停用插件',
+            disabled: Boolean(view.runningAction) || !focus.name,
+          })}
+          ${buttonHtml({
+            action: 'plugin-remove',
+            label: view.runningAction === removeActionId ? '移除插件…' : '移除插件',
+            kind: 'danger',
+            disabled: Boolean(view.runningAction) || !view.installation.binaryFound || !focus.name,
+          })}
+        </div>
+        <div class="toolbar toolbar-muted top-gap">
+          ${providerOption ? buttonHtml({
+            action: 'provider-apply',
+            label: providerButtonLabel(providerOption),
+            kind: providerOption.selected ? 'secondary' : 'primary',
+            disabled: Boolean(view.runningAction) || !view.configDocs || providerOption.selected,
+            attrs: {
+              'data-provider-mode': providerOption.mode,
+              'data-provider-name': providerOption.providerName,
+            },
+          }) : ''}
+          ${buttonHtml({
+            action: 'plugin-configure',
+            label: focus.catalogItem?.requiresEnv.length ? '配置凭证' : '查看配置',
+            attrs: { 'data-name': focus.name },
+          })}
+          ${focus.directoryPath
+            ? buttonHtml({
+              action: 'plugin-open',
+              label: '打开目录',
+              attrs: { 'data-name': focus.name, 'data-path': focus.directoryPath },
+            })
+            : buttonHtml({ action: 'open-plugin-root', label: '打开插件目录' })}
+          ${buttonHtml({ action: 'goto-config-credentials', label: '进入凭证页' })}
+        </div>
+      ` : `
+        <div class="top-gap">
+          ${emptyStateHtml('还没选治理目标', '从下方目录卡点“设为治理目标”，或者直接输入 owner/repo / 插件名。')}
+        </div>
+      `}
+    </section>
+  `;
+}
+
+function renderProviderPresetStrip(view, state) {
+  if (!state.providerOptions.length) {
+    return '';
+  }
+
+  return `
+    <section class="preset-strip">
+      <div class="preset-strip-header">
+        <div class="panel-title-row">
+          <strong>Provider 预设</strong>
+          ${infoTipHtml('这里会直接写回 config.yaml 里的 memory 配置，用客户端接管大部分 provider 切换，不再依赖 hermes memory setup。')}
+        </div>
+        <div class="pill-row">
+          ${pillHtml(state.configuredProviderDisplay, state.providerAligned ? 'good' : 'warn')}
+          ${pillHtml(`可切换 ${state.providerOptions.filter((item) => item.mode === 'plugin').length} 个`, 'neutral')}
+        </div>
+      </div>
+      <div class="preset-card-grid workspace-preset-grid">
+        ${state.providerOptions.map((option) => `
+          <section class="preset-card provider-preset-card${option.selected ? ' provider-preset-card-active' : ''}">
+            <div class="preset-card-head">
+              <div class="preset-card-heading">
+                <strong>${escapeHtml(option.label)}</strong>
+                <span class="preset-card-caption">${escapeHtml(providerCopy(option))}</span>
+              </div>
+              <div class="pill-row">
+                ${pillHtml(option.availability, 'neutral')}
+                ${pillHtml(option.selected ? '配置中' : option.runtimeActive ? '运行中' : '待接管', providerTone(option))}
+              </div>
+            </div>
+            <div class="preset-card-foot">
+              <code class="preset-inline-code">${escapeHtml(
+                option.mode === 'plugin'
+                    ? `plugin ${option.matchedPluginName || option.providerName}${option.requiresEnv.length ? ` · ENV ${option.requiresEnv.join(', ')}` : ''}${option.dependencyCount ? ` · deps ${option.dependencyCount}` : ''}`
+                  : option.mode === 'builtin'
+                    ? 'builtin-file · 无额外依赖'
+                    : 'memory=false · user_profile=false'
+              )}</code>
+              <div class="toolbar">
+                ${buttonHtml({
+                  action: 'provider-apply',
+                  label: providerButtonLabel(option),
+                  kind: option.selected ? 'secondary' : option.mode === 'off' ? 'danger' : 'primary',
+                  disabled: Boolean(view.runningAction) || !view.configDocs || option.selected,
+                  attrs: {
+                    'data-provider-mode': option.mode,
+                    'data-provider-name': option.providerName,
+                  },
+                })}
+                ${option.requiresEnv.length
+                  ? buttonHtml({
+                    action: 'provider-configure',
+                    label: '补凭证',
+                    attrs: { 'data-provider-name': option.matchedPluginName || option.providerName },
+                  })
+                  : buttonHtml({ action: 'goto-memory', label: '查看 Memory' })}
+              </div>
+            </div>
+          </section>
+        `).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function renderSkillCards(state) {
+  if (!state.filteredSkills.length) {
+    return emptyStateHtml('没有匹配技能', '当前筛选条件下没有匹配的运行时技能。');
+  }
+
+  return `
+    <div class="list-stack">
+      ${state.filteredSkills.slice(0, 18).map((item) => `
+        <div class="list-card">
+          <div class="list-card-title">
+            <strong>${escapeHtml(item.name)}</strong>
+            <div class="pill-row">
+              ${pillHtml(categoryLabel(item.category), 'neutral')}
+              ${pillHtml(sourceLabel(item.source), item.source === 'local' ? 'warn' : 'good')}
+              ${pillHtml(trustLabel(item.trust), item.trust === 'local' ? 'warn' : 'neutral')}
+            </div>
+          </div>
+          <p>${escapeHtml(`${categoryLabel(item.category)} · 来源 ${sourceLabel(item.source)} · 信任 ${trustLabel(item.trust)}`)}</p>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+export function renderWorkbenchTabs(view) {
+  const tabs = [
+    { key: 'tools', label: '工具' },
+    { key: 'plugins', label: '插件' },
+    { key: 'skills', label: '技能' },
+    { key: 'runtime', label: '运行快照' },
+  ];
+
+  return `
+    <div class="tab-bar tab-bar-dense">
+      ${tabs.map((tab) => `
+        <button
+          type="button"
+          class="tab ${view.workbenchTab === tab.key ? 'active' : ''}"
+          data-action="set-workbench-tab"
+          data-tab="${escapeHtml(tab.key)}"
+        >
+          ${escapeHtml(tab.label)}
+        </button>
+      `).join('')}
+    </div>
+  `;
+}
+
+export function renderWorkbenchRail(view, state) {
+  if (view.workbenchTab === 'tools') {
+    return `
+      <div class="workspace-rail-header">
+        <div>
+          <strong>平台治理摘要</strong>
+          <p class="workspace-main-copy">只保留当前平台的关键读数和常用下钻。</p>
+        </div>
+        ${pillHtml(state.currentPlatform ? state.currentPlatform.displayName : '未选择', state.currentPlatform ? 'good' : 'warn')}
+      </div>
+      <div class="detail-list compact">
+        <div class="key-value-row">
+          <span>当前平台</span>
+          <strong>${escapeHtml(state.currentPlatform?.displayName || '未解析')}</strong>
+        </div>
+        <div class="key-value-row">
+          <span>运行清单</span>
+          <strong>${escapeHtml(`${state.currentPlatformMetrics.enabled}/${state.currentPlatformMetrics.total}`)}</strong>
+        </div>
+        <div class="key-value-row">
+          <span>摘要</span>
+          <strong>${escapeHtml(state.currentPlatformSummary ? `${state.currentPlatformSummary.enabledCount}/${state.currentPlatformSummary.totalCount}` : '缺摘要')}</strong>
+        </div>
+      </div>
+      ${state.warnings.length > 0
+        ? `<div class="warning-stack top-gap">${state.warnings.slice(0, 2).map((warning) => `<div class="warning-item">${escapeHtml(warning)}</div>`).join('')}</div>`
+        : '<p class="helper-text">当前平台没有明显结构性提醒，可以直接做启停与日志核对。</p>'}
+      <div class="workspace-rail-toolbar top-gap">
+        ${buttonHtml({ action: 'goto-config-toolsets', label: '能力集配置', kind: 'primary' })}
+        ${buttonHtml({ action: 'goto-diagnostics', label: '进入诊断页' })}
+        ${buttonHtml({ action: 'goto-logs', label: '查看日志' })}
+      </div>
+    `;
+  }
+
+  if (view.workbenchTab === 'plugins') {
+    return `
+      <div class="workspace-rail-header">
+        <div>
+          <strong>插件接管摘要</strong>
+          <p class="workspace-main-copy">安装、启停和 provider 切换都先在当前页闭环，配置中心退到次级位。</p>
+        </div>
+        ${pillHtml(`${state.pluginInstalledCount}/${state.pluginAvailableCount || state.pluginInstalledCount}`, state.pluginInstalledCount > 0 ? 'good' : 'warn')}
+      </div>
+      <div class="detail-list compact">
+        <div class="key-value-row">
+          <span>已安装</span>
+          <strong>${escapeHtml(String(state.pluginInstalledCount))}</strong>
+        </div>
+        <div class="key-value-row">
+          <span>可治理目录</span>
+          <strong>${escapeHtml(String(state.pluginAvailableCount || 0))}</strong>
+        </div>
+        <div class="key-value-row">
+          <span>当前输入</span>
+          <strong>${escapeHtml(view.pluginNameInput.trim() || '未填写')}</strong>
+        </div>
+        <div class="key-value-row">
+          <span>筛选</span>
+          <strong>${escapeHtml(view.pluginFilter === 'all' ? '全部插件' : view.pluginFilter === 'installed' ? '仅已装' : view.pluginFilter === 'requires-env' ? '需凭证' : '有依赖')}</strong>
+        </div>
+        <div class="key-value-row">
+          <span>当前 Provider</span>
+          <strong>${escapeHtml(providerDisplayLabel(state.configuredProviderDisplay))}</strong>
+        </div>
+        <div class="key-value-row">
+          <span>可切换 Provider</span>
+          <strong>${escapeHtml(String(state.providerOptions.filter((item) => item.mode === 'plugin').length))}</strong>
+        </div>
+      </div>
+      <p class="helper-text">${escapeHtml(view.extensions.plugins.installHint || 'Provider 预设已经接管到客户端。只有缺少凭证时，才需要回配置中心补变量。')}</p>
+      <div class="workspace-rail-toolbar top-gap">
+        ${buttonHtml({
+          action: 'provider-apply',
+          label: state.configuredProviderDisplay === 'builtin-file' ? '当前内置' : '切回内置',
+          kind: state.configuredProviderDisplay === 'builtin-file' ? 'secondary' : 'primary',
+          disabled: Boolean(view.runningAction) || !view.configDocs || state.configuredProviderDisplay === 'builtin-file',
+          attrs: { 'data-provider-mode': 'builtin', 'data-provider-name': '' },
+        })}
+        ${buttonHtml({ action: 'goto-config-credentials', label: '去配凭证' })}
+        ${buttonHtml({ action: 'goto-memory', label: '查看 Memory' })}
+      </div>
+      <div class="workspace-rail-toolbar workspace-rail-toolbar-muted">
+        ${buttonHtml({ action: 'goto-skills', label: '联动 Skills' })}
+        ${buttonHtml({ action: 'goto-logs', label: '查看日志' })}
+        ${buttonHtml({ action: 'goto-diagnostics', label: '进入诊断页' })}
+      </div>
+    `;
+  }
+
+  if (view.workbenchTab === 'skills') {
+    return `
+      <div class="workspace-rail-header">
+        <div>
+          <strong>技能来源摘要</strong>
+          <p class="workspace-main-copy">区分目录态、安装态和 source/trust，默认先走本页与 Skills 页闭环。</p>
+        </div>
+        ${pillHtml(`${state.runtimeSkills.length} 项`, state.runtimeSkills.length > 0 ? 'good' : 'warn')}
+      </div>
+      <div class="detail-list compact">
+        <div class="key-value-row">
+          <span>内置 / 本地</span>
+          <strong>${escapeHtml(`${state.sourceBuiltinCount} / ${state.sourceLocalCount}`)}</strong>
+        </div>
+        <div class="key-value-row">
+          <span>目录 / 运行态</span>
+          <strong>${escapeHtml(`${view.skills.length} / ${state.runtimeSkills.length}`)}</strong>
+        </div>
+        <div class="key-value-row">
+          <span>筛选条件</span>
+          <strong>${escapeHtml(view.sourceFilter === 'all' ? '全部来源' : view.sourceFilter)}</strong>
+        </div>
+        <div class="key-value-row">
+          <span>Top 分类</span>
+          <strong>${escapeHtml(state.categoryCounts.slice(0, 2).map((item) => `${item.name} ${item.count}`).join(' · ') || '—')}</strong>
+        </div>
+      </div>
+      ${state.runtimeSkillMismatch
+        ? `<div class="warning-stack top-gap"><div class="warning-item">${escapeHtml(`运行态 local 技能 ${state.sourceLocalCount} 个，本地目录 ${view.skills.length} 个，安装态存在偏差。`)}</div></div>`
+        : '<p class="helper-text">当前目录态和运行态没有明显偏差，可以继续按分类筛选。</p>'}
+      <div class="workspace-rail-toolbar top-gap">
+        ${buttonHtml({ action: 'goto-skills', label: '进入 Skills 页', kind: 'primary' })}
+        ${buttonHtml({ action: 'goto-config-toolsets', label: '核对能力集' })}
+        ${buttonHtml({ action: 'goto-memory', label: '查看 Memory' })}
+      </div>
+      <div class="workspace-rail-toolbar workspace-rail-toolbar-muted">
+        ${buttonHtml({ action: 'goto-diagnostics', label: '进入诊断页' })}
+        ${buttonHtml({ action: 'goto-logs', label: '查看日志' })}
+      </div>
+    `;
+  }
+
+  return `
+    <div class="workspace-rail-header">
+      <div>
+        <strong>运行态闭环</strong>
+        <p class="workspace-main-copy">这里集中看提醒、最近动作回执和原始输出对照。</p>
+      </div>
+      ${pillHtml(state.warnings.length === 0 ? '稳定' : `${state.warnings.length} 条提醒`, state.warnings.length === 0 ? 'good' : 'warn')}
+    </div>
+    ${state.warnings.length > 0
+      ? `<div class="warning-stack">${state.warnings.map((warning) => `<div class="warning-item">${escapeHtml(warning)}</div>`).join('')}</div>`
+      : emptyStateHtml('当前无明显结构性风险', 'Tools、plugins、skills 和 provider 暂未发现明显错位。')}
+    <div class="workspace-rail-toolbar top-gap">
+      ${buttonHtml({ action: 'goto-config', label: '核对配置页' })}
+      ${buttonHtml({ action: 'goto-diagnostics', label: '进入诊断页' })}
+      ${buttonHtml({ action: 'goto-logs', label: '查看日志' })}
+      ${buttonHtml({ action: 'open-home', label: '打开 Home', disabled: Boolean(view.runningAction) })}
+    </div>
+  `;
+}
+
+export function renderToolsWorkbench(view, state, runningToolBatchEnable, runningToolBatchDisable) {
+  return `
+    <div class="page-stack">
+      <section class="panel panel-nested">
+        <div class="workspace-main-header">
+          <div>
+            <strong>工具平台治理</strong>
+            <p class="workspace-main-copy">按平台直接启停工具，优先在客户端完成能力面治理。</p>
+          </div>
+          <div class="toolbar">
+            <select class="select-input" id="extensions-platform-select" ${!view.extensions.toolInventory.length || view.runningAction ? 'disabled' : ''}>
+              ${view.extensions.toolInventory.map((item) => `
+                <option value="${escapeHtml(item.platformKey)}" ${item.platformKey === (state.currentPlatform?.platformKey ?? '') ? 'selected' : ''}>
+                  ${escapeHtml(item.displayName)}
+                </option>
+              `).join('')}
+            </select>
+            ${buttonHtml({ action: 'refresh', label: '刷新运行态', disabled: Boolean(view.runningAction) })}
+          </div>
+        </div>
+        ${state.currentPlatform ? `
+          <div class="form-grid">
+            <label class="field-stack">
+              <span>批量工具名称</span>
+              <input class="search-input" id="extensions-tool-input" placeholder="web,browser,terminal" ${view.runningAction ? 'disabled' : ''}>
+            </label>
+            <label class="field-stack">
+              <span>批量预览</span>
+              <input class="search-input" id="extensions-tool-preview" readonly>
+            </label>
+          </div>
+          <div class="toolbar">
+            ${buttonHtml({
+              action: 'tool-batch-enable',
+              label: runningToolBatchEnable ? '批量启用中…' : '批量启用',
+              kind: 'primary',
+              disabled: Boolean(view.runningAction) || state.batchToolNames.length === 0,
+            })}
+            ${buttonHtml({
+              action: 'tool-batch-disable',
+              label: runningToolBatchDisable ? '批量停用中…' : '批量停用',
+              disabled: Boolean(view.runningAction) || state.batchToolNames.length === 0,
+            })}
+            ${buttonHtml({ action: 'goto-config-toolsets', label: '能力集配置' })}
+          </div>
+          <p class="helper-text">当前平台：<code>${escapeHtml(state.currentPlatform.displayName)}</code>。模型最终能看到哪些工具，仍由配置中心的能力集与平台能力集决定。</p>
+        ` : emptyStateHtml('暂无平台可治理', '当前还没有从 Hermes tools 解析出可操作的平台。')}
+      </section>
+      <section class="panel panel-nested">
+        <div class="workspace-list-scroll">
+          ${renderToolCards(view, state)}
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+export function renderPluginsWorkbench(view, state) {
+  const importDraft = view.pluginImportDraft ?? clonePluginImportDraft();
+  const lastImported = view.lastImportedPlugin;
+  const focus = resolvePluginGovernanceTarget(view, state);
+  return `
+    <div class="page-stack">
+      <section class="panel panel-nested">
+        <div class="workspace-summary-strip workspace-summary-strip-dense">
+          <section class="summary-mini-card">
+            <span class="summary-mini-label">已安装</span>
+            <strong class="summary-mini-value">${escapeHtml(String(state.pluginInstalledCount))}</strong>
+            <span class="summary-mini-meta">运行态已识别的插件</span>
+          </section>
+          <section class="summary-mini-card">
+            <span class="summary-mini-label">需凭证</span>
+            <strong class="summary-mini-value">${escapeHtml(String(state.pluginEnvRequiredCount))}</strong>
+            <span class="summary-mini-meta">manifest 声明了 requires_env</span>
+          </section>
+          <section class="summary-mini-card">
+            <span class="summary-mini-label">有依赖</span>
+            <strong class="summary-mini-value">${escapeHtml(String(state.pluginDependencyCount))}</strong>
+            <span class="summary-mini-meta">需要 pip 或外部依赖检查</span>
+          </section>
+          <section class="summary-mini-card">
+            <span class="summary-mini-label">Provider</span>
+            <strong class="summary-mini-value">${escapeHtml(providerDisplayLabel(state.configuredProviderDisplay))}</strong>
+            <span class="summary-mini-meta">${escapeHtml(`运行 ${view.extensions.memoryRuntime.provider}`)}</span>
+          </section>
+        </div>
+        <div class="workspace-main-header">
+          <div>
+            <strong>插件治理</strong>
+            <p class="workspace-main-copy">把目录导入、安装治理、provider 接管和依赖核对压进一个工作台。</p>
+          </div>
+          <div class="toolbar">
+            ${buttonHtml({ action: 'goto-config-credentials', label: '凭证页' })}
+            ${buttonHtml({ action: 'refresh', label: '刷新运行态', disabled: Boolean(view.runningAction) })}
+          </div>
+        </div>
+        ${renderProviderPresetStrip(view, state)}
+        <div class="compact-overview-grid compact-overview-grid-dense top-gap">
+          <section class="shell-card shell-card-dense">
+            <div class="shell-card-header">
+              <div>
+                <div class="panel-title-row">
+                  <strong>导入本地插件</strong>
+                  ${infoTipHtml('适合接入本地 manifest 插件目录。会把 plugin.yaml 和同级文件复制进当前 profile 的 hermes-agent/plugins。')}
+                </div>
+                <p class="shell-card-copy">先把本地插件目录纳入当前实例，再决定是否继续做运行态安装与接管。</p>
+              </div>
+              ${lastImported ? pillHtml(`${lastImported.copiedFiles} 个文件`, 'good') : pillHtml(importDraft.category || '自动归类', 'neutral')}
+            </div>
+            <div class="form-grid">
+              <label class="field-stack">
+                <span>源路径</span>
+                <input class="search-input" id="extensions-plugin-import-source" value="${escapeHtml(importDraft.sourcePath)}" placeholder="~/Downloads/byterover 或 /tmp/demo/plugin.yaml" ${view.runningAction ? 'disabled' : ''}>
+              </label>
+              <label class="field-stack">
+                <span>归档分类</span>
+                <input class="search-input" id="extensions-plugin-import-category" value="${escapeHtml(importDraft.category)}" placeholder="留空沿用源分类，否则归入 imported" ${view.runningAction ? 'disabled' : ''}>
+              </label>
+            </div>
+            <div class="checkbox-row top-gap">
+              <label>
+                <input type="checkbox" id="extensions-plugin-import-overwrite" ${importDraft.overwrite ? 'checked' : ''} ${view.runningAction ? 'disabled' : ''}>
+                覆盖当前 profile 中同名插件目录
+              </label>
+            </div>
+            ${lastImported ? `
+              <div class="top-gap">
+                ${keyValueRowsHtml([
+                  { label: '最近导入', value: lastImported.imported.name },
+                  { label: '来源', value: lastImported.sourcePath },
+                  { label: '目标目录', value: lastImported.targetDirectory },
+                  { label: '分类', value: lastImported.imported.category },
+                ])}
+              </div>
+            ` : ''}
+            <div class="toolbar top-gap">
+              ${buttonHtml({ action: 'plugin-import-local', label: view.runningAction === 'plugin:import-local' ? '导入中…' : '导入目录', kind: 'primary', disabled: Boolean(view.runningAction) || !importDraft.sourcePath.trim() })}
+              ${buttonHtml({ action: 'plugin-import-reset', label: '清空路径', disabled: Boolean(view.runningAction) })}
+              ${buttonHtml({ action: 'open-plugin-root', label: '打开插件目录', disabled: Boolean(view.runningAction) })}
+            </div>
+          </section>
+          ${renderPluginTargetWorkbench(view, state, focus)}
+        </div>
+        <div class="selection-chip-grid top-gap">
+          ${buttonHtml({ action: 'set-plugin-filter', label: '全部插件', className: `selection-chip${view.pluginFilter === 'all' ? ' selection-chip-active' : ''}`, attrs: { 'data-filter': 'all' } })}
+          ${buttonHtml({ action: 'set-plugin-filter', label: '仅已安装', className: `selection-chip${view.pluginFilter === 'installed' ? ' selection-chip-active' : ''}`, attrs: { 'data-filter': 'installed' } })}
+          ${buttonHtml({ action: 'set-plugin-filter', label: '需要凭证', className: `selection-chip${view.pluginFilter === 'requires-env' ? ' selection-chip-active' : ''}`, attrs: { 'data-filter': 'requires-env' } })}
+          ${buttonHtml({ action: 'set-plugin-filter', label: '包含依赖', className: `selection-chip${view.pluginFilter === 'dependencies' ? ' selection-chip-active' : ''}`, attrs: { 'data-filter': 'dependencies' } })}
+        </div>
+      </section>
+      <section class="panel panel-nested">
+        <div class="workspace-main-header">
+          <div>
+            <strong>插件目录</strong>
+            <p class="workspace-main-copy">只保留筛选命中的插件，把关键状态和动作直接压到卡片里。</p>
+          </div>
+          <div class="pill-row">
+            ${pillHtml(`${state.filteredPluginCatalog.length || state.filteredRuntimePlugins.length} 项`, 'neutral')}
+            ${view.pluginQuery.trim() ? pillHtml(`关键词 ${view.pluginQuery.trim()}`, 'warn') : ''}
+          </div>
+        </div>
+        <div class="workspace-list-scroll">
+          ${renderPluginCards(view, state)}
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+export function renderSkillsWorkbench(view, state) {
+  return `
+    <div class="page-stack">
+      <section class="panel panel-nested">
+        <div class="workspace-summary-strip workspace-summary-strip-dense">
+          <section class="summary-mini-card">
+            <span class="summary-mini-label">运行态技能</span>
+            <strong class="summary-mini-value">${escapeHtml(String(state.runtimeSkills.length))}</strong>
+            <span class="summary-mini-meta">source / trust 已被 Hermes 识别</span>
+          </section>
+          <section class="summary-mini-card">
+            <span class="summary-mini-label">内置 / 本地</span>
+            <strong class="summary-mini-value">${escapeHtml(`${state.sourceBuiltinCount} / ${state.sourceLocalCount}`)}</strong>
+            <span class="summary-mini-meta">和本地目录 ${view.skills.length} 个对照</span>
+          </section>
+          <section class="summary-mini-card">
+            <span class="summary-mini-label">Top 分类</span>
+            <strong class="summary-mini-value">${escapeHtml(state.categoryCounts[0]?.name || '—')}</strong>
+            <span class="summary-mini-meta">${escapeHtml(state.categoryCounts.slice(0, 2).map((item) => `${item.name} ${item.count}`).join(' · ') || '暂无分类')}</span>
+          </section>
+          <section class="summary-mini-card">
+            <span class="summary-mini-label">筛选结果</span>
+            <strong class="summary-mini-value">${escapeHtml(String(state.filteredSkills.length))}</strong>
+            <span class="summary-mini-meta">${escapeHtml(view.sourceFilter === 'all' ? '全部来源' : view.sourceFilter)}${view.query.trim() ? ` · ${view.query.trim()}` : ''}</span>
+          </section>
+        </div>
+        <div class="workspace-main-header">
+          <div>
+            <strong>技能安装态</strong>
+            <p class="workspace-main-copy">这里专注运行态 source/trust，不再重复技能目录页的文件视图。</p>
+          </div>
+          <div class="toolbar">
+            <input class="search-input" id="extensions-skill-search" placeholder="搜索技能名、分类、source、trust">
+            <select class="select-input" id="extensions-source-filter">
+              ${state.sourceOptions.map((item) => `
+                <option value="${escapeHtml(item)}" ${item === view.sourceFilter ? 'selected' : ''}>
+                  ${escapeHtml(item === 'all' ? '全部来源' : item)}
+                </option>
+              `).join('')}
+            </select>
+            ${buttonHtml({ action: 'apply-skill-filter', label: '应用筛选' })}
+            ${buttonHtml({ action: 'goto-skills', label: '进入 Skills 页' })}
+          </div>
+        </div>
+        <div class="control-card-grid control-card-grid-dense">
+          <section class="action-card action-card-compact">
+            <div class="action-card-header">
+              <div>
+                <p class="eyebrow">对账</p>
+                <h3 class="action-card-title">目录态与运行态</h3>
+              </div>
+              ${pillHtml(state.runtimeSkillMismatch ? '待校对' : '已对齐', state.runtimeSkillMismatch ? 'warn' : 'good')}
+            </div>
+            <p class="workspace-inline-meta">${escapeHtml(`目录 ${view.skills.length} · 运行本地 ${state.sourceLocalCount} · 能力集 ${(view.dashboard.config.toolsets ?? []).join(', ') || '—'}`)}</p>
+            <div class="toolbar">
+              ${buttonHtml({ action: 'goto-config-toolsets', label: '核对能力集', kind: 'primary' })}
+              ${buttonHtml({ action: 'goto-skills', label: '打开 Skills 页' })}
+              ${buttonHtml({ action: 'goto-logs', label: '查看日志' })}
+            </div>
+          </section>
+          <section class="action-card action-card-compact">
+            <div class="action-card-header">
+              <div>
+                <p class="eyebrow">Memory</p>
+                <h3 class="action-card-title">记忆与自动化闭环</h3>
+              </div>
+              ${pillHtml(view.dashboard.config.memoryEnabled ? '记忆开启' : '记忆关闭', view.dashboard.config.memoryEnabled ? 'good' : 'warn')}
+            </div>
+            <p class="workspace-inline-meta">${escapeHtml(`Gateway ${view.dashboard.gateway?.gatewayState ?? 'unknown'} · Cron ${view.dashboard.counts?.cronJobs ?? 0} · Provider ${view.dashboard.config.memoryProvider || '—'}`)}</p>
+            <div class="toolbar">
+              ${buttonHtml({ action: 'goto-config-memory', label: 'Memory 配置', kind: 'primary' })}
+              ${buttonHtml({ action: 'goto-memory', label: '查看 Memory 文件' })}
+              ${buttonHtml({ action: 'goto-diagnostics', label: '进入诊断页' })}
+            </div>
+          </section>
+        </div>
+        <div class="health-grid">
+          <section class="health-card">
+            <div class="health-card-header">
+              <strong>Source</strong>
+              ${pillHtml(`${view.extensions.skillSourceCounts.length} 类`, 'good')}
+            </div>
+            <p>${escapeHtml(view.extensions.skillSourceCounts.map((item) => `${item.name} ${item.count}`).join(' · ') || '—')}</p>
+          </section>
+          <section class="health-card">
+            <div class="health-card-header">
+              <strong>Trust</strong>
+              ${pillHtml(`${view.extensions.skillTrustCounts.length} 类`, 'neutral')}
+            </div>
+            <p>${escapeHtml(view.extensions.skillTrustCounts.map((item) => `${item.name} ${item.count}`).join(' · ') || '—')}</p>
+          </section>
+        </div>
+      </section>
+      <section class="panel panel-nested">
+        <div class="workspace-list-scroll" id="extensions-skills-container">
+          ${renderSkillCards(state)}
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+export function renderRuntimeWorkbench(view, state) {
+  return `
+    <div class="workspace-bottom-grid workspace-bottom-grid-dense">
+      <section class="panel panel-nested">
+        <div class="workspace-main-header">
+          <div>
+            <strong>最近动作回执</strong>
+            <p class="workspace-main-copy">保留最后一次治理动作的原始结果，只作为回执与排障参考。</p>
+          </div>
+        </div>
+        ${commandResultHtml(view.lastResult, '尚未执行治理动作', '执行 tools / plugins / provider 相关动作后，这里会保留原始输出。')}
+      </section>
+      <section class="panel panel-nested">
+        <div class="workspace-main-header">
+          <div>
+            <strong>运行态原始对照</strong>
+            <p class="workspace-main-copy">只在需要时对照 raw 输出，不让它抢占主工作区。</p>
+          </div>
+          <div class="toolbar">
+            ${buttonHtml({ action: 'raw-tools', label: 'Tools', kind: view.rawKind === 'tools' ? 'primary' : 'secondary' })}
+            ${buttonHtml({ action: 'raw-memory', label: 'Memory', kind: view.rawKind === 'memory' ? 'primary' : 'secondary' })}
+            ${buttonHtml({ action: 'raw-plugins', label: 'Plugins', kind: view.rawKind === 'plugins' ? 'primary' : 'secondary' })}
+            ${buttonHtml({ action: 'raw-skills', label: 'Skills', kind: view.rawKind === 'skills' ? 'primary' : 'secondary' })}
+          </div>
+        </div>
+        <pre class="code-block tall">${escapeHtml(state.rawOutput || '暂无输出')}</pre>
+      </section>
+    </div>
+  `;
+}

@@ -259,6 +259,24 @@ pub struct PluginCatalogItem {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct PluginImportRequest {
+    pub source_path: String,
+    pub category: String,
+    pub overwrite: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginImportResult {
+    pub imported: PluginCatalogItem,
+    pub source_path: String,
+    pub target_directory: String,
+    pub copied_files: usize,
+    pub overwrite: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ExtensionsSnapshot {
     pub profile_name: String,
     pub hermes_home: String,
@@ -339,6 +357,24 @@ pub struct SkillCreateRequest {
     pub category: String,
     pub description: String,
     pub content: String,
+    pub overwrite: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillImportRequest {
+    pub source_path: String,
+    pub category: String,
+    pub overwrite: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillImportResult {
+    pub imported: SkillFileDetail,
+    pub source_path: String,
+    pub target_directory: String,
+    pub copied_files: usize,
     pub overwrite: bool,
 }
 

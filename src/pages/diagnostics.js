@@ -142,7 +142,7 @@ function derivedState(view) {
 
   posture.priorities.forEach((item) => warnings.push(`${item.title}：${item.detail}`));
   if (view.installation && !view.installation.binaryFound) {
-    warnings.push('当前还没有检测到 Hermes CLI，很多问题在修复前都需要先完成安装或重新安装。');
+    warnings.push('当前还没有检测到 Hermes 运行组件，很多问题在修复前都需要先完成安装或重新安装。');
   }
   if (missingReferencedSkills.length > 0) {
     warnings.push(`存在 ${missingReferencedSkills.length} 个被 jobs.json 引用但当前未扫描到的 skill：${missingReferencedSkills.join('、')}。`);
@@ -173,22 +173,22 @@ function derivedState(view) {
 
 function renderDiagnosticGrid(commands, view) {
   return `
-    <div class="workbench-grid">
+    <div class="control-card-grid control-card-grid-dense">
       ${commands.map((item) => `
         <section class="action-card action-card-compact">
           <div class="action-card-header">
             <div>
-              <p class="eyebrow">${item.scope === 'runtime' ? 'Runtime' : 'Capability'}</p>
+              <p class="eyebrow">${item.scope === 'runtime' ? '封装诊断' : '能力核验'}</p>
               <h3 class="action-card-title">${escapeHtml(item.label)}</h3>
             </div>
             ${pillHtml(item.key, item.kind === 'primary' ? 'good' : item.scope === 'capability' ? 'neutral' : 'warn')}
           </div>
           <p class="action-card-copy">${escapeHtml(item.description)}</p>
-          <p class="command-line">${escapeHtml(item.cli)}</p>
+          <p class="workspace-inline-meta">${escapeHtml(`底层动作：${item.cli}`)}</p>
           <div class="toolbar">
             ${buttonHtml({
               action: 'run-diagnostic',
-              label: view.running === item.key ? `${item.label}…` : `执行 ${item.label}`,
+              label: view.running === item.key ? `${item.label}…` : '运行诊断',
               kind: diagnosticButtonKind(item.kind),
               disabled: view.running !== null,
               attrs: { 'data-kind': item.key },
@@ -208,52 +208,50 @@ function renderDiagnosticGrid(commands, view) {
 
 function renderPostureHtml(posture) {
   return `
-    <div class="page-stack">
-      <div class="result-header">
-        <div>
-          <p class="eyebrow">Runtime Posture</p>
-          <h3 class="action-card-title">${escapeHtml(posture.headline)}</h3>
-        </div>
-        ${pillHtml(posture.tone === 'bad' ? '高风险' : posture.tone === 'warn' ? '关注' : posture.tone === 'neutral' ? '观察' : '稳定', posture.tone)}
+    <div class="result-header">
+      <div>
+        <p class="eyebrow">运行姿态</p>
+        <h3 class="action-card-title">${escapeHtml(posture.headline)}</h3>
       </div>
-      <p class="helper-text">${escapeHtml(posture.summary)}</p>
-      <div class="health-grid">
-        ${posture.items.map((item) => `
-          <section class="health-card">
-            <div class="health-card-header">
-              <strong>${escapeHtml(item.title)}</strong>
-              ${pillHtml(item.summary, item.tone)}
-            </div>
-            <p>${escapeHtml(item.detail)}</p>
-            ${item.page ? `
-              <div class="toolbar">
-                ${buttonHtml({
-                  action: 'navigate-page',
-                  label: item.actionLabel || `进入${pageLabel(item.page)}`,
-                  kind: postureButtonKind(item.tone),
-                  attrs: { 'data-page': item.page },
-                })}
-              </div>
-            ` : ''}
-          </section>
-        `).join('')}
-      </div>
-      ${
-        posture.priorities.length > 0
-          ? `
-            <div class="warning-stack">
-              ${posture.priorities.slice(0, 4).map((item) => `<div class="warning-item">${escapeHtml(`${item.title}：${item.detail}`)}</div>`).join('')}
-            </div>
-          `
-          : emptyStateHtml('当前无需优先修正', '核心运行链路已具备继续验证与细化治理的基础。')
-      }
+      ${pillHtml(posture.tone === 'bad' ? '高风险' : posture.tone === 'warn' ? '关注' : posture.tone === 'neutral' ? '观察' : '稳定', posture.tone)}
     </div>
+    <p class="helper-text">${escapeHtml(posture.summary)}</p>
+    <div class="health-grid health-grid-dense top-gap">
+      ${posture.items.map((item) => `
+        <section class="health-card">
+          <div class="health-card-header">
+            <strong>${escapeHtml(item.title)}</strong>
+            ${pillHtml(item.summary, item.tone)}
+          </div>
+          <p>${escapeHtml(item.detail)}</p>
+          ${item.page ? `
+            <div class="toolbar">
+              ${buttonHtml({
+                action: 'navigate-page',
+                label: item.actionLabel || `进入${pageLabel(item.page)}`,
+                kind: postureButtonKind(item.tone),
+                attrs: { 'data-page': item.page },
+              })}
+            </div>
+          ` : ''}
+        </section>
+      `).join('')}
+    </div>
+    ${
+      posture.priorities.length > 0
+        ? `
+          <div class="warning-stack top-gap">
+            ${posture.priorities.slice(0, 4).map((item) => `<div class="warning-item">${escapeHtml(`${item.title}：${item.detail}`)}</div>`).join('')}
+          </div>
+        `
+        : `<p class="helper-text top-gap">当前没有新的高优先项，可以继续做能力核验或直接下钻到对应工作台。</p>`
+    }
   `;
 }
 
 function renderSkeleton(view) {
   view.page.innerHTML = `
-    <div class="page-header">
+    <div class="page-header page-header-compact">
       <div class="panel-title-row">
         <h1 class="page-title">诊断工作台</h1>
       </div>
@@ -279,79 +277,49 @@ function renderPage(view) {
   const lastCommand = state.lastCommand;
 
   view.page.innerHTML = `
-    <div class="page-header">
+    <div class="page-header page-header-compact">
       <div class="panel-title-row">
         <h1 class="page-title">诊断工作台</h1>
         ${infoTipHtml('诊断页只保留体检、日志预览和客户端内修复动作；大段说明后置到提示里，不抢排障区。')}
       </div>
-      <p class="page-desc">先诊断，再跳到真正能修问题的工作台，或直接在客户端里执行边界修复动作。</p>
+      <p class="page-desc">先看诊断摘要，再走修复入口；底层回执与日志统一压到页面下半区。</p>
     </div>
 
-    <section class="config-section">
-      <div class="config-section-header">
-        <div>
-          <h2 class="config-section-title">运行总览</h2>
-          <p class="config-section-desc">先看主链路姿态，再决定执行哪个命令或切去哪个修复入口。</p>
-        </div>
-        <div class="toolbar">
-          ${buttonHtml({ action: 'refresh-context', label: view.loading ? '刷新中…' : '刷新上下文', kind: 'primary', disabled: view.loading })}
-        </div>
-      </div>
-      <div class="hero-grid">
-        <div class="hero-copy">
-          <p class="hero-title">Hermes Diagnostic Workbench</p>
-          <p class="hero-subtitle">先汇总主链路风险，再执行命令。</p>
-          ${keyValueRowsHtml([
-            { label: '当前 Profile', value: view.snapshot?.profileName ?? view.profile },
-            { label: 'Hermes Binary', value: view.snapshot?.hermesBinary ?? '—' },
-            { label: 'Hermes Home', value: view.snapshot?.hermesHome ?? '—' },
-            { label: 'Gateway', value: view.snapshot?.gateway?.gatewayState ?? '未检测到' },
-            { label: 'Context Engine', value: view.config?.summary.contextEngine || '—' },
-            { label: '记忆 Provider', value: view.config?.summary.memoryProvider || 'builtin-file' },
-          ])}
-        </div>
-        <div class="metrics-grid">
-          <div class="metric-card">
-            <p class="metric-label">高优先项</p>
-            <div class="metric-value">${escapeHtml(String(state.posture.priorities.length))}</div>
-            <p class="metric-hint">共享运行姿态汇总后的优先修正项</p>
-          </div>
-          <div class="metric-card">
-            <p class="metric-label">远端作业</p>
-            <div class="metric-value">${escapeHtml(String(state.remoteJobs.length))}</div>
-            <p class="metric-hint">依赖 gateway / delivery 的 cron 作业</p>
-          </div>
-          <div class="metric-card">
-            <p class="metric-label">缺 Skill 引用</p>
-            <div class="metric-value">${escapeHtml(String(state.missingReferencedSkills.length))}</div>
-            <p class="metric-hint">jobs.json 引用了但本地没扫到</p>
-          </div>
-          <div class="metric-card">
-            <p class="metric-label">运行 Tools</p>
-            <div class="metric-value">${escapeHtml(`${enabledToolCount(view.extensions)} / ${totalToolCount(view.extensions)}`)}</div>
-            <p class="metric-hint">启用 tools / 全量 tools</p>
-          </div>
-          <div class="metric-card">
-            <p class="metric-label">本地技能 / 插件</p>
-            <div class="metric-value">${escapeHtml(`${(view.skills ?? []).length} / ${pluginsCount(view.extensions)}`)}</div>
-            <p class="metric-hint">目录扫描 skills / 插件层覆盖</p>
-          </div>
-          <div class="metric-card">
-            <p class="metric-label">日志预览</p>
-            <div class="metric-value">${escapeHtml(String(view.logPreview?.lines.length ?? 0))}</div>
-            <p class="metric-hint">${escapeHtml(LOG_OPTIONS.find((item) => item.key === view.logName)?.label || view.logName)}</p>
-          </div>
-        </div>
-      </div>
+    <section class="workspace-summary-strip workspace-summary-strip-dense">
+      <section class="summary-mini-card">
+        <span class="summary-mini-label">当前 Profile</span>
+        <strong class="summary-mini-value">${escapeHtml(view.snapshot?.profileName ?? view.profile)}</strong>
+        <span class="summary-mini-meta">${escapeHtml(view.snapshot?.gateway?.gatewayState ?? '未检测到 Gateway')}</span>
+      </section>
+      <section class="summary-mini-card">
+        <span class="summary-mini-label">高优先项</span>
+        <strong class="summary-mini-value">${escapeHtml(String(state.posture.priorities.length))}</strong>
+        <span class="summary-mini-meta">共享运行姿态汇总后的优先修正项</span>
+      </section>
+      <section class="summary-mini-card">
+        <span class="summary-mini-label">远端作业</span>
+        <strong class="summary-mini-value">${escapeHtml(String(state.remoteJobs.length))}</strong>
+        <span class="summary-mini-meta">依赖 gateway / delivery 的 cron 作业</span>
+      </section>
+      <section class="summary-mini-card">
+        <span class="summary-mini-label">缺 Skill 引用</span>
+        <strong class="summary-mini-value">${escapeHtml(String(state.missingReferencedSkills.length))}</strong>
+        <span class="summary-mini-meta">jobs.json 引用了但本地没扫到</span>
+      </section>
+      <section class="summary-mini-card">
+        <span class="summary-mini-label">运行 Tools</span>
+        <strong class="summary-mini-value">${escapeHtml(`${enabledToolCount(view.extensions)} / ${totalToolCount(view.extensions)}`)}</strong>
+        <span class="summary-mini-meta">${escapeHtml(`${(view.skills ?? []).length} 个本地技能 · ${pluginsCount(view.extensions)} 个插件`)}</span>
+      </section>
     </section>
 
     ${
       view.investigation
         ? `
-          <div class="context-banner">
+          <div class="context-banner context-banner-compact">
             <div class="context-banner-header">
               <div class="context-banner-copy">
-                <span class="context-banner-label">Session Drilldown</span>
+                <span class="context-banner-label">排障上下文</span>
                 <strong class="context-banner-title">${escapeHtml(view.investigation.headline)}</strong>
                 <p class="context-banner-description">${escapeHtml(view.investigation.description)}</p>
               </div>
@@ -364,12 +332,12 @@ function renderPage(view) {
             <div class="context-banner-actions toolbar">
               ${view.investigation.suggestedCommand ? buttonHtml({
                 action: 'run-suggested',
-                label: '执行建议命令',
+                label: '运行建议诊断',
                 kind: 'primary',
                 disabled: view.running !== null,
               }) : ''}
-              ${buttonHtml({ action: 'clear-investigation', label: '清除上下文' })}
-              ${buttonHtml({ action: 'goto-logs', label: '进入日志页' })}
+              ${buttonHtml({ action: 'clear-investigation', label: '清除' })}
+              ${buttonHtml({ action: 'goto-logs', label: '日志页' })}
             </div>
           </div>
         `
@@ -379,35 +347,68 @@ function renderPage(view) {
     <section class="config-section">
       <div class="config-section-header">
         <div>
-          <h2 class="config-section-title">运行姿态</h2>
-          <p class="config-section-desc">把模型链、执行后端、能力面、记忆回路和网关交付收成同一套诊断语言。</p>
+          <h2 class="config-section-title">诊断摘要</h2>
+          <p class="config-section-desc">先看主链路姿态与本地上下文，再决定应该走哪条修复路径。</p>
+        </div>
+        <div class="toolbar">
+          ${buttonHtml({ action: 'refresh-context', label: view.loading ? '刷新中…' : '刷新上下文', kind: 'primary', disabled: view.loading })}
         </div>
       </div>
-      ${renderPostureHtml(state.posture)}
+      <div class="compact-overview-grid compact-overview-grid-dense">
+        <section class="shell-card shell-card-dense">
+          ${renderPostureHtml(state.posture)}
+        </section>
+        <section class="shell-card shell-card-dense">
+          <div class="shell-card-header">
+            <div>
+              <strong>本地上下文</strong>
+              <p class="shell-card-copy">这里展示的都是当前 profile 的真实本地状态，用来决定该去配置、网关还是能力工作台修。</p>
+            </div>
+            ${pillHtml(view.installation?.binaryFound ? '已接管' : '待安装', view.installation?.binaryFound ? 'good' : 'warn')}
+          </div>
+          ${view.snapshot && view.config
+            ? keyValueRowsHtml([
+                { label: 'Hermes Binary', value: view.snapshot.hermesBinary ?? '—' },
+                { label: 'Hermes Home', value: view.snapshot.hermesHome ?? '—' },
+                { label: 'Context Engine', value: view.config.summary.contextEngine ?? '—' },
+                { label: '默认模型', value: view.config.summary.modelDefault ?? '—' },
+                { label: '模型提供商', value: view.config.summary.modelProvider ?? '—' },
+                { label: '记忆 Provider', value: view.config.summary.memoryProvider ?? 'builtin-file' },
+                { label: '终端后端', value: view.config.summary.terminalBackend ?? '—' },
+                { label: '工作目录', value: view.config.summary.terminalCwd ?? '—' },
+              ])
+            : emptyStateHtml('上下文未就绪', '暂时还没有读取到 dashboard、config 与安装摘要。')}
+          <div class="toolbar top-gap">
+            ${buttonHtml({ action: 'goto-config-model', label: '配置工作台', disabled: state.actionBusy || !view.installation?.binaryFound })}
+            ${buttonHtml({ action: 'goto-gateway-workbench', label: 'Gateway 工作台', disabled: state.actionBusy || !view.installation?.binaryFound })}
+            ${buttonHtml({ action: 'goto-logs', label: '日志页' })}
+          </div>
+        </section>
+      </div>
     </section>
 
     <section class="config-section">
       <div class="config-section-header">
-          <div>
-            <h2 class="config-section-title">修复动作台</h2>
-            <p class="config-section-desc">参考 clawpanel 的闭环思路，优先回结构化工作台；安装升级这类边界动作由客户端后端直接执行。</p>
-          </div>
+        <div>
+          <h2 class="config-section-title">修复入口</h2>
+          <p class="config-section-desc">优先回结构化工作台闭环；安装与文件定位这类边界动作继续由客户端后端直接执行。</p>
         </div>
-      <div class="control-card-grid">
+      </div>
+      <div class="control-card-grid control-card-grid-dense">
         <section class="action-card action-card-compact">
           <div class="action-card-header">
             <div>
               <p class="eyebrow">Bootstrap</p>
               <h3 class="action-card-title">安装 / 升级 / 重装</h3>
             </div>
-            ${pillHtml(view.installation?.binaryFound ? 'CLI 可用' : 'CLI 缺失', view.installation?.binaryFound ? 'good' : 'bad')}
+            ${pillHtml(view.installation?.binaryFound ? '已接管' : '待安装', view.installation?.binaryFound ? 'good' : 'bad')}
           </div>
-          <p class="action-card-copy">如果 CLI 本体都不稳，后续 gateway、skills、plugins、memory 的问题很多都会是假问题。</p>
-          <p class="command-line">客户端内执行安装脚本与更新命令，不再默认弹出 Terminal。</p>
+          <p class="action-card-copy">如果 Hermes 本体都不稳，后续 gateway、skills、plugins 和 memory 的问题很多都会是假问题。</p>
+          <p class="workspace-inline-meta">客户端内执行安装脚本与更新命令，不再默认弹出 Terminal。</p>
           <div class="toolbar">
-            ${buttonHtml({ action: 'install-cli', label: view.runningDesktopAction === 'diagnostics:install' ? (view.installation?.binaryFound ? '重新安装 CLI…' : '一键安装 CLI…') : (view.installation?.binaryFound ? '重新安装 CLI' : '一键安装 CLI'), kind: 'primary', disabled: state.actionBusy || !view.installation })}
-            ${buttonHtml({ action: 'update-cli', label: view.runningDesktopAction === 'diagnostics:update' ? '升级 CLI…' : '升级 CLI', disabled: state.actionBusy || !view.installation?.binaryFound })}
-            ${buttonHtml({ action: 'navigate-page', label: '进入控制中心', attrs: { 'data-page': 'dashboard' }, disabled: state.actionBusy })}
+            ${buttonHtml({ action: 'install-cli', label: view.runningDesktopAction === 'diagnostics:install' ? '安装中…' : (view.installation?.binaryFound ? '重新安装 Hermes' : '安装 Hermes'), kind: 'primary', disabled: state.actionBusy || !view.installation })}
+            ${buttonHtml({ action: 'update-cli', label: view.runningDesktopAction === 'diagnostics:update' ? '升级中…' : '升级 Hermes', disabled: state.actionBusy || !view.installation?.binaryFound })}
+            ${buttonHtml({ action: 'navigate-page', label: '控制中心', attrs: { 'data-page': 'dashboard' }, disabled: state.actionBusy })}
           </div>
         </section>
         <section class="action-card action-card-compact">
@@ -419,9 +420,9 @@ function renderPage(view) {
             ${pillHtml(view.snapshot?.gateway?.gatewayState ?? 'gateway 待修复', view.snapshot?.gateway?.gatewayState === 'running' ? 'good' : 'warn')}
           </div>
           <p class="action-card-copy">大多数问题先回结构化配置中心和 Gateway 工作台，优先在客户端里完成修正。</p>
-          <p class="command-line">${escapeHtml(view.installation ? `${view.config?.summary.modelProvider || 'provider 未配'} / ${view.config?.summary.modelDefault || 'model 未配'} · gateway ${view.snapshot?.gateway?.gatewayState || 'unknown'}` : '未读取配置摘要')}</p>
+          <p class="workspace-inline-meta">${escapeHtml(view.installation ? `${view.config?.summary.modelProvider || 'provider 未配'} / ${view.config?.summary.modelDefault || 'model 未配'} · gateway ${view.snapshot?.gateway?.gatewayState || 'unknown'}` : '未读取配置摘要')}</p>
           <div class="toolbar">
-            ${buttonHtml({ action: 'goto-config-model', label: '配置中心', kind: 'primary', disabled: state.actionBusy || !view.installation?.binaryFound })}
+            ${buttonHtml({ action: 'goto-config-model', label: '配置工作台', kind: 'primary', disabled: state.actionBusy || !view.installation?.binaryFound })}
             ${buttonHtml({ action: 'goto-config-credentials', label: '凭证 / 通道', disabled: state.actionBusy || !view.installation?.binaryFound })}
             ${buttonHtml({ action: 'goto-gateway-workbench', label: 'Gateway 工作台', disabled: state.actionBusy || !view.installation?.binaryFound })}
           </div>
@@ -434,8 +435,8 @@ function renderPage(view) {
             </div>
             ${pillHtml(enabledToolCount(view.extensions) > 0 ? `${enabledToolCount(view.extensions)} 个 tools` : '能力面待修', enabledToolCount(view.extensions) > 0 ? 'good' : 'warn')}
           </div>
-          <p class="action-card-copy">能力面问题优先回工具、技能、记忆和扩展工作台，不再打开交互式命令面板。</p>
-          <p class="command-line">${escapeHtml(view.installation ? `${view.config?.summary.toolsets.join(', ') || '无 toolsets'} · memory ${view.config?.summary.memoryProvider || 'builtin-file'} · plugins ${pluginsCount(view.extensions)}` : '未读取能力面摘要')}</p>
+          <p class="action-card-copy">能力面问题优先回工具、技能、记忆和扩展工作台，不再回到命令入口。</p>
+          <p class="workspace-inline-meta">${escapeHtml(view.installation ? `${view.config?.summary.toolsets?.join(', ') || '无 toolsets'} · memory ${view.config?.summary.memoryProvider || 'builtin-file'} · plugins ${pluginsCount(view.extensions)}` : '未读取能力面摘要')}</p>
           <div class="toolbar">
             ${buttonHtml({ action: 'goto-config-toolsets', label: 'Toolsets', disabled: state.actionBusy || !view.installation?.binaryFound })}
             ${buttonHtml({ action: 'goto-skills-workbench', label: '技能工作台', disabled: state.actionBusy || !view.installation?.binaryFound })}
@@ -451,8 +452,8 @@ function renderPage(view) {
             </div>
             ${pillHtml(state.combinedWarnings.length === 0 ? '上下文稳定' : `${state.combinedWarnings.length} 条风险`, state.combinedWarnings.length === 0 ? 'good' : 'warn')}
           </div>
-          <p class="action-card-copy">命令结果看不清时，直接回到实际文件和日志最有效，特别适合定位 platform、delivery 和 provider 侧问题。</p>
-          <p class="command-line">${escapeHtml(`${view.config?.configPath || '未读取 config'} · ${view.config?.envPath || '未读取 env'} · ${state.logsDir || '未读取 logs'}`)}</p>
+          <p class="action-card-copy">诊断结果不够清楚时，直接回到实际文件和日志最有效，特别适合定位 platform、delivery 和 provider 侧问题。</p>
+          <p class="workspace-inline-meta">${escapeHtml(`${view.config?.configPath || '未读取 config'} · ${view.config?.envPath || '未读取 env'} · ${state.logsDir || '未读取 logs'}`)}</p>
           <div class="toolbar">
             ${buttonHtml({ action: 'open-home', label: '打开 Home', disabled: state.actionBusy || !view.snapshot })}
             ${buttonHtml({ action: 'open-config', label: '定位 config.yaml', disabled: state.actionBusy || !view.config })}
@@ -484,46 +485,15 @@ function renderPage(view) {
       </section>
     </div>
 
-    <div class="two-column wide-left">
-      <section class="config-section">
-        <div class="config-section-header">
-          <div>
-            <h2 class="config-section-title">排障上下文</h2>
-            <p class="config-section-desc">这里展示的都是当前 profile 的真实本地状态，适合在执行命令前先扫一眼。</p>
-          </div>
-        </div>
-        ${
-          view.snapshot && view.config
-            ? keyValueRowsHtml([
-                { label: '当前 Profile', value: view.snapshot.profileName },
-                { label: '默认模型', value: view.config.summary.modelDefault ?? '—' },
-                { label: '提供商', value: view.config.summary.modelProvider ?? '—' },
-                { label: 'Base URL', value: view.config.summary.modelBaseUrl ?? '—' },
-                { label: '终端后端', value: view.config.summary.terminalBackend ?? '—' },
-                { label: '工作目录', value: view.config.summary.terminalCwd ?? '—' },
-                { label: 'Context Engine', value: view.config.summary.contextEngine ?? '—' },
-                { label: 'Toolsets', value: view.config.summary.toolsets.length ? view.config.summary.toolsets.join(', ') : '—' },
-                { label: '记忆功能', value: String(view.config.summary.memoryEnabled ?? false) },
-                { label: '用户画像', value: String(view.config.summary.userProfileEnabled ?? false) },
-                { label: 'MEMORY / USER 上限', value: `${view.config.summary.memoryCharLimit ?? '—'} / ${view.config.summary.userCharLimit ?? '—'}` },
-                { label: '本地技能数', value: String((view.skills ?? []).length) },
-                { label: '运行工具', value: `${enabledToolCount(view.extensions)} / ${totalToolCount(view.extensions)}` },
-                { label: '插件数', value: String(pluginsCount(view.extensions)) },
-                { label: 'Memory Runtime', value: view.extensions?.memoryRuntime.provider ?? '—' },
-                { label: 'Cron 作业数', value: String((view.cronSnapshot?.jobs ?? []).length) },
-                { label: '远端投递作业', value: String(state.remoteJobs.length) },
-              ])
-            : emptyStateHtml('上下文未就绪', '暂时还没有读取到 dashboard、config 与 cron 摘要。')
-        }
-      </section>
-      <section class="config-section">
+    <div class="workspace-bottom-grid workspace-bottom-grid-dense">
+      <section class="workspace-main-card">
         <div class="config-section-header">
           <div>
             <h2 class="config-section-title">风险与入口</h2>
-            <p class="config-section-desc">先看当前最可能出问题的环节，再跳到更合适的页面或文件。</p>
+            <p class="config-section-desc">先看当前最可能出问题的环节，再决定下钻到配置、网关还是能力工作台。</p>
           </div>
         </div>
-        <div class="health-grid">
+        <div class="health-grid health-grid-dense">
           <section class="health-card">
             <div class="health-card-header">
               <strong>Gateway Delivery</strong>
@@ -536,7 +506,7 @@ function renderPage(view) {
               <strong>Context Engine</strong>
               ${pillHtml(view.config?.summary.contextEngine || '未配置', view.config?.summary.contextEngine ? 'good' : 'warn')}
             </div>
-            <p>Hermes 的上下文编排引擎最好显式可见，这样才能把模型、工具和记忆链路看清楚。</p>
+            <p>上下文编排最好显式可见，这样才能把模型、工具和记忆链路看清楚。</p>
           </section>
           <section class="health-card">
             <div class="health-card-header">
@@ -557,29 +527,28 @@ function renderPage(view) {
           state.combinedWarnings.length > 0
             ? `
               <div class="warning-stack top-gap">
-                ${state.combinedWarnings.map((warning) => `<div class="warning-item">${escapeHtml(warning)}</div>`).join('')}
+                ${state.combinedWarnings.slice(0, 6).map((warning) => `<div class="warning-item">${escapeHtml(warning)}</div>`).join('')}
               </div>
             `
             : emptyStateHtml('当前风险不高', '没有检测到明显的结构性问题，可以先执行能力诊断或直接去日志页看细节。')
         }
       </section>
-    </div>
 
-    <div class="two-column wide-left">
-      <section class="config-section">
+      <section class="workspace-main-card">
         <div class="config-section-header">
           <div>
-            <h2 class="config-section-title">原始输出</h2>
-            <p class="config-section-desc">保留 Hermes 原生命令的 stdout / stderr，方便把客户端动作和底层结果对齐。</p>
+            <h2 class="config-section-title">最近回执</h2>
+            <p class="config-section-desc">保留客户端动作与底层结果对照，方便继续排障时快速回看。</p>
           </div>
         </div>
-        ${commandResultHtml(view.resultPayload, '尚未执行命令', '先从上面的运行诊断或能力诊断里选一项，这里就会保留 Hermes 原始输出。')}
+        ${commandResultHtml(view.resultPayload, '尚未执行诊断', '先从上面的运行诊断或能力诊断里选一项，这里就会保留最近回执。')}
       </section>
-      <section class="config-section">
+
+      <section class="workspace-main-card">
         <div class="config-section-header">
           <div>
-            <h2 class="config-section-title">相关日志预览</h2>
-            <p class="config-section-desc">命令执行后会自动切到更相关的日志类型，帮助你把原始结果和运行期日志串起来看。</p>
+            <h2 class="config-section-title">日志预览</h2>
+            <p class="config-section-desc">诊断后会自动切到更相关的日志类型，帮助你把最近回执和运行期材料串起来看。</p>
           </div>
           <div class="toolbar">
             <select class="select-input" id="diagnostics-log-select">
@@ -599,10 +568,10 @@ function renderPage(view) {
               ${keyValueRowsHtml([
                 { label: '文件', value: view.logPreview.filePath },
                 { label: '返回行数', value: String(view.logPreview.lines.length) },
-                { label: '当前命令', value: lastCommand?.label ?? view.resultPayload?.label ?? '未执行命令' },
+                { label: '最近动作', value: lastCommand?.label ?? view.resultPayload?.label ?? '未执行诊断' },
                 { label: 'Gateway 更新时间', value: formatTimestamp(view.snapshot?.gateway?.updatedAt) },
               ])}
-              <pre class="code-block tall">${escapeHtml(view.logPreview.lines.join('\n') || '没有匹配到日志行。')}</pre>
+              <pre class="code-block diagnostics-log-block">${escapeHtml(view.logPreview.lines.join('\n') || '没有匹配到日志行。')}</pre>
             `
             : emptyStateHtml('暂无日志预览', '切换日志类型或刷新后，这里会展示相关日志尾部内容。')
         }
@@ -840,13 +809,13 @@ function bindEvents(view) {
               view,
               'install',
               'diagnostics:install',
-              view.installation.binaryFound ? '重新安装 CLI' : '一键安装 CLI',
+              view.installation.binaryFound ? '重新安装 Hermes' : '安装 Hermes',
             );
           }
           return;
         case 'update-cli':
           if (view.installation) {
-            await runInstallationAction(view, 'update', 'diagnostics:update', '升级 CLI');
+            await runInstallationAction(view, 'update', 'diagnostics:update', '升级 Hermes');
           }
           return;
         case 'goto-config-model':

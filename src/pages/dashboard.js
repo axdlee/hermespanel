@@ -42,14 +42,6 @@ function currentProfileSummary(profile) {
   return getPanelState().profiles?.profiles.find((item) => item.name === profile) ?? null;
 }
 
-function dependencyTone(dependency) {
-  if (dependency?.found) {
-    return 'good';
-  }
-
-  return ['hermes', 'curl', 'git', 'python3'].includes(dependency?.name) ? 'bad' : 'warn';
-}
-
 function workspaceArtifacts(data, installation) {
   return [
     { key: 'home', label: 'Hermes Home', path: installation.hermesHome, exists: installation.hermesHomeExists },
@@ -63,7 +55,7 @@ function workspaceArtifacts(data, installation) {
 
 function renderSkeleton(view) {
   view.page.innerHTML = `
-    <div class="page-header">
+    <div class="page-header page-header-compact">
       <h1 class="page-title">仪表盘</h1>
       <p class="page-desc">正在同步 Hermes 安装、网关、工作区和最近运行材料。</p>
     </div>
@@ -85,7 +77,7 @@ function renderPage(view) {
 
   if (view.error || !view.dashboard || !view.installation) {
     view.page.innerHTML = `
-      <div class="page-header">
+      <div class="page-header page-header-compact">
         <h1 class="page-title">仪表盘</h1>
         <p class="page-desc">Hermes 运行状态与治理入口。</p>
       </div>
@@ -118,74 +110,56 @@ function renderPage(view) {
   const primaryAlias = profileSummary?.aliases.find((item) => item.isPrimary) ?? profileSummary?.aliases[0] ?? null;
   const sessions = dashboard.recentSessions ?? [];
   const toolsetsLine = (dashboard.config.toolsets ?? []).join(', ') || '—';
+  const missingDependencies = installation.dependencies.filter((item) => !item.found);
+  const missingDependencyLine = missingDependencies.length
+    ? missingDependencies.map((item) => item.name).join('、')
+    : '依赖骨架已齐备';
+  const missingArtifactList = artifacts.filter((item) => !item.exists);
+  const artifactSummaryLine = missingArtifactList.length
+    ? missingArtifactList.map((item) => item.label).join('、')
+    : '关键文件与日志目录已齐备';
+  const workspaceTone = warnings.length > 0 || missingDependencies.length > 0 || missingArtifacts > 0 ? 'warn' : 'good';
   const primaryActionLabel = installation.binaryFound
     ? (gatewayRunning ? '重启 Gateway' : '启动 Gateway')
-    : '安装 CLI';
+    : '安装 Hermes';
 
   view.page.innerHTML = `
-    <div class="page-header">
+    <div class="page-header page-header-compact">
       <div class="panel-title-row">
         <h1 class="page-title">仪表盘</h1>
         ${infoTipHtml('首页只保留高频治理入口、最近运行材料和少量系统边界动作，避免把配置、技能、网关按钮在多个区域重复铺开。')}
       </div>
-      <p class="page-desc">Hermes 运行与治理总览。</p>
+      <p class="page-desc">更像客户端控制台首页，而不是命令面板入口页。</p>
     </div>
 
-    <div class="stat-cards">
-      <section class="stat-card">
-        <div class="stat-card-header">
-          <span class="stat-card-label">Gateway</span>
-          ${statusDotHtml(gatewayRunning ? 'running' : 'warning')}
-        </div>
-        <div class="stat-card-value">${gatewayRunning ? '运行中' : '待启动'}</div>
-        <div class="stat-card-meta">${gatewayRunning ? `PID ${escapeHtml(dashboard.gateway?.pid ?? '—')} · ${escapeHtml(dashboard.gateway?.activeAgents ?? 0)} 个活跃 Agent` : '当前还没有检测到运行中的 Gateway 状态。'}</div>
+    <section class="workspace-summary-strip workspace-summary-strip-dense">
+      <section class="summary-mini-card">
+        <span class="summary-mini-label">Gateway</span>
+        <strong class="summary-mini-value">${escapeHtml(gatewayRunning ? '运行中' : '待启动')}</strong>
+        <span class="summary-mini-meta">${escapeHtml(gatewayRunning ? `PID ${dashboard.gateway?.pid ?? '—'} · ${dashboard.gateway?.activeAgents ?? 0} 个活跃 Agent` : '当前还没有检测到运行中的 Gateway 状态')}</span>
       </section>
-      <section class="stat-card">
-        <div class="stat-card-header">
-          <span class="stat-card-label">CLI / Version</span>
-          ${statusDotHtml(installation.binaryFound ? 'running' : 'stopped')}
-        </div>
-        <div class="stat-card-value">${escapeHtml(installation.binaryFound ? versionLine : '未安装 Hermes CLI')}</div>
-        <div class="stat-card-meta">${escapeHtml(installation.binaryFound ? installation.hermesBinary || 'CLI 已就绪' : '安装后才能接管模型、Gateway 与技能治理。')}</div>
+      <section class="summary-mini-card">
+        <span class="summary-mini-label">安装接管</span>
+        <strong class="summary-mini-value">${escapeHtml(installation.binaryFound ? versionLine : '待安装')}</strong>
+        <span class="summary-mini-meta">${escapeHtml(installation.binaryFound ? (installation.hermesBinary || 'Hermes 可执行组件已接管') : '安装后才能继续接管模型、Gateway 与能力面')}</span>
       </section>
-      <section class="stat-card">
-        <div class="stat-card-header">
-          <span class="stat-card-label">Model</span>
-          ${statusDotHtml(modelReady ? 'running' : 'warning')}
-        </div>
-        <div class="stat-card-value">${escapeHtml(modelReady ? `${dashboard.config.modelProvider} / ${dashboard.config.modelDefault}` : '待配置')}</div>
-        <div class="stat-card-meta">${escapeHtml(dashboard.config.modelBaseUrl || '建议先补齐 provider、默认模型和 key。')}</div>
+      <section class="summary-mini-card">
+        <span class="summary-mini-label">模型链路</span>
+        <strong class="summary-mini-value">${escapeHtml(modelReady ? `${dashboard.config.modelProvider} / ${dashboard.config.modelDefault}` : '待补齐')}</strong>
+        <span class="summary-mini-meta">${escapeHtml(dashboard.config.modelBaseUrl || '建议先补齐 provider、默认模型与 key')}</span>
       </section>
-      <section class="stat-card">
-        <div class="stat-card-header">
-          <span class="stat-card-label">Workspace</span>
-        </div>
-        <div class="stat-card-value">${escapeHtml(`${dashboard.counts.sessions} 会话 / ${dashboard.counts.skills} 技能`)}</div>
-        <div class="stat-card-meta">${escapeHtml(`Cron ${dashboard.counts.cronJobs} · Alias ${primaryAlias?.name || '未创建'}`)}</div>
+      <section class="summary-mini-card">
+        <span class="summary-mini-label">工作区</span>
+        <strong class="summary-mini-value">${escapeHtml(`${dashboard.counts.sessions} 会话 / ${dashboard.counts.skills} 技能`)}</strong>
+        <span class="summary-mini-meta">${escapeHtml(`Cron ${dashboard.counts.cronJobs} · Alias ${primaryAlias?.name || '未创建'}`)}</span>
       </section>
-      <section class="stat-card">
-        <div class="stat-card-header">
-          <span class="stat-card-label">Dependencies</span>
-          ${statusDotHtml(dependencyReadyCount === installation.dependencies.length ? 'running' : 'warning')}
-        </div>
-        <div class="stat-card-value">${escapeHtml(`${dependencyReadyCount}/${installation.dependencies.length}`)}</div>
-        <div class="stat-card-meta">${dependencyReadyCount === installation.dependencies.length ? 'CLI 周边依赖已齐备。' : '仍有缺失依赖，建议继续做 doctor。'}</div>
-      </section>
-      <section class="stat-card">
-        <div class="stat-card-header">
-          <span class="stat-card-label">Artifacts</span>
-          ${statusDotHtml(missingArtifacts === 0 ? 'running' : 'warning')}
-        </div>
-        <div class="stat-card-value">${escapeHtml(missingArtifacts === 0 ? '工作区完整' : `缺失 ${missingArtifacts} 项`)}</div>
-        <div class="stat-card-meta">${escapeHtml(`Home ${installation.hermesHomeExists ? 'Ready' : 'Missing'} · Logs ${installation.logsDirExists ? 'Ready' : 'Missing'}`)}</div>
-      </section>
-    </div>
+    </section>
 
     <div class="quick-actions">
       ${buttonHtml({
         action: 'quick-primary',
         label: view.runningAction === 'installation:install'
-          ? (installation.binaryFound ? '重装中…' : '安装中…')
+          ? '安装中…'
           : view.runningAction === 'gateway:start'
             ? '启动中…'
             : view.runningAction === 'gateway:restart'
@@ -194,232 +168,237 @@ function renderPage(view) {
         kind: 'primary',
         disabled: Boolean(view.runningAction),
       })}
-      ${buttonHtml({ action: 'refresh', label: view.refreshing ? '同步中…' : '刷新状态', disabled: view.refreshing || Boolean(view.runningAction) })}
-      ${buttonHtml({ action: 'goto-config-model', label: '配置中心' })}
+      ${buttonHtml({ action: 'refresh', label: view.refreshing ? '同步中…' : '刷新', disabled: view.refreshing || Boolean(view.runningAction) })}
+      ${buttonHtml({ action: 'goto-config-model', label: '配置工作台' })}
       ${buttonHtml({ action: 'goto-gateway', label: 'Gateway 工作台' })}
-      ${buttonHtml({ action: 'goto-skills', label: '技能工作台' })}
-      ${buttonHtml({ action: 'goto-logs', label: '日志查看' })}
-      ${buttonHtml({ action: 'doctor', label: '健康检查', disabled: Boolean(view.runningAction) || !installation.binaryFound })}
     </div>
 
-    <section class="config-section">
-      <div class="config-section-header">
-        <div>
-          <div class="panel-title-row">
-            <h2 class="config-section-title">工作台入口</h2>
-            ${infoTipHtml('像 clawpanel 一样，首页优先承担导航和状态聚合。需要深操作时再下钻到对应工作台，而不是在首页重复实现整套功能。')}
+    <div class="compact-overview-grid compact-overview-grid-dense">
+      <section class="shell-card shell-card-dense">
+        <div class="shell-card-header">
+          <div>
+            <div class="panel-title-row">
+              <strong>配置接管</strong>
+              ${infoTipHtml('模型、凭证、toolsets 和 provider 继续放到配置工作台里做结构化编辑，首页只保留摘要和跳转。')}
+            </div>
+            <p class="shell-card-copy">把模型链路、凭证与运行环境汇聚到一张卡里，避免首页重复铺太多入口。</p>
           </div>
-          <p class="config-section-desc">高频入口集中，重复动作收口。</p>
+          ${pillHtml(modelReady ? '链路已配' : '待补齐', modelReady ? 'good' : 'warn')}
         </div>
-      </div>
-      <div class="overview-grid dashboard-entry-grid">
-        <section class="overview-card">
-          <div class="overview-card-body">
+        ${keyValueRowsHtml([
+          { label: 'Provider', value: dashboard.config.modelProvider || '未配置' },
+          { label: '默认模型', value: dashboard.config.modelDefault || '未配置' },
+          { label: 'Base URL', value: dashboard.config.modelBaseUrl || '—' },
+          { label: 'Toolsets', value: toolsetsLine },
+        ])}
+        <div class="toolbar top-gap">
+          ${buttonHtml({ action: 'goto-config-model', label: '模型配置', kind: 'primary' })}
+          ${buttonHtml({ action: 'goto-config-credentials', label: '凭证 / 通道' })}
+          ${buttonHtml({ action: 'goto-config-toolsets', label: 'Toolsets' })}
+        </div>
+      </section>
+      <section class="shell-card shell-card-dense">
+        <div class="shell-card-header">
+          <div>
             <div class="panel-title-row">
-              <div class="overview-card-title">模型 / 凭证</div>
-              ${infoTipHtml('模型 provider、默认模型、API key、平台 token 和 toolsets 继续放到配置中心做结构化编辑。')}
+              <strong>Gateway 接管</strong>
+              ${infoTipHtml('Gateway 启停、平台接入和远端投递继续在专门工作台完成，首页只保留当前链路判断和下钻入口。')}
             </div>
-            <div class="overview-card-value">${escapeHtml(modelReady ? `${dashboard.config.modelProvider} / ${dashboard.config.modelDefault}` : '待补齐模型链路')}</div>
-            <div class="overview-card-meta">${escapeHtml(`${dashboard.config.modelBaseUrl || 'base url 未配置'} · toolsets ${toolsetsLine}`)}</div>
-            <div class="overview-card-actions toolbar">
-              ${buttonHtml({ action: 'goto-config-model', label: '模型配置', kind: 'primary' })}
-              ${buttonHtml({ action: 'goto-config-credentials', label: '凭证 / 通道' })}
-              ${buttonHtml({ action: 'goto-config-toolsets', label: 'Toolsets' })}
-            </div>
+            <p class="shell-card-copy">把 service、平台通道和日志联调后置到 Gateway 工作台，首页不再重复堆平台卡片。</p>
           </div>
-        </section>
-        <section class="overview-card">
-          <div class="overview-card-body">
+          ${pillHtml(gatewayRunning ? '运行中' : '待启动', gatewayRunning ? 'good' : 'warn')}
+        </div>
+        ${keyValueRowsHtml([
+          { label: 'PID', value: String(dashboard.gateway?.pid ?? '—') },
+          { label: '活跃 Agent', value: String(dashboard.gateway?.activeAgents ?? 0) },
+          { label: '已配平台', value: String(dashboard.counts.configuredPlatforms) },
+          { label: '最近日志', value: view.logName || 'gateway' },
+        ])}
+        <div class="toolbar top-gap">
+          ${buttonHtml({ action: 'goto-gateway', label: 'Gateway 工作台', kind: 'primary' })}
+          ${buttonHtml({ action: 'goto-diagnostics', label: '系统诊断' })}
+          ${buttonHtml({ action: 'goto-logs', label: '查看日志' })}
+        </div>
+      </section>
+      <section class="shell-card shell-card-dense">
+        <div class="shell-card-header">
+          <div>
             <div class="panel-title-row">
-              <div class="overview-card-title">Gateway / 通道</div>
-              ${infoTipHtml('Gateway 启停、平台 token、home channel 和 service 接管统一回 Gateway 工作台，不在首页重复铺平台卡片。')}
+              <strong>能力工作台</strong>
+              ${infoTipHtml('Skills、Plugins、Memory 和运行工具面继续保留在对应工作台，不在首页重复放功能块。')}
             </div>
-            <div class="overview-card-value">${escapeHtml(gatewayRunning ? `运行中 / PID ${dashboard.gateway?.pid ?? '—'}` : '待启动')}</div>
-            <div class="overview-card-meta">${escapeHtml(`${dashboard.counts.configuredPlatforms} 个平台已配置 · active agents ${dashboard.gateway?.activeAgents ?? 0}`)}</div>
-            <div class="overview-card-actions toolbar">
-              ${buttonHtml({ action: 'goto-gateway', label: 'Gateway 工作台', kind: 'primary' })}
-              ${buttonHtml({ action: 'goto-logs', label: '查看日志' })}
-              ${buttonHtml({ action: 'goto-diagnostics', label: '系统诊断' })}
-            </div>
+            <p class="shell-card-copy">能力面保留摘要，真正治理动作继续落到技能、扩展和记忆工作台中完成。</p>
           </div>
-        </section>
-        <section class="overview-card">
-          <div class="overview-card-body">
-            <div class="panel-title-row">
-              <div class="overview-card-title">Skills / Plugins / Memory</div>
-              ${infoTipHtml('技能目录、插件安装、memory provider 和工具运行态都已经有对应工作台，首页只保留总览和跳转。')}
-            </div>
-            <div class="overview-card-value">${escapeHtml(`${dashboard.counts.skills} 个技能 / ${dashboard.counts.cronJobs} 个作业`)}</div>
-            <div class="overview-card-meta">${escapeHtml(`sessions ${dashboard.counts.sessions} · toolsets ${toolsetsLine}`)}</div>
-            <div class="overview-card-actions toolbar">
-              ${buttonHtml({ action: 'goto-skills', label: '技能工作台', kind: 'primary' })}
-              ${buttonHtml({ action: 'goto-extensions', label: '扩展能力' })}
-              ${buttonHtml({ action: 'goto-memory', label: '记忆工作台' })}
-            </div>
-          </div>
-        </section>
-        <section class="overview-card">
-          <div class="overview-card-body">
-            <div class="panel-title-row">
-              <div class="overview-card-title">Profile / Workspace</div>
-              ${infoTipHtml('把当前 profile、别名和工作区入口放在一张卡里，避免这些路径信息在多个区域重复出现。')}
-            </div>
-            <div class="overview-card-value">${escapeHtml(`${view.profile}${primaryAlias ? ` / ${primaryAlias.name}` : ''}`)}</div>
-            <div class="overview-card-meta">${escapeHtml(`Home ${installation.hermesHomeExists ? 'ready' : 'missing'} · logs ${installation.logsDirExists ? 'ready' : 'missing'} · 会话 ${dashboard.counts.sessions}`)}</div>
-            <div class="overview-card-actions toolbar">
-              ${buttonHtml({ action: 'goto-profiles', label: 'Profile 管理', kind: 'primary' })}
-              ${buttonHtml({ action: 'open-home', label: '打开 Home', disabled: Boolean(view.runningAction) || !installation.hermesHomeExists })}
-              ${buttonHtml({ action: 'open-logs', label: '打开 Logs', disabled: Boolean(view.runningAction) || !installation.logsDirExists })}
-            </div>
-          </div>
-        </section>
-      </div>
-    </section>
+          ${pillHtml(dashboard.counts.skills > 0 ? '已接管' : '待补齐', dashboard.counts.skills > 0 ? 'good' : 'warn')}
+        </div>
+        ${keyValueRowsHtml([
+          { label: '技能', value: String(dashboard.counts.skills) },
+          { label: 'Cron 作业', value: String(dashboard.counts.cronJobs) },
+          { label: '会话', value: String(dashboard.counts.sessions) },
+          { label: 'Alias', value: primaryAlias?.name || '未创建' },
+        ])}
+        <div class="toolbar top-gap">
+          ${buttonHtml({ action: 'goto-skills', label: '技能工作台', kind: 'primary' })}
+          ${buttonHtml({ action: 'goto-extensions', label: '扩展能力' })}
+          ${buttonHtml({ action: 'goto-memory', label: '记忆工作台' })}
+        </div>
+      </section>
+    </div>
 
-    <div class="two-column wide-left">
-      <div class="page-stack">
-        <section class="config-section">
-          <div class="config-section-header">
+    <div class="workspace-shell workspace-shell-dense">
+      <aside class="workspace-rail">
+        <div class="workspace-rail-header">
+          <div>
+            <strong>运行边界</strong>
+            <p class="helper-text">把依赖、关键文件和高风险提醒收在侧栏，主区只保留高价值工作面。</p>
+          </div>
+          ${pillHtml(workspaceTone === 'good' ? '稳定' : '待关注', workspaceTone)}
+        </div>
+        ${keyValueRowsHtml([
+          { label: '当前 Profile', value: view.profile },
+          { label: '主别名', value: primaryAlias?.name || '未创建' },
+          { label: '依赖就绪', value: `${dependencyReadyCount}/${installation.dependencies.length}` },
+          { label: '材料缺失', value: missingArtifacts === 0 ? '0' : String(missingArtifacts) },
+        ])}
+        <section class="workspace-rail-section">
+          <div class="workspace-rail-section-header">
+            <span class="workspace-rail-section-title">风险雷达</span>
+            ${pillHtml(missingDependencies.length > 0 ? `${missingDependencies.length} 项缺失` : '已齐备', missingDependencies.length > 0 ? 'warn' : 'good')}
+          </div>
+          <div class="list-stack">
+            <div class="list-card">
+              <div class="list-card-title">
+                <strong>依赖骨架</strong>
+                ${pillHtml(missingDependencies.length > 0 ? '待修复' : '已齐备', missingDependencies.length > 0 ? 'warn' : 'good')}
+              </div>
+              <p>${escapeHtml(missingDependencyLine)}</p>
+            </div>
+            <div class="list-card">
+              <div class="list-card-title">
+                <strong>工作区材料</strong>
+                ${pillHtml(missingArtifactList.length > 0 ? '有缺口' : '完整', missingArtifactList.length > 0 ? 'warn' : 'good')}
+              </div>
+              <p>${escapeHtml(artifactSummaryLine)}</p>
+            </div>
+            <div class="list-card">
+              <div class="list-card-title">
+                <strong>结构性提醒</strong>
+                ${pillHtml(warnings.length > 0 ? `${warnings.length} 条` : '无新增', warnings.length > 0 ? 'warn' : 'good')}
+              </div>
+              <p>${escapeHtml(warnings[0] || '当前没有新的结构性阻塞项，适合继续做配置或联调。')}</p>
+            </div>
+          </div>
+        </section>
+        <section class="workspace-rail-section">
+          <div class="workspace-rail-section-header">
+            <span class="workspace-rail-section-title">继续动作</span>
+            ${pillHtml(gatewayRunning ? 'Gateway 就绪' : 'Gateway 待启动', gatewayRunning ? 'good' : 'neutral')}
+          </div>
+          <div class="workspace-rail-toolbar workspace-rail-toolbar-muted">
+            <div class="workspace-rail-toolbar-grid">
+              ${buttonHtml({ action: 'goto-diagnostics', label: '系统诊断' })}
+              ${buttonHtml({ action: 'doctor', label: '健康检查', disabled: Boolean(view.runningAction) || !installation.binaryFound })}
+              ${buttonHtml({ action: 'goto-profiles', label: 'Profile 管理' })}
+              ${buttonHtml({ action: 'open-home', label: '打开 Home', disabled: Boolean(view.runningAction) || !installation.hermesHomeExists })}
+              ${buttonHtml({ action: 'goto-logs', label: '日志页' })}
+              ${buttonHtml({ action: 'open-logs', label: '打开日志', disabled: Boolean(view.runningAction) || !installation.logsDirExists })}
+            </div>
+          </div>
+        </section>
+      </aside>
+
+      <div class="workspace-main">
+        <section class="workspace-main-card">
+          <div class="workspace-main-header">
             <div>
               <div class="panel-title-row">
-                <h2 class="config-section-title">最近动作</h2>
-                ${infoTipHtml('无论是内部执行的安装、Gateway 控制，还是其他治理动作，最近一次原始结果都会留在这里。')}
+                <strong>最近动作回执</strong>
+                ${infoTipHtml('首页只保留最近一次动作回执，原始细节继续留给诊断页和日志页，避免首页成为命令结果墙。')}
               </div>
-              <p class="config-section-desc">统一回看原始输出，不额外铺说明。</p>
+              <p class="workspace-main-copy">安装、Gateway 控制和桌面动作都会在这里保留最近一次回执。</p>
             </div>
             ${buttonHtml({ action: 'goto-diagnostics', label: '进入诊断页' })}
           </div>
-          ${commandResultHtml(view.lastResult, '暂无动作输出', '先执行任一控制动作，这里会保留 Hermes 的原始命令结果。')}
+          ${commandResultHtml(view.lastResult, '暂无最近动作', '先从上方入口执行一次动作，这里会保留最近回执。')}
         </section>
 
-        <section class="config-section">
-          <div class="config-section-header">
-            <div>
-              <h2 class="config-section-title">最近日志</h2>
-              <p class="config-section-desc">先看最近日志，再决定是否继续下钻。</p>
-            </div>
-            <div class="toolbar">
-              ${buttonHtml({ action: 'goto-logs', label: '进入日志页' })}
-              ${buttonHtml({ action: 'open-logs', label: '打开日志目录', disabled: Boolean(view.runningAction) || !installation.logsDirExists })}
-            </div>
-          </div>
-          <div class="log-viewer">${view.logPreview?.lines?.length ? escapeHtml(view.logPreview.lines.join('\n')) : escapeHtml(view.logError || '当前没有读取到最近日志。')}</div>
-        </section>
-      </div>
-
-      <div class="page-stack">
-        <section class="config-section">
-          <div class="config-section-header">
-            <div>
-              <div class="panel-title-row">
-                <h2 class="config-section-title">工作区与风险</h2>
-                ${infoTipHtml('把依赖、关键文件和真正影响闭环的提醒放在右侧，避免长说明挤占主操作区。')}
+        <div class="workspace-bottom-grid workspace-bottom-grid-dense">
+          <section class="workspace-main-card">
+            <div class="workspace-main-header">
+              <div>
+                <strong>最近日志</strong>
+                <p class="workspace-main-copy">先看最近材料，再决定要不要下钻到日志页或诊断页。</p>
               </div>
-              <p class="config-section-desc">缺什么、丢了什么，一眼可见。</p>
+              <div class="toolbar">
+                ${buttonHtml({ action: 'goto-logs', label: '查看日志' })}
+                ${buttonHtml({ action: 'open-logs', label: '打开目录', disabled: Boolean(view.runningAction) || !installation.logsDirExists })}
+              </div>
             </div>
-          </div>
-          <div class="service-stack">
-            ${installation.dependencies.map((dependency) => `
-              <div class="service-card">
-                <div class="service-info">
-                  ${pillHtml(dependency.found ? '已发现' : '缺失', dependencyTone(dependency))}
-                  <div>
-                    <div class="service-name">${escapeHtml(dependency.name)}</div>
-                    <div class="service-desc">${escapeHtml(dependency.note)}</div>
-                    <div class="service-desc service-path">${escapeHtml(dependency.path || '未检测到可执行路径')}</div>
+            <div class="log-viewer">${view.logPreview?.lines?.length ? escapeHtml(view.logPreview.lines.join('\n')) : escapeHtml(view.logError || '当前没有读取到最近日志。')}</div>
+          </section>
+
+          <section class="workspace-main-card">
+            <div class="workspace-main-header">
+              <div>
+                <strong>最近会话</strong>
+                <p class="workspace-main-copy">保留少量最近 session，首页不再铺完整会话管理界面。</p>
+              </div>
+              <div class="toolbar">
+                ${buttonHtml({ action: 'goto-sessions', label: '会话页' })}
+                ${buttonHtml({ action: 'goto-gateway', label: 'Gateway' })}
+              </div>
+            </div>
+            ${
+              sessions.length
+                ? `
+                  <div class="session-list session-list-compact">
+                    ${sessions.slice(0, 4).map((session) => `
+                      <div class="session-row">
+                        <div class="session-row-header">
+                          <strong class="session-key">${escapeHtml(session.title || session.id)}</strong>
+                          ${session.model ? pillHtml(session.model, 'neutral') : ''}
+                          ${pillHtml(session.source || 'session', 'neutral')}
+                        </div>
+                        <div class="service-desc">${escapeHtml(truncate(session.preview || '无预览内容', 128))}</div>
+                        <div class="session-row-meta">
+                          <span>${escapeHtml(session.id)}</span>
+                          <span>${escapeHtml(formatEpoch(session.startedAt))}</span>
+                          <span>${escapeHtml(`${session.messageCount} 条消息 / ${session.toolCallCount} 次工具`)}</span>
+                        </div>
+                      </div>
+                    `).join('')}
                   </div>
-                </div>
-              </div>
-            `).join('')}
-          </div>
-          <div class="artifact-grid artifact-grid-compact">
-            ${artifacts.map((artifact) => `
-              <div class="artifact-card">
-                <div class="artifact-card-header">
-                  <strong>${escapeHtml(artifact.label)}</strong>
-                  ${pillHtml(artifact.exists ? '存在' : '缺失', artifact.exists ? 'good' : 'warn')}
-                </div>
-                <p>${escapeHtml(artifact.path)}</p>
-              </div>
-            `).join('')}
-          </div>
-          ${warnings.length > 0 ? `
-            <div class="warning-stack top-gap">
-              ${warnings.slice(0, 4).map((warning) => `<div class="warning-item">${escapeHtml(warning)}</div>`).join('')}
-            </div>
-          ` : ''}
-        </section>
+                `
+                : emptyStateHtml('暂无最近会话', '待 Hermes 产生更多 session 后，这里会自动显示最近轨迹。')
+            }
+          </section>
 
-        <section class="config-section">
-          <div class="config-section-header">
-            <div>
-              <h2 class="config-section-title">最近会话</h2>
-              <p class="config-section-desc">从控制面板直接继续追 session。</p>
-            </div>
-            <div class="toolbar">
-              ${buttonHtml({ action: 'goto-sessions', label: '进入会话页' })}
-              ${buttonHtml({ action: 'goto-gateway', label: '进入 Gateway' })}
-            </div>
-          </div>
-          ${
-            sessions.length
-              ? `
-                <div class="session-list session-list-compact">
-                  ${sessions.slice(0, 6).map((session) => `
-                    <div class="session-row">
-                      <div class="session-row-header">
-                        <strong class="session-key">${escapeHtml(session.title || session.id)}</strong>
-                        ${session.model ? pillHtml(session.model, 'neutral') : ''}
-                        ${pillHtml(session.source || 'session', 'neutral')}
-                      </div>
-                      <div class="service-desc">${escapeHtml(truncate(session.preview || '无预览内容', 128))}</div>
-                      <div class="session-row-meta">
-                        <span>${escapeHtml(session.id)}</span>
-                        <span>${escapeHtml(formatEpoch(session.startedAt))}</span>
-                        <span>${escapeHtml(`${session.messageCount} 条消息 / ${session.toolCallCount} 次工具`)}</span>
-                      </div>
-                    </div>
-                  `).join('')}
+          <section class="workspace-main-card">
+            <div class="workspace-main-header">
+              <div>
+                <div class="panel-title-row">
+                  <strong>安装边界</strong>
+                  ${infoTipHtml('这里专门收纳真正触及系统边界的动作，例如安装、升级和卸载；默认仍在客户端内执行，不再把你甩去外部 Terminal。')}
                 </div>
-              `
-              : emptyStateHtml('暂无最近会话', '待 Hermes 产生更多 session 后，这里会自动显示最近轨迹。')
-          }
-        </section>
+                <p class="workspace-main-copy">保留必要的安装与更新动作，但不再占据首页主要视觉位置。</p>
+              </div>
+              ${pillHtml(installation.binaryFound ? '已接管' : '待安装', installation.binaryFound ? 'good' : 'warn')}
+            </div>
+            ${keyValueRowsHtml([
+              { label: '安装', value: installation.quickInstallCommand },
+              { label: '升级', value: installation.updateCommand },
+              { label: '卸载', value: 'hermes uninstall --yes' },
+              { label: '当前版本', value: versionLine },
+            ])}
+            <div class="toolbar top-gap">
+              ${buttonHtml({ action: 'install-cli', label: view.runningAction === 'installation:install' ? '安装中…' : (installation.binaryFound ? '重新安装 Hermes' : '安装 Hermes'), kind: 'primary', disabled: Boolean(view.runningAction) })}
+              ${buttonHtml({ action: 'update-cli', label: view.runningAction === 'installation:update' ? '升级中…' : '升级 Hermes', disabled: Boolean(view.runningAction) || !installation.binaryFound })}
+              ${buttonHtml({ action: 'uninstall-cli', label: view.runningAction === 'installation:uninstall' ? '卸载中…' : '卸载 Hermes', kind: 'danger', disabled: Boolean(view.runningAction) || !installation.binaryFound })}
+            </div>
+          </section>
+        </div>
       </div>
     </div>
-
-    <section class="config-section">
-      <div class="config-section-header">
-        <div>
-          <div class="panel-title-row">
-            <h2 class="config-section-title">系统边界动作</h2>
-            ${infoTipHtml('这里专门收纳真正触及系统边界的动作，例如 CLI 安装、升级和卸载。它们仍由面板内执行，但不再占据首页主操作位。')}
-          </div>
-          <p class="config-section-desc">仍然可控，但不喧宾夺主。</p>
-        </div>
-        ${pillHtml(installation.binaryFound ? 'CLI 就绪' : 'CLI 缺失', installation.binaryFound ? 'good' : 'warn')}
-      </div>
-      <section class="shell-card shell-card-muted">
-        <div class="shell-card-header">
-          <div>
-            <strong>CLI 生命周期</strong>
-            <p class="shell-card-copy">默认在客户端内执行，不再直接把安装和升级甩给外部 Terminal。</p>
-          </div>
-          ${pillHtml(view.lastResult?.label || '待执行', view.lastResult?.result?.success ? 'good' : view.lastResult ? 'warn' : 'neutral')}
-        </div>
-        ${keyValueRowsHtml([
-          { label: '安装', value: installation.quickInstallCommand },
-          { label: '升级', value: installation.updateCommand },
-          { label: '卸载', value: 'hermes uninstall --yes' },
-          { label: '当前版本', value: versionLine },
-        ])}
-        <div class="toolbar top-gap">
-          ${buttonHtml({ action: 'install-cli', label: view.runningAction === 'installation:install' ? (installation.binaryFound ? '重装中…' : '安装中…') : (installation.binaryFound ? '重装 CLI' : '安装 CLI'), kind: 'primary', disabled: Boolean(view.runningAction) })}
-          ${buttonHtml({ action: 'update-cli', label: view.runningAction === 'installation:update' ? '升级中…' : '升级 CLI', disabled: Boolean(view.runningAction) || !installation.binaryFound })}
-          ${buttonHtml({ action: 'uninstall-cli', label: view.runningAction === 'installation:uninstall' ? '卸载中…' : '卸载 CLI', kind: 'danger', disabled: Boolean(view.runningAction) || !installation.binaryFound })}
-        </div>
-      </section>
-    </section>
   `;
 
   bindEvents(view);
@@ -608,23 +587,23 @@ function bindEvents(view) {
           if (installation.binaryFound) {
             await runGatewayAction(view, dashboard?.gateway?.gatewayState === 'running' ? 'restart' : 'start', dashboard?.gateway?.gatewayState === 'running' ? '重启 Gateway' : '启动 Gateway');
           } else {
-            await runInstallationAction(view, 'install', '安装 CLI');
+            await runInstallationAction(view, 'install', '安装 Hermes');
           }
           return;
         case 'doctor':
           await runDiagnostic(view, 'doctor', '健康检查');
           return;
         case 'install-cli':
-          await runInstallationAction(view, 'install', installation.binaryFound ? '重装 CLI' : '安装 CLI');
+          await runInstallationAction(view, 'install', installation.binaryFound ? '重新安装 Hermes' : '安装 Hermes');
           return;
         case 'update-cli':
-          await runInstallationAction(view, 'update', '升级 CLI');
+          await runInstallationAction(view, 'update', '升级 Hermes');
           return;
         case 'uninstall-cli':
-          if (!window.confirm('确定卸载 Hermes CLI 吗？这会移除当前安装的命令行客户端。')) {
+          if (!window.confirm('确定卸载 Hermes 运行组件吗？这会移除当前安装的命令行主体。')) {
             return;
           }
-          await runInstallationAction(view, 'uninstall', '卸载 CLI');
+          await runInstallationAction(view, 'uninstall', '卸载 Hermes');
           return;
         case 'open-home':
           await runFinderAction(view, 'finder:home', '打开 Hermes Home', installation.hermesHome, false);

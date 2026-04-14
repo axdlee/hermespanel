@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Hermes Agent 桌面管理客户端",
   "scripts": {
-    "dev": "vite --host 127.0.0.1 --port 1420",
+    "dev": "npm run dev:vite",
+    "dev:vite": "vite --host 127.0.0.1 --port 1420",
     "build": "tsc && vite build",
     "check": "npm run build && cargo test --manifest-path src-tauri/Cargo.toml",
     "preview": "vite preview --host 127.0.0.1 --port 1420",

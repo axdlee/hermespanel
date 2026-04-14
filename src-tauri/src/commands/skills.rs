@@ -1,6 +1,7 @@
 use crate::application::hermes_manager::HermesManager;
 use crate::models::{
-    CommandRunResult, SkillCreateRequest, SkillFileDetail, SkillItem, SkillSaveRequest,
+    CommandRunResult, SkillCreateRequest, SkillFileDetail, SkillImportRequest, SkillImportResult,
+    SkillItem, SkillSaveRequest,
 };
 
 #[tauri::command]
@@ -37,6 +38,16 @@ pub fn create_skill(
 ) -> Result<SkillFileDetail, String> {
     HermesManager::new(profile.as_deref())
         .and_then(|manager| manager.create_skill(&request))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn import_skill(
+    request: SkillImportRequest,
+    profile: Option<String>,
+) -> Result<SkillImportResult, String> {
+    HermesManager::new(profile.as_deref())
+        .and_then(|manager| manager.import_skill(&request))
         .map_err(|error| error.to_string())
 }
 

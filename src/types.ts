@@ -182,6 +182,20 @@ export interface PluginCatalogItem {
   installed: boolean;
 }
 
+export interface PluginImportRequest {
+  sourcePath: string;
+  category: string;
+  overwrite: boolean;
+}
+
+export interface PluginImportResult {
+  imported: PluginCatalogItem;
+  sourcePath: string;
+  targetDirectory: string;
+  copiedFiles: number;
+  overwrite: boolean;
+}
+
 export interface ExtensionsSnapshot {
   profileName: string;
   hermesHome: string;
@@ -273,6 +287,20 @@ export interface SkillCreateRequest {
   category: string;
   description: string;
   content: string;
+  overwrite: boolean;
+}
+
+export interface SkillImportRequest {
+  sourcePath: string;
+  category: string;
+  overwrite: boolean;
+}
+
+export interface SkillImportResult {
+  imported: SkillFileDetail;
+  sourcePath: string;
+  targetDirectory: string;
+  copiedFiles: number;
   overwrite: boolean;
 }
 

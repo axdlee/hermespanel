@@ -19,10 +19,11 @@ use crate::models::{
     GatewayStateSnapshot, GatewayWorkspace, HermesHome, InstallationSnapshot, LogReadResult,
     MemoryFileDetail, MemoryFileSummary, MemoryProviderOption, MemoryRuntimeSnapshot, NamedCount,
     PlatformToolsetBinding, PluginCatalogItem, PluginExternalDependency, PluginRuntimeSnapshot,
-    ProfileAliasCreateRequest, ProfileAliasDeleteRequest, ProfileAliasItem, ProfileCreateRequest,
-    ProfileDeleteRequest, ProfileExportRequest, ProfileImportRequest, ProfileRenameRequest,
-    ProfileSummary, ProfilesSnapshot, RuntimeSkillItem, SessionDetail, SessionMessage,
-    SessionRecord, SkillCreateRequest, SkillFileDetail, SkillFrontmatter, SkillItem,
+    PluginImportRequest, PluginImportResult, ProfileAliasCreateRequest, ProfileAliasDeleteRequest,
+    ProfileAliasItem, ProfileCreateRequest, ProfileDeleteRequest, ProfileExportRequest,
+    ProfileImportRequest, ProfileRenameRequest, ProfileSummary, ProfilesSnapshot,
+    RuntimeSkillItem, SessionDetail, SessionMessage, SessionRecord, SkillCreateRequest,
+    SkillFileDetail, SkillFrontmatter, SkillImportRequest, SkillImportResult, SkillItem,
     ToolPlatformInventory, ToolPlatformSummary, ToolRuntimeItem,
 };
 
@@ -1316,8 +1317,12 @@ fn build_plugin_catalog(
     items
 }
 
+fn profile_plugin_catalog_root(home: &HermesHome) -> PathBuf {
+    home.root.join("hermes-agent").join("plugins")
+}
+
 fn plugin_catalog_root(home: &HermesHome) -> Option<PathBuf> {
-    let mut candidates = vec![home.root.join("hermes-agent").join("plugins")];
+    let mut candidates = vec![profile_plugin_catalog_root(home)];
     if let Ok(default_root) = resolve_default_hermes_root(None) {
         candidates.push(default_root.join("hermes-agent").join("plugins"));
     }
@@ -1325,6 +1330,20 @@ fn plugin_catalog_root(home: &HermesHome) -> Option<PathBuf> {
     candidates
         .into_iter()
         .find(|candidate| candidate.exists() && candidate.is_dir())
+}
+
+fn infer_plugin_category_from_source(source_root: &Path) -> Option<String> {
+    let category_dir = source_root.parent()?;
+    let plugins_dir = category_dir.parent()?;
+    if plugins_dir.file_name() != Some(std::ffi::OsStr::new("plugins")) {
+        return None;
+    }
+
+    category_dir
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.trim().is_empty())
+        .map(ToString::to_string)
 }
 
 fn plugin_installed_aliases(runtime: &PluginRuntimeSnapshot) -> BTreeSet<String> {
@@ -1412,6 +1431,82 @@ fn parse_plugin_catalog_item(
     })
 }
 
+pub fn import_plugin(home: &HermesHome, request: &PluginImportRequest) -> AppResult<PluginImportResult> {
+    let source_path = resolve_import_source_path(&request.source_path)?;
+    let source_metadata = fs::metadata(&source_path)?;
+    let (source_root, manifest_path) = if source_metadata.is_dir() {
+        let candidate = source_path.join("plugin.yaml");
+        if !candidate.is_file() {
+            return Err(AppError::Message(
+                "导入目录中未找到 plugin.yaml，请选择插件目录或直接选择 plugin.yaml".into(),
+            ));
+        }
+        (source_path.clone(), candidate)
+    } else {
+        if source_path.file_name() != Some(std::ffi::OsStr::new("plugin.yaml")) {
+            return Err(AppError::Message(
+                "导入源必须是插件目录，或明确指向 plugin.yaml 文件".into(),
+            ));
+        }
+        let parent = source_path.parent().ok_or_else(|| {
+            AppError::Message("无法解析导入插件所在目录".into())
+        })?;
+        (parent.to_path_buf(), source_path.clone())
+    };
+
+    let manifest: RawPluginManifest = serde_yaml::from_str(&read_text_file(&manifest_path)?)?;
+    let fallback_slug = source_root
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.trim().is_empty())
+        .map(ToString::to_string)
+        .unwrap_or_else(|| "imported-plugin".into());
+    let inferred_category = infer_plugin_category_from_source(&source_root);
+    let category = normalize_skill_segment(
+        &request.category,
+        inferred_category.as_deref().unwrap_or("imported"),
+    );
+    let plugin_name = manifest
+        .name
+        .unwrap_or_else(|| fallback_slug.clone())
+        .trim()
+        .to_string();
+    let slug = normalize_skill_segment(&plugin_name, &fallback_slug);
+    let catalog_root = profile_plugin_catalog_root(home);
+    let target_directory = catalog_root.join(&category).join(&slug);
+
+    if target_directory.exists() {
+        let same_target = fs::canonicalize(&target_directory)
+            .ok()
+            .map(|path| path == source_root)
+            .unwrap_or(false);
+        if same_target {
+            return Err(AppError::Message("源插件已经位于当前 profile，无需再次导入".into()));
+        }
+
+        if !request.overwrite {
+            return Err(AppError::Message(format!(
+                "目标插件已存在：{}/{}",
+                category, slug
+            )));
+        }
+
+        fs::remove_dir_all(&target_directory)?;
+    }
+
+    fs::create_dir_all(&catalog_root)?;
+    let copied_files = copy_directory_contents(&source_root, &target_directory)?;
+    let imported = parse_plugin_catalog_item(&catalog_root, &target_directory.join("plugin.yaml"), &BTreeSet::new())?;
+
+    Ok(PluginImportResult {
+        copied_files,
+        imported,
+        overwrite: request.overwrite,
+        source_path: source_path.display().to_string(),
+        target_directory: target_directory.display().to_string(),
+    })
+}
+
 pub fn list_skills(home: &HermesHome) -> AppResult<Vec<SkillItem>> {
     if !home.skills_dir.exists() {
         return Ok(Vec::new());
@@ -1456,9 +1551,11 @@ pub fn list_skills(home: &HermesHome) -> AppResult<Vec<SkillItem>> {
 
 pub fn read_skill_file(home: &HermesHome, file_path: &str) -> AppResult<SkillFileDetail> {
     let path = ensure_skill_file_within_home(home, file_path)?;
+    let skills_root =
+        fs::canonicalize(&home.skills_dir).unwrap_or_else(|_| home.skills_dir.clone());
     let content = read_text_file(&path)?;
     let relative = path
-        .strip_prefix(&home.skills_dir)
+        .strip_prefix(&skills_root)
         .unwrap_or(path.as_path())
         .to_string_lossy()
         .replace('\\', "/");
@@ -1510,6 +1607,89 @@ pub fn create_skill_file(
     )?;
 
     read_skill_file(home, &file_path.display().to_string())
+}
+
+pub fn import_skill(home: &HermesHome, request: &SkillImportRequest) -> AppResult<SkillImportResult> {
+    let source_path = resolve_import_source_path(&request.source_path)?;
+    let source_metadata = fs::metadata(&source_path)?;
+
+    let (source_root, source_skill_file, copy_directory) = if source_metadata.is_dir() {
+        let file_path = source_path.join("SKILL.md");
+        if !file_path.is_file() {
+            return Err(AppError::Message(
+                "导入目录中未找到 SKILL.md，请选择技能目录或直接选择 SKILL.md".into(),
+            ));
+        }
+        (source_path.clone(), file_path, true)
+    } else {
+        if source_path.file_name() != Some(std::ffi::OsStr::new("SKILL.md")) {
+            return Err(AppError::Message(
+                "导入源必须是技能目录，或明确指向 SKILL.md 文件".into(),
+            ));
+        }
+        let parent = source_path.parent().ok_or_else(|| {
+            AppError::Message("无法解析导入技能所在目录".into())
+        })?;
+        (parent.to_path_buf(), source_path.clone(), false)
+    };
+
+    let source_skill_content = read_text_file(&source_skill_file)?;
+    let fallback_slug = source_root
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.trim().is_empty())
+        .map(ToString::to_string)
+        .unwrap_or_else(|| "imported-skill".into());
+    let parsed = parse_skill_frontmatter(
+        &source_skill_content,
+        &format!("imported/{fallback_slug}/SKILL.md"),
+    );
+    let inferred_category = infer_skill_category_from_source(&source_root);
+    let category = normalize_skill_segment(
+        &request.category,
+        inferred_category.as_deref().unwrap_or("imported"),
+    );
+    let slug = normalize_skill_segment(&parsed.name, &fallback_slug);
+    let target_directory = home.skills_dir.join(&category).join(&slug);
+    let target_skill_file = target_directory.join("SKILL.md");
+
+    if target_directory.exists() {
+        let same_target = fs::canonicalize(&target_skill_file)
+            .ok()
+            .map(|path| path == source_skill_file)
+            .unwrap_or(false);
+        if same_target {
+            return Err(AppError::Message("源技能已经位于当前 profile，无需再次导入".into()));
+        }
+
+        if !request.overwrite {
+            return Err(AppError::Message(format!(
+                "目标技能已存在：{}/{}",
+                category, slug
+            )));
+        }
+
+        fs::remove_dir_all(&target_directory)?;
+    }
+
+    fs::create_dir_all(&target_directory)?;
+
+    let copied_files = if copy_directory {
+        copy_directory_contents(&source_root, &target_directory)?
+    } else {
+        fs::copy(&source_skill_file, &target_skill_file)?;
+        1
+    };
+
+    let imported = read_skill_file(home, &target_skill_file.display().to_string())?;
+
+    Ok(SkillImportResult {
+        copied_files,
+        imported,
+        overwrite: request.overwrite,
+        source_path: source_path.display().to_string(),
+        target_directory: target_directory.display().to_string(),
+    })
 }
 
 pub fn get_session_detail(db_path: &Path, session_id: &str) -> AppResult<SessionDetail> {
@@ -2540,6 +2720,77 @@ fn build_skill_markdown(name: &str, description: &str, body: &str) -> String {
     )
 }
 
+fn resolve_import_source_path(source_path: &str) -> AppResult<PathBuf> {
+    let trimmed = source_path.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::Message("请先提供要导入的技能目录或 SKILL.md 路径".into()));
+    }
+
+    let expanded = if trimmed == "~" {
+        dirs::home_dir().ok_or_else(|| AppError::Message("无法解析当前用户目录".into()))?
+    } else if let Some(suffix) = trimmed.strip_prefix("~/") {
+        dirs::home_dir()
+            .ok_or_else(|| AppError::Message("无法解析当前用户目录".into()))?
+            .join(suffix)
+    } else {
+        PathBuf::from(trimmed)
+    };
+
+    fs::canonicalize(&expanded).map_err(|error| {
+        AppError::Message(format!(
+            "无法访问导入源：{} ({error})",
+            expanded.display()
+        ))
+    })
+}
+
+fn infer_skill_category_from_source(source_root: &Path) -> Option<String> {
+    let category_dir = source_root.parent()?;
+    let skills_dir = category_dir.parent()?;
+    if skills_dir.file_name() != Some(std::ffi::OsStr::new("skills")) {
+        return None;
+    }
+
+    category_dir
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.trim().is_empty())
+        .map(ToString::to_string)
+}
+
+fn copy_directory_contents(source_root: &Path, target_root: &Path) -> AppResult<usize> {
+    let mut copied_files = 0usize;
+
+    for entry in WalkDir::new(source_root).min_depth(1) {
+        let entry = entry
+            .map_err(|error| AppError::Message(format!("复制技能目录失败: {error}")))?;
+        let relative = entry
+            .path()
+            .strip_prefix(source_root)
+            .map_err(|_| AppError::Message("复制技能目录时无法解析相对路径".into()))?;
+        let target_path = target_root.join(relative);
+
+        if entry.file_type().is_dir() {
+            fs::create_dir_all(&target_path)?;
+            continue;
+        }
+
+        if entry.file_type().is_file() {
+            if let Some(parent) = target_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(entry.path(), &target_path)?;
+            copied_files += 1;
+        }
+    }
+
+    if copied_files == 0 {
+        return Err(AppError::Message("导入目录里没有可复制的技能文件".into()));
+    }
+
+    Ok(copied_files)
+}
+
 fn ensure_skill_file_within_home(home: &HermesHome, file_path: &str) -> AppResult<PathBuf> {
     let candidate = PathBuf::from(file_path);
     let resolved = if candidate.is_absolute() {
@@ -2992,9 +3243,10 @@ mod tests {
 
     use crate::models::{
         ConfigWorkspace, CronCreateRequest, CronDeleteRequest, CronUpdateRequest, EnvWorkspace,
-        GatewayWorkspace, PlatformToolsetBinding, PluginRuntimeSnapshot, ProfileAliasCreateRequest,
-        ProfileAliasDeleteRequest, ProfileCreateRequest, ProfileDeleteRequest,
-        ProfileExportRequest, ProfileImportRequest, ProfileRenameRequest, SkillCreateRequest,
+        GatewayWorkspace, PlatformToolsetBinding, PluginImportRequest, PluginRuntimeSnapshot,
+        ProfileAliasCreateRequest, ProfileAliasDeleteRequest, ProfileCreateRequest,
+        ProfileDeleteRequest, ProfileExportRequest, ProfileImportRequest, ProfileRenameRequest,
+        SkillCreateRequest, SkillImportRequest,
     };
 
     use super::{
@@ -3004,13 +3256,13 @@ mod tests {
         build_profile_create_args, build_profile_delete_args, build_profile_export_args,
         build_profile_import_args, build_profile_rename_args, build_skill_action_args,
         build_tool_action_args, compose_hermes_command_args, config_compat_action_args,
-        create_skill_file, get_active_profile, installation_action_command, list_profile_aliases,
-        list_profiles, load_recent_sessions, parse_memory_runtime, parse_plugin_runtime,
-        parse_runtime_skills, parse_skill_frontmatter, parse_tool_inventory,
-        parse_tool_inventory_line, parse_tool_summary, read_config_documents, read_cron_jobs,
-        read_gateway_state, resolve_hermes_home, set_active_profile, write_structured_config,
-        write_structured_env, write_structured_gateway, InstallationActionCommand,
-        QUICK_INSTALL_COMMAND,
+        create_skill_file, get_active_profile, import_plugin, import_skill,
+        installation_action_command, list_profile_aliases, list_profiles, load_recent_sessions,
+        parse_memory_runtime, parse_plugin_runtime, parse_runtime_skills,
+        parse_skill_frontmatter, parse_tool_inventory, parse_tool_inventory_line,
+        parse_tool_summary, read_config_documents, read_cron_jobs, read_gateway_state,
+        resolve_hermes_home, set_active_profile, write_structured_config, write_structured_env,
+        write_structured_gateway, InstallationActionCommand, QUICK_INSTALL_COMMAND,
     };
 
     #[test]
@@ -3637,6 +3889,100 @@ requires_env:
     }
 
     #[test]
+    fn imports_plugin_directory_into_profile_catalog() {
+        let temp = tempdir().expect("创建临时目录失败");
+        let root = temp.path().join(".hermes");
+        let source_dir = temp.path().join("local-plugin").join("memory").join("byterover");
+
+        seed_profile_root(&root, "gpt-5.4");
+        fs::create_dir_all(source_dir.join("assets")).expect("创建源插件目录失败");
+        fs::write(
+            source_dir.join("plugin.yaml"),
+            r#"name: byterover
+description: "ByteRover memory"
+requires_env:
+  - BYTEROVER_API_KEY
+"#,
+        )
+        .expect("写入 plugin.yaml 失败");
+        fs::write(source_dir.join("assets").join("README.txt"), "plugin asset")
+            .expect("写入插件附属文件失败");
+
+        let home =
+            resolve_hermes_home(Some("default"), Some(&root)).expect("解析 Hermes Home 失败");
+        let result = import_plugin(
+            &home,
+            &PluginImportRequest {
+                source_path: source_dir.display().to_string(),
+                category: String::new(),
+                overwrite: false,
+            },
+        )
+        .expect("导入插件目录失败");
+
+        assert_eq!(result.imported.category, "imported");
+        assert_eq!(result.imported.name, "byterover");
+        assert_eq!(result.copied_files, 2);
+        assert!(PathBuf::from(&result.target_directory)
+            .join("assets/README.txt")
+            .is_file());
+    }
+
+    #[test]
+    fn imports_plugin_manifest_and_uses_requested_category() {
+        let temp = tempdir().expect("创建临时目录失败");
+        let root = temp.path().join(".hermes");
+        let manifest_path = temp
+            .path()
+            .join("manifest-source")
+            .join("plugin.yaml");
+
+        seed_profile_root(&root, "gpt-5.4");
+        fs::create_dir_all(
+            manifest_path
+                .parent()
+                .expect("解析源插件父目录失败"),
+        )
+        .expect("创建 manifest 目录失败");
+        fs::write(
+            &manifest_path,
+            r#"name: retaindb
+description: "RetainDB memory"
+pip_dependencies:
+  - requests
+"#,
+        )
+        .expect("写入 manifest 失败");
+        fs::write(
+            manifest_path
+                .parent()
+                .expect("解析 manifest 目录失败")
+                .join("runtime.py"),
+            "print('ready')",
+        )
+        .expect("写入插件文件失败");
+
+        let home =
+            resolve_hermes_home(Some("default"), Some(&root)).expect("解析 Hermes Home 失败");
+        let result = import_plugin(
+            &home,
+            &PluginImportRequest {
+                source_path: manifest_path.display().to_string(),
+                category: "vector memory".into(),
+                overwrite: false,
+            },
+        )
+        .expect("导入 plugin.yaml 失败");
+
+        assert_eq!(result.imported.category, "vector-memory");
+        assert_eq!(result.copied_files, 2);
+        assert!(result
+            .imported
+            .directory_path
+            .ends_with("plugins/vector-memory/retaindb"));
+    }
+
+    #[test]
     fn parses_tool_summary_output() {
         let output = r#"
 ⚕ Tool Summary
@@ -3742,6 +4088,82 @@ Memory status
             .ends_with("skills/ops-automation/release-notes/SKILL.md"));
         assert!(detail.content.contains("name: Release Notes"));
         assert!(detail.content.contains("## 步骤"));
+    }
+
+    #[test]
+    fn imports_skill_directory_into_current_profile() {
+        let temp = tempdir().expect("创建临时目录失败");
+        let root = temp.path().join(".hermes");
+        let external = temp.path().join("external-skills");
+        let source_dir = external.join("ops").join("release-notes");
+
+        seed_profile_root(&root, "gpt-5.4");
+        fs::create_dir_all(source_dir.join("assets")).expect("创建导入源目录失败");
+        fs::write(
+            source_dir.join("SKILL.md"),
+            "---\nname: Release Notes\ndescription: 整理版本发布摘要\n---\n\n# Release Notes\n",
+        )
+        .expect("写入导入源技能失败");
+        fs::write(source_dir.join("assets").join("checklist.txt"), "draft")
+            .expect("写入附属文件失败");
+
+        let home =
+            resolve_hermes_home(Some("default"), Some(&root)).expect("解析 Hermes Home 失败");
+        let result = import_skill(
+            &home,
+            &SkillImportRequest {
+                source_path: source_dir.display().to_string(),
+                category: String::new(),
+                overwrite: false,
+            },
+        )
+        .expect("导入技能目录失败");
+
+        assert_eq!(result.imported.name, "Release Notes");
+        assert_eq!(result.imported.category, "imported");
+        assert_eq!(result.copied_files, 2);
+        assert!(PathBuf::from(&result.target_directory)
+            .join("assets/checklist.txt")
+            .is_file());
+    }
+
+    #[test]
+    fn imports_skill_file_and_preserves_requested_category() {
+        let temp = tempdir().expect("创建临时目录失败");
+        let root = temp.path().join(".hermes");
+        let source_file = temp.path().join("skills-source").join("SKILL.md");
+
+        seed_profile_root(&root, "gpt-5.4");
+        fs::create_dir_all(
+            source_file
+                .parent()
+                .expect("解析源技能父目录失败"),
+        )
+        .expect("创建源技能目录失败");
+        fs::write(
+            &source_file,
+            "---\nname: Browser QA\ndescription: 浏览器验收巡检\n---\n\n# Browser QA\n",
+        )
+        .expect("写入源技能文件失败");
+
+        let home =
+            resolve_hermes_home(Some("default"), Some(&root)).expect("解析 Hermes Home 失败");
+        let result = import_skill(
+            &home,
+            &SkillImportRequest {
+                source_path: source_file.display().to_string(),
+                category: "quality assurance".into(),
+                overwrite: false,
+            },
+        )
+        .expect("导入技能文件失败");
+
+        assert_eq!(result.imported.category, "quality-assurance");
+        assert!(result
+            .imported
+            .file_path
+            .ends_with("skills/quality-assurance/browser-qa/SKILL.md"));
+        assert_eq!(result.copied_files, 1);
     }
 
     #[test]

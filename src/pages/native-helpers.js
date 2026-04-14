@@ -73,8 +73,8 @@ export function commandResultHtml(payload, emptyTitle, emptyDescription) {
   return `
     <div class="result-stack">
       ${keyValueRowsHtml([
-        { label: '动作', value: payload.label || '命令执行' },
-        { label: '命令', value: payload.result.command || '—' },
+        { label: '动作', value: payload.label || '动作执行' },
+        { label: '底层命令', value: payload.result.command || '—' },
         { label: '退出码', value: String(payload.result.exitCode ?? '—') },
         { label: '结果', value: payload.result.success ? '成功' : '失败' },
       ])}

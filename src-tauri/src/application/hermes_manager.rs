@@ -4,9 +4,10 @@ use crate::models::{
     CommandRunResult, ConfigDocuments, ConfigWorkspace, CronCreateRequest, CronDeleteRequest,
     CronJobsSnapshot, CronUpdateRequest, DashboardSnapshot, EnvWorkspace, ExtensionsSnapshot,
     GatewayWorkspace, HermesHome, InstallationSnapshot, LogReadResult, MemoryFileDetail,
-    MemoryFileSummary, ProfileAliasCreateRequest, ProfileAliasDeleteRequest, ProfileCreateRequest,
-    ProfileDeleteRequest, ProfileExportRequest, ProfileImportRequest, ProfileRenameRequest,
-    ProfilesSnapshot, SessionDetail, SessionRecord, SkillCreateRequest, SkillFileDetail, SkillItem,
+    MemoryFileSummary, PluginImportRequest, PluginImportResult, ProfileAliasCreateRequest,
+    ProfileAliasDeleteRequest, ProfileCreateRequest, ProfileDeleteRequest, ProfileExportRequest,
+    ProfileImportRequest, ProfileRenameRequest, ProfilesSnapshot, SessionDetail, SessionRecord,
+    SkillCreateRequest, SkillFileDetail, SkillImportRequest, SkillImportResult, SkillItem,
     SkillSaveRequest,
 };
 
@@ -78,6 +79,10 @@ impl HermesManager {
         hermes::run_hermes_command_owned(Some(&self.home.profile_name), &args)
     }
 
+    pub fn import_plugin(&self, request: &PluginImportRequest) -> AppResult<PluginImportResult> {
+        hermes::import_plugin(&self.home, request)
+    }
+
     pub fn run_skill_action(
         &self,
         action: &str,
@@ -135,6 +140,10 @@ impl HermesManager {
 
     pub fn create_skill(&self, request: &SkillCreateRequest) -> AppResult<SkillFileDetail> {
         hermes::create_skill_file(&self.home, request)
+    }
+
+    pub fn import_skill(&self, request: &SkillImportRequest) -> AppResult<SkillImportResult> {
+        hermes::import_skill(&self.home, request)
     }
 
     pub fn read_log(

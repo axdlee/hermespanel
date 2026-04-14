@@ -19,6 +19,8 @@ import type {
   LogReadResult,
   MemoryFileDetail,
   MemoryFileSummary,
+  PluginImportRequest,
+  PluginImportResult,
   ProfileAliasCreateRequest,
   ProfileAliasDeleteRequest,
   ProfileCreateRequest,
@@ -31,6 +33,8 @@ import type {
   SessionRecord,
   SkillCreateRequest,
   SkillFileDetail,
+  SkillImportRequest,
+  SkillImportResult,
   SkillItem,
   SkillSaveRequest,
 } from '../types';
@@ -99,6 +103,8 @@ export const api = {
     call<CommandRunResult>('run_tool_action', withProfile(profile, { action, platform, names })),
   runPluginAction: (action: 'enable' | 'disable' | 'install' | 'update' | 'remove', name: string, profile?: string) =>
     call<CommandRunResult>('run_plugin_action', withProfile(profile, { action, name })),
+  importPlugin: (request: PluginImportRequest, profile?: string) =>
+    call<PluginImportResult>('import_plugin', withProfile(profile, { request })),
   saveConfigYaml: (content: string, profile?: string) =>
     call<void>('save_config_yaml', withProfile(profile, { content })),
   saveEnvFile: (content: string, profile?: string) =>
@@ -122,6 +128,8 @@ export const api = {
     call<SkillFileDetail>('save_skill_file', withProfile(profile, { request })),
   createSkill: (request: SkillCreateRequest, profile?: string) =>
     call<SkillFileDetail>('create_skill', withProfile(profile, { request })),
+  importSkill: (request: SkillImportRequest, profile?: string) =>
+    call<SkillImportResult>('import_skill', withProfile(profile, { request })),
   runSkillAction: (action: string, value?: string | null, profile?: string) =>
     call<CommandRunResult>('run_skill_action', withProfile(profile, { action, value: value || null })),
   getCronJobs: (profile?: string) =>

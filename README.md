@@ -117,6 +117,11 @@ npm install
 npm run tauri:dev
 ```
 
+开发链路已经做了端口复用处理：
+
+- 如果 `127.0.0.1:1420` 上已经是当前仓库的 Vite 开发服务，`tauri:dev` 会直接复用，不再因为端口被自己占用而启动失败
+- 如果该端口被其他项目占用，会直接报错并提示当前占用进程，避免误连到错误的前端壳
+
 ### 常用命令
 
 ```bash
@@ -173,6 +178,14 @@ npm run docs:capture:mac
 3. 输出到 `docs/screenshots/hermespanel-window.png`
 
 如果失败，通常是因为 macOS 没给当前终端开启“屏幕与系统音频录制”权限。
+
+建议在截图前先切到这些页面再抓图：
+
+1. Dashboard
+2. Config
+3. Gateway
+4. Extensions
+5. Diagnostics
 
 ## 当前限制
 

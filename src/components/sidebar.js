@@ -24,6 +24,33 @@ function esc(value) {
     .replace(/"/g, '&quot;');
 }
 
+function pillHtml(label, tone = 'neutral') {
+  return `<span class="pill pill-${esc(tone)}">${esc(label)}</span>`;
+}
+
+function gatewayTone(state) {
+  if (state === 'running') {
+    return 'good';
+  }
+  if (state === 'stopped' || state === 'error') {
+    return 'warn';
+  }
+  return 'neutral';
+}
+
+function gatewayLabel(state) {
+  if (state === 'running') {
+    return 'Gateway 运行中';
+  }
+  if (state === 'stopped') {
+    return 'Gateway 待启动';
+  }
+  if (state === 'error') {
+    return 'Gateway 异常';
+  }
+  return 'Gateway 未检测';
+}
+
 export function renderSidebar(el) {
   const state = getPanelState();
   const activeProfile = state.profiles?.activeProfile ?? 'default';
@@ -33,14 +60,15 @@ export function renderSidebar(el) {
   const gatewayState = viewedProfile?.gatewayState ?? state.shellDashboard?.gateway?.gatewayState ?? 'gateway ?';
   const envReady = viewedProfile?.envExists ?? false;
   const profileMode = state.selectedProfile === activeProfile ? '默认实例' : '浏览实例';
+  const modelLabel = viewedProfile?.modelDefault ?? state.shellDashboard?.config?.modelDefault ?? '模型待配置';
 
   el.className = `sidebar ${state.sidebarCollapsed ? 'sidebar-collapsed' : ''}`;
   el.innerHTML = `
     <div class="sidebar-brand">
-      <span class="brand-mark">H</span>
+      <span class="brand-mark">HP</span>
       <div class="sidebar-brand-copy">
         <p>HermesPanel</p>
-        <span>Native control shell</span>
+        <span>桌面管理客户端</span>
       </div>
       <button type="button" class="sidebar-collapse-btn" id="sidebar-collapse-btn">
         ${state.sidebarCollapsed ? '»' : '«'}
@@ -76,15 +104,15 @@ export function renderSidebar(el) {
           <strong>${esc(state.selectedProfile)}</strong>
           <span>${profileMode}</span>
         </div>
-        <span class="pill pill-${cliReady ? 'good' : 'bad'}">${cliReady ? 'CLI Ready' : 'CLI Missing'}</span>
+        ${pillHtml(cliReady ? '已接管' : '待安装', cliReady ? 'good' : 'bad')}
+      </div>
+      <div class="sidebar-pill-row">
+        ${pillHtml(envReady ? 'Env 已就绪' : 'Env 缺失', envReady ? 'good' : 'warn')}
+        ${pillHtml(gatewayLabel(gatewayState), gatewayTone(gatewayState))}
       </div>
       <div class="sidebar-footer-meta">
-        <span>${envReady ? 'Env Ready' : 'Env Missing'}</span>
-        <span>${esc(gatewayState)}</span>
-      </div>
-      <div class="sidebar-footer-meta">
-        <span>${esc(viewedProfile?.modelDefault ?? '未配置模型')}</span>
-        <span>${pluginCount} Plugins</span>
+        <span>${esc(modelLabel)}</span>
+        <span>${pluginCount} 个插件</span>
       </div>
       <div class="sidebar-status-toolbar toolbar">
         <button type="button" class="button button-secondary" id="sidebar-make-active" ${state.syncingActive || state.selectedProfile === activeProfile ? 'disabled' : ''}>

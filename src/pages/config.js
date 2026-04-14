@@ -25,314 +25,28 @@ import {
   pillHtml,
   statusDotHtml,
 } from './native-helpers';
-import { infoTipHtml, shortcutCardHtml } from './workbench-helpers';
-
-const CONFIG_WORKBENCH_KEYS = ['config-check', 'doctor', 'memory-status', 'gateway-status'];
-const MODEL_PROVIDER_PRESETS = [
-  {
-    id: 'openrouter',
-    label: 'OpenRouter',
-    provider: 'openrouter',
-    baseUrl: 'https://openrouter.ai/api/v1',
-    envKey: 'openrouterApiKey',
-    envLabel: 'OPENROUTER_API_KEY',
-    copy: '聚合路由，一套配置接多家模型，适合 Hermes 的快速切换场景。',
-    models: [
-      'anthropic/claude-sonnet-4.6',
-      'openai/gpt-5.4',
-      'openai/gpt-5.3-codex',
-      'google/gemini-3-flash-preview',
-      'qwen/qwen3.6-plus',
-    ],
-  },
-  {
-    id: 'openai',
-    label: 'OpenAI',
-    provider: 'openai',
-    baseUrl: 'https://api.openai.com/v1',
-    envKey: 'openaiApiKey',
-    envLabel: 'OPENAI_API_KEY',
-    copy: '最直接的 OpenAI 直连配置，适合主模型链路稳定接入。',
-    models: [
-      'gpt-5.4',
-      'gpt-5.4-mini',
-      'gpt-5.3-codex',
-      'gpt-5.2-codex',
-      'gpt-4.1',
-    ],
-  },
-  {
-    id: 'anthropic',
-    label: 'Anthropic',
-    provider: 'anthropic',
-    baseUrl: 'https://api.anthropic.com',
-    envKey: 'anthropicApiKey',
-    envLabel: 'ANTHROPIC_API_KEY',
-    copy: '适合 Claude 直连；如果走兼容端点，也可以先套预设再改 Base URL。',
-    models: [
-      'claude-sonnet-4-6',
-      'claude-opus-4-6',
-      'claude-sonnet-4-5-20250929',
-      'claude-haiku-4-5-20251001',
-    ],
-  },
-  {
-    id: 'gemini',
-    label: 'Gemini',
-    provider: 'gemini',
-    baseUrl: '',
-    envKey: 'googleApiKey',
-    envLabel: 'GOOGLE_API_KEY',
-    copy: 'Google AI Studio 直连模式，Hermes 会按 provider 解析 Gemini 路由。',
-    models: [
-      'gemini-3.1-pro-preview',
-      'gemini-3-flash-preview',
-      'gemini-3.1-flash-lite-preview',
-      'gemini-2.5-pro',
-      'gemini-2.5-flash',
-    ],
-  },
-  {
-    id: 'huggingface',
-    label: 'Hugging Face',
-    provider: 'huggingface',
-    baseUrl: 'https://router.huggingface.co/v1',
-    envKey: 'hfToken',
-    envLabel: 'HF_TOKEN',
-    copy: '适合用 HF Router 接开放模型；如果你有自定义网关，也可以再改 Base URL。',
-    models: [
-      'openai/gpt-oss-120b',
-      'deepseek-ai/DeepSeek-R1',
-      'Qwen/Qwen3-Coder-480B-A35B-Instruct',
-      'moonshotai/Kimi-K2-Instruct',
-    ],
-  },
-  {
-    id: 'custom',
-    label: 'Custom',
-    provider: 'custom',
-    baseUrl: '',
-    envKey: '',
-    envLabel: '',
-    copy: '保留完全自定义的 provider / endpoint 组合，适合私有网关和兼容接口。',
-    models: [
-      'gpt-oss-local',
-      'qwen3-coder-local',
-      'deepseek-r1-local',
-    ],
-  },
-];
-
-const CHANNEL_PRESETS = [
-  {
-    id: 'telegram',
-    label: 'Telegram',
-    tokenKey: 'telegramBotToken',
-    channelKey: 'telegramHomeChannel',
-    modeKey: 'telegramReplyToMode',
-    modeDefault: 'reply',
-    tokenLabel: 'TELEGRAM_BOT_TOKEN',
-    copy: '适合个人通知和轻量群组接入，建议同时配置 home channel 和 reply mode。',
-  },
-  {
-    id: 'discord',
-    label: 'Discord',
-    tokenKey: 'discordBotToken',
-    channelKey: 'discordHomeChannel',
-    modeKey: 'discordReplyToMode',
-    modeDefault: 'thread',
-    tokenLabel: 'DISCORD_BOT_TOKEN',
-    copy: '适合团队协作和线程式回复，通常会配合 Gateway 和 toolsets 一起验证。',
-  },
-  {
-    id: 'slack',
-    label: 'Slack',
-    tokenKey: 'slackBotToken',
-    channelKey: '',
-    modeKey: '',
-    modeDefault: '',
-    tokenLabel: 'SLACK_BOT_TOKEN',
-    copy: '先补 bot token，复杂的 Slack 工作区行为再交给 Gateway 页和日志页闭环验证。',
-  },
-];
-
-const TOOLSET_WORKSPACE_PRESETS = [
-  {
-    id: 'cli-default',
-    label: 'CLI 全能力',
-    copy: '最接近 Hermes 默认 CLI 体验，适合本机直接接管和快速闭环。',
-    toolsets: ['hermes-cli'],
-    platformToolsets: [{ platform: 'cli', toolsets: ['hermes-cli'] }],
-  },
-  {
-    id: 'research-coding',
-    label: '研究开发',
-    copy: '把搜索、浏览器、终端、文件、技能、记忆拆成显式能力面，方便精细化调优。',
-    toolsets: ['web', 'browser', 'terminal', 'file', 'skills', 'todo', 'memory', 'session_search', 'code_execution'],
-    platformToolsets: [
-      { platform: 'cli', toolsets: ['web', 'browser', 'terminal', 'file', 'skills', 'todo', 'memory', 'session_search', 'code_execution'] },
-    ],
-  },
-  {
-    id: 'messaging-ops',
-    label: '消息协作',
-    copy: '桌面配置完后，顺手把 CLI、Telegram、Discord、Slack 的能力面一起拉起。',
-    toolsets: ['web', 'browser', 'terminal', 'file', 'skills', 'todo', 'memory', 'session_search', 'delegation'],
-    platformToolsets: [
-      { platform: 'cli', toolsets: ['hermes-cli'] },
-      { platform: 'telegram', toolsets: ['hermes-telegram'] },
-      { platform: 'discord', toolsets: ['hermes-discord'] },
-      { platform: 'slack', toolsets: ['hermes-slack'] },
-    ],
-  },
-  {
-    id: 'safe-review',
-    label: '安全审阅',
-    copy: '偏保守的审阅能力面，默认不暴露 terminal / file 的强写能力。',
-    toolsets: ['safe', 'skills', 'todo', 'session_search'],
-    platformToolsets: [{ platform: 'cli', toolsets: ['safe', 'skills', 'todo', 'session_search'] }],
-  },
-];
-
-const TERMINAL_BACKEND_PRESETS = [
-  {
-    id: 'local',
-    label: 'Local',
-    backend: 'local',
-    cwd: '.',
-    terminalTimeout: 180,
-    terminalLifetimeSeconds: 300,
-    copy: '直接在当前 Mac 工作目录执行，适合本机开发与排障。',
-  },
-  {
-    id: 'docker',
-    label: 'Docker',
-    backend: 'docker',
-    cwd: '/workspace',
-    terminalTimeout: 180,
-    terminalLifetimeSeconds: 300,
-    copy: '容器隔离执行环境；如果需要自定义镜像，可再进入 YAML 补 docker_image。',
-    partial: true,
-  },
-  {
-    id: 'modal',
-    label: 'Modal',
-    backend: 'modal',
-    cwd: '/workspace',
-    terminalTimeout: 180,
-    terminalLifetimeSeconds: 300,
-    terminalModalImage: 'debian_slim',
-    copy: '云端沙盒执行，适合临时远端算力和更干净的运行环境。',
-  },
-  {
-    id: 'daytona',
-    label: 'Daytona',
-    backend: 'daytona',
-    cwd: '~',
-    terminalTimeout: 180,
-    terminalLifetimeSeconds: 300,
-    copy: '偏云开发工作区形态；如需镜像或配额参数，可再进入 YAML 补充。',
-    partial: true,
-  },
-];
+import { infoTipHtml } from './workbench-helpers';
+import {
+  cloneEnvWorkspace,
+  cloneWorkspace,
+  currentEditorBadge,
+  envPresetReady,
+  getChannelPreset,
+  getMemoryPreset,
+  getProviderPreset,
+  getTerminalPreset,
+  getToolsetPreset,
+  normalizePlatformBindings,
+  parseOptionalNumber,
+  renderConfigRail,
+  renderEditorTabs,
+  renderStructuredControls,
+  renderStructuredEnvControls,
+  splitLineValues,
+  uniqueValues,
+} from './config-workbench';
 
 let activeView = null;
-
-function cloneWorkspace(workspace = {}) {
-  return {
-    modelDefault: workspace.modelDefault || '',
-    modelProvider: workspace.modelProvider || '',
-    modelBaseUrl: workspace.modelBaseUrl || '',
-    contextEngine: workspace.contextEngine || '',
-    terminalBackend: workspace.terminalBackend || '',
-    terminalCwd: workspace.terminalCwd || '',
-    personality: workspace.personality || '',
-    streamingEnabled: Boolean(workspace.streamingEnabled),
-    memoryEnabled: Boolean(workspace.memoryEnabled),
-    userProfileEnabled: Boolean(workspace.userProfileEnabled),
-    memoryProvider: workspace.memoryProvider || '',
-    memoryCharLimit: workspace.memoryCharLimit ?? null,
-    userCharLimit: workspace.userCharLimit ?? null,
-    toolsets: [...(workspace.toolsets ?? [])],
-    platformToolsets: (workspace.platformToolsets ?? []).map((item) => ({
-      platform: item.platform || '',
-      toolsets: [...(item.toolsets ?? [])],
-    })),
-    skillsExternalDirs: [...(workspace.skillsExternalDirs ?? [])],
-    discordRequireMention: Boolean(workspace.discordRequireMention),
-    discordFreeResponseChannels: workspace.discordFreeResponseChannels || '',
-    discordAllowedChannels: workspace.discordAllowedChannels || '',
-    discordAutoThread: Boolean(workspace.discordAutoThread),
-    discordReactions: Boolean(workspace.discordReactions),
-    approvalsMode: workspace.approvalsMode || 'manual',
-    approvalsTimeout: workspace.approvalsTimeout ?? null,
-  };
-}
-
-function cloneEnvWorkspace(workspace = {}) {
-  return {
-    openaiApiKey: workspace.openaiApiKey || '',
-    openrouterApiKey: workspace.openrouterApiKey || '',
-    anthropicApiKey: workspace.anthropicApiKey || '',
-    googleApiKey: workspace.googleApiKey || '',
-    hfToken: workspace.hfToken || '',
-    anyrouter2ApiKey: workspace.anyrouter2ApiKey || '',
-    crsApiKey: workspace.crsApiKey || '',
-    siliconflowApiKey: workspace.siliconflowApiKey || '',
-    hermesGatewayToken: workspace.hermesGatewayToken || '',
-    telegramBotToken: workspace.telegramBotToken || '',
-    telegramHomeChannel: workspace.telegramHomeChannel || '',
-    telegramReplyToMode: workspace.telegramReplyToMode || '',
-    discordBotToken: workspace.discordBotToken || '',
-    discordHomeChannel: workspace.discordHomeChannel || '',
-    discordReplyToMode: workspace.discordReplyToMode || '',
-    slackBotToken: workspace.slackBotToken || '',
-    whatsappEnabled: Boolean(workspace.whatsappEnabled),
-    terminalModalImage: workspace.terminalModalImage || '',
-    terminalTimeout: workspace.terminalTimeout ?? null,
-    terminalLifetimeSeconds: workspace.terminalLifetimeSeconds ?? null,
-    browserSessionTimeout: workspace.browserSessionTimeout ?? null,
-    browserInactivityTimeout: workspace.browserInactivityTimeout ?? null,
-  };
-}
-
-function splitLineValues(value) {
-  return String(value ?? '')
-    .split(/\r?\n|[,，；;]/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function parseOptionalNumber(value) {
-  const normalized = String(value ?? '').trim();
-  if (!normalized) {
-    return null;
-  }
-  const parsed = Number.parseInt(normalized, 10);
-  return Number.isNaN(parsed) ? null : parsed;
-}
-
-function platformToolsetsToText(bindings = []) {
-  return bindings
-    .filter((item) => item.platform && item.toolsets?.length)
-    .map((item) => `${item.platform} = ${item.toolsets.join(', ')}`)
-    .join('\n');
-}
-
-function parsePlatformToolsets(value) {
-  return String(value ?? '')
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [platformPart, toolsetsPart = ''] = line.split('=');
-      return {
-        platform: platformPart.trim(),
-        toolsets: splitLineValues(toolsetsPart),
-      };
-    })
-    .filter((item) => item.platform);
-}
 
 function structuredConfigDirty(view) {
   if (!view.data?.workspace || !view.controlDraft) {
@@ -346,187 +60,6 @@ function structuredEnvDirty(view) {
     return false;
   }
   return JSON.stringify(view.envDraft) !== JSON.stringify(cloneEnvWorkspace(view.data.envWorkspace));
-}
-
-function envPresetReady(view, key) {
-  if (!key) {
-    return false;
-  }
-  return Boolean(view.envDraft?.[key]?.trim());
-}
-
-function getProviderPreset(id) {
-  return MODEL_PROVIDER_PRESETS.find((preset) => preset.id === id) || null;
-}
-
-function getChannelPreset(id) {
-  return CHANNEL_PRESETS.find((preset) => preset.id === id) || null;
-}
-
-function getToolsetPreset(id) {
-  return TOOLSET_WORKSPACE_PRESETS.find((preset) => preset.id === id) || null;
-}
-
-function getTerminalPreset(id) {
-  return TERMINAL_BACKEND_PRESETS.find((preset) => preset.id === id) || null;
-}
-
-function uniqueValues(values = []) {
-  return Array.from(
-    new Set(
-      values
-        .map((item) => String(item ?? '').trim())
-        .filter(Boolean),
-    ),
-  );
-}
-
-function normalizePlatformBindings(bindings = []) {
-  return [...(bindings ?? [])]
-    .map((item) => ({
-      platform: String(item?.platform ?? '').trim(),
-      toolsets: uniqueValues(item?.toolsets ?? []),
-    }))
-    .filter((item) => item.platform)
-    .sort((left, right) => left.platform.localeCompare(right.platform));
-}
-
-function sameStringArray(left = [], right = []) {
-  const normalizedLeft = uniqueValues(left);
-  const normalizedRight = uniqueValues(right);
-  return JSON.stringify(normalizedLeft) === JSON.stringify(normalizedRight);
-}
-
-function samePlatformBindings(left = [], right = []) {
-  return JSON.stringify(normalizePlatformBindings(left)) === JSON.stringify(normalizePlatformBindings(right));
-}
-
-function toolsetPresetActive(draft, preset) {
-  if (!draft || !preset) {
-    return false;
-  }
-  return sameStringArray(draft.toolsets, preset.toolsets)
-    && samePlatformBindings(draft.platformToolsets, preset.platformToolsets);
-}
-
-function previewJoined(values = [], emptyLabel = '—', limit = 3) {
-  const normalized = uniqueValues(values);
-  if (!normalized.length) {
-    return emptyLabel;
-  }
-  if (normalized.length <= limit) {
-    return normalized.join(', ');
-  }
-  return `${normalized.slice(0, limit).join(', ')} +${normalized.length - limit}`;
-}
-
-function platformBindingsPreview(bindings = [], emptyLabel = '—', limit = 2) {
-  const normalized = normalizePlatformBindings(bindings);
-  if (!normalized.length) {
-    return emptyLabel;
-  }
-  const labels = normalized.map((item) => `${item.platform}=${previewJoined(item.toolsets, '—', 2)}`);
-  if (labels.length <= limit) {
-    return labels.join(' · ');
-  }
-  return `${labels.slice(0, limit).join(' · ')} +${labels.length - limit}`;
-}
-
-function memoryProviderPresets(view) {
-  const installed = view.extensions?.memoryRuntime?.installedPlugins ?? [];
-  const dynamicPresets = installed.map((item) => ({
-    id: `memory:${item.name}`,
-    label: item.name,
-    provider: item.name,
-    availability: item.availability || '已发现插件',
-    copy: item.availability || '运行态已发现该记忆插件，可直接切换为默认 provider。',
-    memoryEnabled: true,
-    userProfileEnabled: true,
-  }));
-
-  return [
-    {
-      id: 'memory-off',
-      label: '关闭记忆',
-      provider: view.controlDraft?.memoryProvider || '',
-      availability: '关闭',
-      copy: '适合极简会话或临时排查，把长期记忆和用户画像一起关闭。',
-      memoryEnabled: false,
-      userProfileEnabled: false,
-    },
-    {
-      id: 'builtin-file',
-      label: 'Builtin File',
-      provider: '',
-      availability: '内置',
-      copy: '零依赖的本地文件记忆，最稳妥，也最适合桌面客户端默认闭环。',
-      memoryEnabled: true,
-      userProfileEnabled: true,
-    },
-    ...dynamicPresets,
-  ];
-}
-
-function getMemoryPreset(view, id) {
-  return memoryProviderPresets(view).find((preset) => preset.id === id) || null;
-}
-
-function memoryPresetActive(view, preset) {
-  if (!preset || !view.controlDraft) {
-    return false;
-  }
-  if (!preset.memoryEnabled) {
-    return !view.controlDraft.memoryEnabled;
-  }
-  return view.controlDraft.memoryEnabled && String(view.controlDraft.memoryProvider || '') === String(preset.provider || '');
-}
-
-function terminalPresetActive(view, preset) {
-  if (!preset || !view.controlDraft) {
-    return false;
-  }
-  const modalImage = String(view.envDraft?.terminalModalImage || '').trim();
-  const presetImage = String(preset.terminalModalImage || '').trim();
-  return String(view.controlDraft.terminalBackend || '') === String(preset.backend || '')
-    && String(view.controlDraft.terminalCwd || '') === String(preset.cwd || '')
-    && (presetImage ? modalImage === presetImage : true);
-}
-
-function renderModelPresetChips(view, preset, draft) {
-  const models = preset?.models ?? [];
-  if (!models.length) {
-    return '';
-  }
-
-  return `
-    <div class="selection-chip-grid">
-      ${models.map((model) => buttonHtml({
-        action: 'apply-model-preset',
-        label: model,
-        kind: draft.modelProvider === preset.provider && draft.modelDefault === model ? 'primary' : 'secondary',
-        className: `selection-chip${draft.modelProvider === preset.provider && draft.modelDefault === model ? ' selection-chip-active' : ''}`,
-        attrs: {
-          'data-model': model,
-          'data-preset': preset.id,
-        },
-      })).join('')}
-    </div>
-  `;
-}
-
-function currentEditorBadge(view) {
-  switch (view.editorTab) {
-    case 'control':
-      return '控制面';
-    case 'credentials':
-      return '凭证';
-    case 'config':
-      return 'YAML';
-    case 'env':
-      return 'ENV';
-    default:
-      return '工作台';
-  }
 }
 
 function runtimeWarnings(data, snapshot, skills, extensions, cronSnapshot) {
@@ -569,10 +102,43 @@ function runtimeWarnings(data, snapshot, skills, extensions, cronSnapshot) {
     warnings.push(`当前有 ${remoteJobs.length} 个远端作业依赖 Gateway，但网关不在 running 状态。`);
   }
   if (runtimeLocalSkills !== skills.length) {
-    warnings.push(`CLI 运行态 local skills 为 ${runtimeLocalSkills} 个，本地目录扫描到 ${skills.length} 个，存在安装态偏差。`);
+    warnings.push(`运行态 local skills 为 ${runtimeLocalSkills} 个，本地目录扫描到 ${skills.length} 个，存在安装态偏差。`);
   }
 
   return Array.from(new Set(warnings));
+}
+
+function investigationPrimaryAction(view) {
+  const focus = view.investigation?.focus;
+  switch (focus) {
+    case 'model':
+      return buttonHtml({
+        action: 'focus-workspace',
+        label: '定位模型面',
+        kind: 'primary',
+        attrs: { 'data-tab': 'control', 'data-section': 'model-presets' },
+      });
+    case 'toolsets':
+      return buttonHtml({ action: 'goto-extensions', label: '继续到扩展页', kind: 'primary' });
+    case 'memory':
+      return buttonHtml({ action: 'goto-memory', label: '继续到记忆页', kind: 'primary' });
+    case 'context':
+      return buttonHtml({ action: 'goto-gateway', label: '继续到 Gateway', kind: 'primary' });
+    case 'credentials':
+      return buttonHtml({
+        action: 'focus-workspace',
+        label: '定位凭证面',
+        kind: 'primary',
+        attrs: { 'data-tab': 'credentials', 'data-section': 'provider-credentials' },
+      });
+    default:
+      return buttonHtml({
+        action: 'focus-workspace',
+        label: '回到控制面',
+        kind: 'primary',
+        attrs: { 'data-tab': 'control', 'data-section': 'model-presets' },
+      });
+  }
 }
 
 function workspaceSectionFromFocus(focus) {
@@ -640,7 +206,7 @@ function relaySeed(view) {
 
 function renderSkeleton(view) {
   view.page.innerHTML = `
-    <div class="page-header">
+    <div class="page-header page-header-compact">
       <div class="panel-title-row">
         <h1 class="page-title">配置中心</h1>
       </div>
@@ -648,837 +214,6 @@ function renderSkeleton(view) {
     </div>
     <div class="stat-cards">
       ${Array.from({ length: 6 }).map(() => '<div class="stat-card loading-placeholder" style="min-height:124px"></div>').join('')}
-    </div>
-  `;
-}
-
-function renderWorkbenchCommands(view) {
-  return CONFIG_WORKBENCH_KEYS
-    .map((key) => getDiagnosticCommand(key))
-    .filter(Boolean)
-    .map((command) => `
-      <section class="action-card">
-        <div class="action-card-header">
-          <div>
-            <p class="eyebrow">${escapeHtml(command.scope === 'capability' ? 'Capability' : 'Runtime')}</p>
-            <h3 class="action-card-title">${escapeHtml(command.label)}</h3>
-          </div>
-          ${pillHtml(command.key, command.kind === 'primary' ? 'good' : 'neutral')}
-        </div>
-        <p class="action-card-copy">${escapeHtml(command.description)}</p>
-        <p class="command-line">${escapeHtml(command.cli)}</p>
-        <div class="toolbar">
-          ${buttonHtml({
-            action: `diagnostic-${command.key}`,
-            label: view.runningDiagnostic === command.key ? `${command.label}…` : `执行${command.label}`,
-            kind: command.kind,
-            disabled: Boolean(view.runningDiagnostic),
-          })}
-          ${buttonHtml({
-            action: 'goto-related-page',
-            label: '进入相关页',
-            attrs: { 'data-page': command.relatedPage },
-          })}
-        </div>
-      </section>
-    `)
-    .join('');
-}
-
-function renderEditorTabs(view, configDirty, envDirty, structuredDirty, credentialsDirty) {
-  const tabs = [
-    {
-      key: 'control',
-      label: '控制面',
-      dirty: structuredDirty,
-    },
-    {
-      key: 'credentials',
-      label: '凭证',
-      dirty: credentialsDirty,
-    },
-    {
-      key: 'config',
-      label: 'config.yaml',
-      dirty: configDirty,
-    },
-    {
-      key: 'env',
-      label: '.env',
-      dirty: envDirty,
-    },
-  ];
-
-  return `
-    <div class="tab-bar">
-      ${tabs.map((tab) => `
-        <button
-          type="button"
-          class="tab ${view.editorTab === tab.key ? 'active' : ''}"
-          data-action="switch-editor-tab"
-          data-tab="${escapeHtml(tab.key)}"
-        >
-          ${escapeHtml(tab.label)}
-          ${tab.dirty ? ' *' : ''}
-        </button>
-      `).join('')}
-    </div>
-  `;
-}
-
-function renderConfigRail(view, context) {
-  const {
-    actionBusy,
-    data,
-    enabledTools,
-    installation,
-    localSkills,
-    remoteJobs,
-    skills,
-    snapshot,
-    totalTools,
-    warnings,
-  } = context;
-  const env = data.envWorkspace ?? {};
-  const credentialsCount = [
-    env.openaiApiKey,
-    env.openrouterApiKey,
-    env.anthropicApiKey,
-    env.googleApiKey,
-    env.hfToken,
-    env.hermesGatewayToken,
-  ].filter((value) => String(value ?? '').trim()).length;
-  const channelCount = [
-    env.telegramBotToken,
-    env.telegramHomeChannel,
-    env.discordBotToken,
-    env.discordHomeChannel,
-    env.slackBotToken,
-  ].filter((value) => String(value ?? '').trim()).length;
-
-  return `
-    <div class="workspace-rail-header">
-      <div>
-        <strong>运行校验</strong>
-        <p class="workspace-main-copy">主区直改，侧栏只做导航和闭环。</p>
-      </div>
-      ${pillHtml(warnings.length === 0 ? '稳定' : `${warnings.length} 条提醒`, warnings.length === 0 ? 'good' : 'warn')}
-    </div>
-    <div class="detail-list compact">
-      <div class="key-value-row">
-        <span>Model</span>
-        <strong>${escapeHtml(`${data.summary.modelProvider || '未配置'} / ${data.summary.modelDefault || '未配置'}`)}</strong>
-      </div>
-      <div class="key-value-row">
-        <span>Terminal</span>
-        <strong>${escapeHtml(data.summary.terminalBackend || '未配置')}</strong>
-      </div>
-      <div class="key-value-row">
-        <span>Tools</span>
-        <strong>${escapeHtml(`${data.summary.toolsets.length} / ${enabledTools} / ${totalTools}`)}</strong>
-      </div>
-      <div class="key-value-row">
-        <span>Gateway</span>
-        <strong>${escapeHtml(snapshot?.gateway?.gatewayState || '未检测到')}</strong>
-      </div>
-      <div class="key-value-row">
-        <span>Skills</span>
-        <strong>${escapeHtml(`${localSkills}/${skills.length}`)}</strong>
-      </div>
-    </div>
-    ${warnings.length > 0
-      ? `<div class="warning-stack top-gap">${warnings.slice(0, 2).map((warning) => `<div class="warning-item">${escapeHtml(warning)}</div>`).join('')}</div>`
-      : `<p class="helper-text">当前没有明显结构性风险。</p>`}
-
-    <section class="workspace-rail-section">
-      <div class="workspace-rail-section-header">
-        <span class="workspace-rail-section-title">主工作台</span>
-        ${pillHtml(view.editorTab === 'credentials' ? '凭证面' : '控制面', 'neutral')}
-      </div>
-      <div class="workspace-shortcut-grid">
-        ${shortcutCardHtml({
-          action: 'focus-workspace',
-          label: '模型',
-          meta: `${data.summary.modelProvider || 'provider 待配'} · ${data.summary.modelDefault || '默认模型待配'}`,
-          active: view.activeWorkspaceSection === 'model-presets',
-          attrs: {
-            'data-tab': 'control',
-            'data-section': 'model-presets',
-          },
-        })}
-        ${shortcutCardHtml({
-          action: 'focus-workspace',
-          label: '能力面',
-          meta: `${data.summary.toolsets.length} 组 toolsets · ${enabledTools} 个 tools`,
-          active: view.activeWorkspaceSection === 'toolsets-presets',
-          attrs: {
-            'data-tab': 'control',
-            'data-section': 'toolsets-presets',
-          },
-        })}
-        ${shortcutCardHtml({
-          action: 'focus-workspace',
-          label: '记忆',
-          meta: data.summary.memoryEnabled ? (data.summary.memoryProvider || 'builtin-file') : 'memory off',
-          active: view.activeWorkspaceSection === 'memory-presets',
-          attrs: {
-            'data-tab': 'control',
-            'data-section': 'memory-presets',
-          },
-        })}
-        ${shortcutCardHtml({
-          action: 'focus-workspace',
-          label: '凭证',
-          meta: `${credentialsCount} 项密钥已填`,
-          active: view.activeWorkspaceSection === 'provider-credentials',
-          attrs: {
-            'data-tab': 'credentials',
-            'data-section': 'provider-credentials',
-          },
-        })}
-        ${shortcutCardHtml({
-          action: 'focus-workspace',
-          label: '通道',
-          meta: `${channelCount} 项通道参数 · ${remoteJobs.length} 个远端作业`,
-          active: view.activeWorkspaceSection === 'channel-credentials',
-          attrs: {
-            'data-tab': 'credentials',
-            'data-section': 'channel-credentials',
-          },
-        })}
-        ${shortcutCardHtml({
-          action: 'goto-gateway',
-          label: 'Gateway',
-          meta: snapshot?.gateway?.gatewayState || '进入网关工作台',
-        })}
-      </div>
-    </section>
-
-    <section class="workspace-rail-section">
-      <div class="workspace-rail-section-header">
-        <span class="workspace-rail-section-title">体检</span>
-        ${pillHtml(remoteJobs.length > 0 ? `${remoteJobs.length} 远端作业` : '本地优先', remoteJobs.length > 0 ? 'warn' : 'neutral')}
-      </div>
-      <div class="workspace-rail-toolbar workspace-rail-toolbar-grid">
-        ${buttonHtml({ action: 'diagnostic-config-check', label: view.runningDiagnostic === 'config-check' ? '配置体检…' : '配置体检', kind: 'primary', disabled: actionBusy })}
-        ${buttonHtml({ action: 'diagnostic-memory-status', label: '记忆状态', disabled: actionBusy })}
-        ${buttonHtml({ action: 'diagnostic-gateway-status', label: '网关状态', disabled: actionBusy })}
-        ${buttonHtml({ action: 'diagnostic-doctor', label: 'Doctor', disabled: actionBusy })}
-      </div>
-    </section>
-
-    <section class="workspace-rail-section">
-      <div class="workspace-rail-section-header">
-        <span class="workspace-rail-section-title">文件与页内联动</span>
-        ${pillHtml(`${localSkills}/${skills.length} Skills`, localSkills === skills.length ? 'good' : 'warn')}
-      </div>
-      <div class="workspace-rail-toolbar workspace-rail-toolbar-grid">
-        ${buttonHtml({ action: 'open-config', label: '定位 YAML', disabled: actionBusy })}
-        ${buttonHtml({ action: 'open-env', label: '定位 .env', disabled: actionBusy })}
-        ${buttonHtml({ action: 'open-home', label: '打开 Home', disabled: actionBusy })}
-        ${buttonHtml({ action: 'goto-extensions', label: '扩展页' })}
-      </div>
-    </section>
-
-    <section class="workspace-rail-section workspace-compat-card">
-      <div class="workspace-rail-section-header">
-        <span class="workspace-rail-section-title">历史迁移</span>
-        ${buttonHtml({
-          action: 'toggle-compatibility-actions',
-          label: view.showCompatibilityActions ? '收起' : '展开',
-          kind: 'secondary',
-        })}
-      </div>
-      <p class="helper-text">只保留旧配置接管；模型、通道、记忆、插件和 skills 已优先收回客户端工作台。</p>
-      ${view.showCompatibilityActions ? `
-        <div class="workspace-compat-panel">
-          ${buttonHtml({ action: 'compat-config-migrate', label: view.runningAction === 'config:compat-migrate' ? '迁移中…' : '迁移旧配置', kind: 'primary', disabled: actionBusy || !installation.binaryFound })}
-          ${buttonHtml({ action: 'compat-claw-migrate', label: view.runningAction === 'config:claw-migrate' ? '导入中…' : '导入 OpenClaw', disabled: actionBusy || !installation.binaryFound })}
-        </div>
-      ` : ''}
-    </section>
-  `;
-}
-
-function renderStructuredControls(view) {
-  const draft = view.controlDraft ?? cloneWorkspace();
-  const memoryPresets = memoryProviderPresets(view);
-  return `
-    <div class="page-stack">
-      <section class="panel panel-nested">
-        <div class="workspace-main-header">
-          <div>
-            <div class="panel-title-row">
-              <strong>结构化控制面</strong>
-              ${infoTipHtml('优先在客户端里直接完成模型、memory、toolsets 等高频配置，尽量减少回官方交互命令。')}
-            </div>
-          </div>
-          <div class="pill-row">
-            ${pillHtml(draft.modelProvider || 'provider 未配', draft.modelProvider ? 'good' : 'warn')}
-            ${pillHtml(draft.memoryEnabled ? 'Memory On' : 'Memory Off', draft.memoryEnabled ? 'good' : 'warn')}
-            ${pillHtml(draft.toolsets.length ? `${draft.toolsets.length} Toolsets` : '无 Toolsets', draft.toolsets.length ? 'good' : 'warn')}
-          </div>
-        </div>
-
-        <section class="workspace-summary-strip">
-          <section class="summary-mini-card">
-            <span class="summary-mini-label">当前主模型</span>
-            <strong class="summary-mini-value">${escapeHtml(draft.modelDefault || '待选择')}</strong>
-            <span class="summary-mini-meta">${escapeHtml(draft.modelProvider || 'provider 未配')}</span>
-          </section>
-          <section class="summary-mini-card">
-            <span class="summary-mini-label">能力暴露</span>
-            <strong class="summary-mini-value">${escapeHtml(String(draft.toolsets.length))}</strong>
-            <span class="summary-mini-meta">${escapeHtml(platformBindingsPreview(draft.platformToolsets, '无平台绑定', 2))}</span>
-          </section>
-          <section class="summary-mini-card">
-            <span class="summary-mini-label">记忆与画像</span>
-            <strong class="summary-mini-value">${escapeHtml(draft.memoryEnabled ? (draft.memoryProvider || 'builtin-file') : 'off')}</strong>
-            <span class="summary-mini-meta">${escapeHtml(draft.userProfileEnabled ? 'user profile on' : 'user profile off')}</span>
-          </section>
-          <section class="summary-mini-card">
-            <span class="summary-mini-label">终端后端</span>
-            <strong class="summary-mini-value">${escapeHtml(draft.terminalBackend || '待配置')}</strong>
-            <span class="summary-mini-meta">${escapeHtml(draft.terminalCwd || '未声明 cwd')}</span>
-          </section>
-        </section>
-
-        <section class="preset-strip workspace-section-anchor" data-workspace-section="model-presets">
-          <div class="preset-strip-header">
-            <div>
-              <div class="panel-title-row">
-                <strong>模型工作台</strong>
-                ${infoTipHtml('像 clawpanel 一样先决定 provider，再直接点选常用 model。这里会同时改 provider、base URL 和默认模型。')}
-              </div>
-            </div>
-            ${buttonHtml({ action: 'switch-editor-tab', label: '去配凭证', attrs: { 'data-tab': 'credentials' } })}
-          </div>
-          <div class="preset-card-grid workspace-preset-grid">
-            ${MODEL_PROVIDER_PRESETS.map((preset) => `
-              <section class="preset-card">
-                <div class="preset-card-head">
-                  <div class="preset-card-heading">
-                    <strong>${escapeHtml(preset.label)}</strong>
-                    <span class="preset-card-caption">${escapeHtml(preset.provider)}</span>
-                  </div>
-                  <div class="pill-row">
-                    ${draft.modelProvider === preset.provider ? pillHtml('当前使用', 'good') : ''}
-                    ${preset.envKey ? pillHtml(envPresetReady(view, preset.envKey) ? '密钥已就绪' : '缺少密钥', envPresetReady(view, preset.envKey) ? 'good' : 'warn') : pillHtml('自定义', 'neutral')}
-                  </div>
-                </div>
-                <p class="preset-card-copy">${escapeHtml(preset.copy)}</p>
-                <code class="preset-inline-code">${escapeHtml(preset.baseUrl || '保留当前 Base URL，适合本地兼容端点')}</code>
-                ${renderModelPresetChips(view, preset, draft)}
-                <div class="preset-card-foot">
-                  <div class="toolbar top-gap">
-                    ${buttonHtml({ action: 'apply-provider-preset', label: '应用 Provider', kind: 'primary', attrs: { 'data-preset': preset.id } })}
-                    ${preset.envKey ? buttonHtml({ action: 'switch-editor-tab', label: preset.envLabel, attrs: { 'data-tab': 'credentials' } }) : ''}
-                  </div>
-                </div>
-              </section>
-            `).join('')}
-          </div>
-        </section>
-
-        <section class="preset-strip workspace-section-anchor" data-workspace-section="toolsets-presets">
-          <div class="preset-strip-header">
-            <div>
-              <div class="panel-title-row">
-                <strong>能力预设</strong>
-                ${infoTipHtml('直接写入 toolsets 和 platform_toolsets，用预设替代大部分“工具选择”命令行向导。')}
-              </div>
-            </div>
-          </div>
-          <div class="preset-card-grid">
-            ${TOOLSET_WORKSPACE_PRESETS.map((preset) => `
-              <section class="preset-card">
-                <div class="preset-card-head">
-                  <div class="preset-card-heading">
-                    <strong>${escapeHtml(preset.label)}</strong>
-                    <span class="preset-card-caption">${escapeHtml(previewJoined(preset.toolsets, '—', 4))}</span>
-                  </div>
-                  <div class="pill-row">
-                    ${toolsetPresetActive(draft, preset) ? pillHtml('当前方案', 'good') : ''}
-                    ${pillHtml(`${preset.toolsets.length} 组`, 'neutral')}
-                    ${pillHtml(`${preset.platformToolsets.length} 平台`, preset.platformToolsets.length ? 'neutral' : 'warn')}
-                  </div>
-                </div>
-                <p class="preset-card-copy">${escapeHtml(preset.copy)}</p>
-                <code class="preset-inline-code">${escapeHtml(platformBindingsPreview(preset.platformToolsets, '只写顶层 toolsets', 2))}</code>
-                <div class="preset-card-foot">
-                  <div class="toolbar top-gap">
-                    ${buttonHtml({ action: 'apply-toolset-preset', label: '应用能力面', kind: 'primary', attrs: { 'data-preset': preset.id } })}
-                  </div>
-                </div>
-              </section>
-            `).join('')}
-          </div>
-        </section>
-
-        <section class="preset-strip workspace-section-anchor" data-workspace-section="memory-presets">
-          <div class="preset-strip-header">
-            <div>
-              <div class="panel-title-row">
-                <strong>记忆 Provider</strong>
-                ${infoTipHtml('直接切换默认 memory provider，并同步打开或关闭 memory / user profile。')}
-              </div>
-            </div>
-            ${buttonHtml({ action: 'goto-memory', label: '记忆页' })}
-          </div>
-          <div class="preset-card-grid">
-            ${memoryPresets.map((preset) => `
-              <section class="preset-card">
-                <div class="preset-card-head">
-                  <div class="preset-card-heading">
-                    <strong>${escapeHtml(preset.label)}</strong>
-                    <span class="preset-card-caption">${escapeHtml(preset.availability)}</span>
-                  </div>
-                  <div class="pill-row">
-                    ${memoryPresetActive(view, preset) ? pillHtml('当前使用', 'good') : ''}
-                    ${pillHtml(preset.memoryEnabled ? 'memory on' : 'memory off', preset.memoryEnabled ? 'neutral' : 'warn')}
-                  </div>
-                </div>
-                <p class="preset-card-copy">${escapeHtml(preset.copy)}</p>
-                <code class="preset-inline-code">${escapeHtml(preset.provider || 'builtin-file')}</code>
-                <div class="preset-card-foot">
-                  <div class="toolbar top-gap">
-                    ${buttonHtml({ action: 'apply-memory-preset', label: preset.memoryEnabled ? '设为默认' : '关闭记忆', kind: preset.memoryEnabled ? 'primary' : 'secondary', attrs: { 'data-preset': preset.id } })}
-                  </div>
-                </div>
-              </section>
-            `).join('')}
-          </div>
-        </section>
-
-        <section class="preset-strip workspace-section-anchor" data-workspace-section="runtime-presets">
-          <div class="preset-strip-header">
-            <div>
-              <div class="panel-title-row">
-                <strong>Terminal Backend</strong>
-                ${infoTipHtml('先用常见 backend 预设把 backend、cwd 和基础 timeout 写好，确实需要更细参数时再进 YAML 精修。')}
-              </div>
-            </div>
-          </div>
-          <div class="preset-card-grid">
-            ${TERMINAL_BACKEND_PRESETS.map((preset) => `
-              <section class="preset-card">
-                <div class="preset-card-head">
-                  <div class="preset-card-heading">
-                    <strong>${escapeHtml(preset.label)}</strong>
-                    <span class="preset-card-caption">${escapeHtml(preset.backend)}</span>
-                  </div>
-                  <div class="pill-row">
-                    ${terminalPresetActive(view, preset) ? pillHtml('当前后端', 'good') : ''}
-                    ${preset.partial ? pillHtml('可继续精修', 'warn') : pillHtml('结构化可配', 'neutral')}
-                  </div>
-                </div>
-                <p class="preset-card-copy">${escapeHtml(preset.copy)}</p>
-                <code class="preset-inline-code">${escapeHtml(`${preset.cwd} · timeout ${preset.terminalTimeout}s${preset.terminalModalImage ? ` · ${preset.terminalModalImage}` : ''}`)}</code>
-                <div class="preset-card-foot">
-                  <div class="toolbar top-gap">
-                    ${buttonHtml({ action: 'apply-terminal-preset', label: '应用后端', kind: 'primary', attrs: { 'data-preset': preset.id } })}
-                  </div>
-                </div>
-              </section>
-            `).join('')}
-          </div>
-        </section>
-
-        <div class="control-card-grid">
-          <section class="action-card action-card-compact workspace-section-anchor" data-workspace-section="model-detail">
-            <div class="action-card-header">
-              <div>
-                <p class="eyebrow">Model</p>
-                <h3 class="action-card-title">模型与上下文</h3>
-              </div>
-            </div>
-            <div class="form-grid">
-              <label class="field-stack">
-                <span>默认模型</span>
-                <input class="search-input" id="control-model-default" value="${escapeHtml(draft.modelDefault)}" placeholder="gpt-5.4">
-              </label>
-              <label class="field-stack">
-                <span>Provider</span>
-                <input class="search-input" id="control-model-provider" value="${escapeHtml(draft.modelProvider)}" placeholder="openai / anthropic / custom">
-              </label>
-              <label class="field-stack">
-                <span>Base URL</span>
-                <input class="search-input" id="control-model-base-url" value="${escapeHtml(draft.modelBaseUrl)}" placeholder="https://api.example.com/v1">
-              </label>
-              <label class="field-stack">
-                <span>Context Engine</span>
-                <input class="search-input" id="control-context-engine" value="${escapeHtml(draft.contextEngine)}" placeholder="compressor">
-              </label>
-            </div>
-            <label class="field-stack">
-              <span>Personality</span>
-              <input class="search-input" id="control-personality" value="${escapeHtml(draft.personality)}" placeholder="helpful / technical / concise">
-            </label>
-            <div class="checkbox-row top-gap">
-              <label>
-                <input type="checkbox" id="control-streaming-enabled" ${draft.streamingEnabled ? 'checked' : ''}>
-                <span>启用 Streaming</span>
-              </label>
-            </div>
-          </section>
-
-          <section class="action-card action-card-compact workspace-section-anchor" data-workspace-section="toolsets-detail">
-            <div class="action-card-header">
-              <div>
-                <p class="eyebrow">Toolsets</p>
-                <h3 class="action-card-title">能力暴露与平台绑定</h3>
-              </div>
-            </div>
-            <label class="field-stack">
-              <span>顶层 Toolsets</span>
-              <textarea class="editor compact-control-editor" id="control-toolsets" placeholder="hermes-cli&#10;web">${escapeHtml(draft.toolsets.join('\n'))}</textarea>
-            </label>
-            <label class="field-stack top-gap">
-              <span>平台 Toolsets</span>
-              <textarea class="editor compact-control-editor" id="control-platform-toolsets" placeholder="cli = hermes-cli, web&#10;discord = hermes-discord">${escapeHtml(platformToolsetsToText(draft.platformToolsets))}</textarea>
-            </label>
-            <p class="helper-text">格式：平台 = toolset1, toolset2。</p>
-          </section>
-
-          <section class="action-card action-card-compact workspace-section-anchor" data-workspace-section="memory-detail">
-            <div class="action-card-header">
-              <div>
-                <p class="eyebrow">Memory</p>
-                <h3 class="action-card-title">记忆与 Skills 目录</h3>
-              </div>
-            </div>
-            <div class="form-grid">
-              <label class="field-stack">
-                <span>Memory Provider</span>
-                <input class="search-input" id="control-memory-provider" value="${escapeHtml(draft.memoryProvider)}" placeholder="留空表示 builtin-file">
-              </label>
-              <label class="field-stack">
-                <span>Memory Char Limit</span>
-                <input class="search-input" id="control-memory-char-limit" value="${escapeHtml(draft.memoryCharLimit ?? '')}" placeholder="2200">
-              </label>
-              <label class="field-stack">
-                <span>User Char Limit</span>
-                <input class="search-input" id="control-user-char-limit" value="${escapeHtml(draft.userCharLimit ?? '')}" placeholder="1375">
-              </label>
-            </div>
-            <div class="checkbox-row">
-              <label>
-                <input type="checkbox" id="control-memory-enabled" ${draft.memoryEnabled ? 'checked' : ''}>
-                <span>启用 Memory</span>
-              </label>
-              <label>
-                <input type="checkbox" id="control-user-profile-enabled" ${draft.userProfileEnabled ? 'checked' : ''}>
-                <span>启用 User Profile</span>
-              </label>
-            </div>
-            <label class="field-stack">
-              <span>外部 Skills 目录</span>
-              <textarea class="editor compact-control-editor" id="control-skills-external-dirs" placeholder="/Users/me/skills&#10;/opt/hermes-skills">${escapeHtml(draft.skillsExternalDirs.join('\n'))}</textarea>
-            </label>
-          </section>
-
-          <section class="action-card action-card-compact workspace-section-anchor" data-workspace-section="runtime-detail">
-            <div class="action-card-header">
-              <div>
-                <p class="eyebrow">Runtime</p>
-                <h3 class="action-card-title">终端、审批与 Discord 路由</h3>
-              </div>
-            </div>
-            <div class="form-grid">
-              <label class="field-stack">
-                <span>Terminal Backend</span>
-                <input class="search-input" id="control-terminal-backend" value="${escapeHtml(draft.terminalBackend)}" placeholder="local / docker / modal">
-              </label>
-              <label class="field-stack">
-                <span>Terminal CWD</span>
-                <input class="search-input" id="control-terminal-cwd" value="${escapeHtml(draft.terminalCwd)}" placeholder=".">
-              </label>
-              <label class="field-stack">
-                <span>审批模式</span>
-                <select class="select-input" id="control-approvals-mode">
-                  ${['manual', 'auto', 'disabled'].map((item) => `
-                    <option value="${item}" ${draft.approvalsMode === item ? 'selected' : ''}>${item}</option>
-                  `).join('')}
-                </select>
-              </label>
-              <label class="field-stack">
-                <span>审批超时</span>
-                <input class="search-input" id="control-approvals-timeout" value="${escapeHtml(draft.approvalsTimeout ?? '')}" placeholder="60">
-              </label>
-            </div>
-            <div class="checkbox-row">
-              <label>
-                <input type="checkbox" id="control-discord-require-mention" ${draft.discordRequireMention ? 'checked' : ''}>
-                <span>Discord 需要 @ 提及</span>
-              </label>
-              <label>
-                <input type="checkbox" id="control-discord-auto-thread" ${draft.discordAutoThread ? 'checked' : ''}>
-                <span>自动开线程</span>
-              </label>
-              <label>
-                <input type="checkbox" id="control-discord-reactions" ${draft.discordReactions ? 'checked' : ''}>
-                <span>启用状态反应</span>
-              </label>
-            </div>
-            <div class="form-grid">
-              <label class="field-stack">
-                <span>自由响应频道</span>
-                <input class="search-input" id="control-discord-free-response" value="${escapeHtml(draft.discordFreeResponseChannels)}" placeholder="dev,ops">
-              </label>
-              <label class="field-stack">
-                <span>允许频道</span>
-                <input class="search-input" id="control-discord-allowed" value="${escapeHtml(draft.discordAllowedChannels)}" placeholder="general,alerts">
-              </label>
-            </div>
-          </section>
-        </div>
-      </section>
-    </div>
-  `;
-}
-
-function renderStructuredEnvControls(view) {
-  const draft = view.envDraft ?? cloneEnvWorkspace();
-  const credentialsCount = [
-    draft.openaiApiKey,
-    draft.openrouterApiKey,
-    draft.anthropicApiKey,
-    draft.googleApiKey,
-    draft.hfToken,
-    draft.anyrouter2ApiKey,
-    draft.crsApiKey,
-    draft.siliconflowApiKey,
-    draft.hermesGatewayToken,
-    draft.telegramBotToken,
-    draft.discordBotToken,
-    draft.slackBotToken,
-  ].filter((value) => value.trim()).length;
-  const channelCount = [
-    draft.telegramHomeChannel,
-    draft.telegramReplyToMode,
-    draft.discordHomeChannel,
-    draft.discordReplyToMode,
-  ].filter((value) => value.trim()).length;
-
-  return `
-    <div class="page-stack">
-      <section class="panel panel-nested">
-        <div class="workspace-main-header">
-          <div>
-            <div class="panel-title-row">
-              <strong>凭证与通道控制面</strong>
-              ${infoTipHtml('模型密钥、Gateway Token、消息通道凭证和运行时 .env 都优先在客户端内完成，避免把常见配置再交给 Terminal。')}
-            </div>
-          </div>
-          <div class="pill-row">
-            ${pillHtml(credentialsCount ? `${credentialsCount} 项已填` : '暂无密钥', credentialsCount ? 'good' : 'warn')}
-            ${pillHtml(channelCount ? `${channelCount} 项通道参数` : '通道参数待补', channelCount ? 'neutral' : 'warn')}
-            ${pillHtml(draft.whatsappEnabled ? 'WhatsApp On' : 'WhatsApp Off', draft.whatsappEnabled ? 'good' : 'neutral')}
-          </div>
-        </div>
-
-        <section class="workspace-summary-strip">
-          <section class="summary-mini-card">
-            <span class="summary-mini-label">模型凭证</span>
-            <strong class="summary-mini-value">${escapeHtml(String(credentialsCount))}</strong>
-            <span class="summary-mini-meta">已写入的 provider / gateway / channel token 数</span>
-          </section>
-          <section class="summary-mini-card">
-            <span class="summary-mini-label">消息通道</span>
-            <strong class="summary-mini-value">${escapeHtml(String(channelCount))}</strong>
-            <span class="summary-mini-meta">${escapeHtml(draft.telegramBotToken || draft.discordBotToken || draft.slackBotToken ? '已有至少一个消息入口' : '通道 token 仍待补齐')}</span>
-          </section>
-          <section class="summary-mini-card">
-            <span class="summary-mini-label">Gateway Token</span>
-            <strong class="summary-mini-value">${escapeHtml(draft.hermesGatewayToken ? '已写入' : '未写入')}</strong>
-            <span class="summary-mini-meta">用于 Gateway / 多平台闭环</span>
-          </section>
-          <section class="summary-mini-card">
-            <span class="summary-mini-label">运行时变量</span>
-            <strong class="summary-mini-value">${escapeHtml(draft.terminalModalImage || '默认')}</strong>
-            <span class="summary-mini-meta">${escapeHtml(`terminal ${draft.terminalTimeout ?? '—'}s · browser ${draft.browserSessionTimeout ?? '—'}s`)}</span>
-          </section>
-        </section>
-
-        <section class="preset-strip workspace-section-anchor" data-workspace-section="channel-presets">
-          <div class="preset-strip-header">
-            <div>
-              <div class="panel-title-row">
-                <strong>通道骨架</strong>
-                ${infoTipHtml('为 Telegram、Discord、Slack 预填推荐的 reply mode 和最小通道骨架，后续只需要补 token / channel id 即可。')}
-              </div>
-            </div>
-          </div>
-          <div class="preset-card-grid">
-            ${CHANNEL_PRESETS.map((preset) => `
-              <section class="preset-card">
-                <div class="preset-card-head">
-                  <strong>${escapeHtml(preset.label)}</strong>
-                  <div class="pill-row">
-                    ${pillHtml(envPresetReady(view, preset.tokenKey) ? 'Token 已填' : '待填 Token', envPresetReady(view, preset.tokenKey) ? 'good' : 'warn')}
-                    ${preset.modeKey ? pillHtml(view.envDraft?.[preset.modeKey]?.trim() ? view.envDraft[preset.modeKey] : '默认模式未写入', view.envDraft?.[preset.modeKey]?.trim() ? 'neutral' : 'warn') : pillHtml('仅 Token', 'neutral')}
-                  </div>
-                </div>
-                <p>${escapeHtml(preset.copy)}</p>
-                <code class="preset-inline-code">${escapeHtml(preset.modeKey ? `${preset.modeKey} = ${preset.modeDefault}` : `${preset.tokenLabel} = ...`)}</code>
-                <div class="toolbar top-gap">
-                  ${buttonHtml({ action: 'apply-channel-preset', label: '应用骨架', kind: 'primary', attrs: { 'data-preset': preset.id } })}
-                </div>
-              </section>
-            `).join('')}
-          </div>
-        </section>
-
-        <div class="control-card-grid">
-          <section class="action-card action-card-compact workspace-section-anchor" data-workspace-section="provider-credentials">
-            <div class="action-card-header">
-              <div>
-                <p class="eyebrow">Models</p>
-                <h3 class="action-card-title">模型通道凭证</h3>
-              </div>
-            </div>
-            <div class="form-grid">
-              <label class="field-stack">
-                <span>OpenAI API Key</span>
-                <input class="search-input" id="env-openai-api-key" value="${escapeHtml(draft.openaiApiKey)}" placeholder="sk-..." spellcheck="false" autocomplete="off">
-              </label>
-              <label class="field-stack">
-                <span>Anthropic API Key</span>
-                <input class="search-input" id="env-anthropic-api-key" value="${escapeHtml(draft.anthropicApiKey)}" placeholder="sk-ant-..." spellcheck="false" autocomplete="off">
-              </label>
-              <label class="field-stack">
-                <span>OpenRouter API Key</span>
-                <input class="search-input" id="env-openrouter-api-key" value="${escapeHtml(draft.openrouterApiKey)}" placeholder="sk-or-..." spellcheck="false" autocomplete="off">
-              </label>
-              <label class="field-stack">
-                <span>Google API Key</span>
-                <input class="search-input" id="env-google-api-key" value="${escapeHtml(draft.googleApiKey)}" placeholder="AIza..." spellcheck="false" autocomplete="off">
-              </label>
-              <label class="field-stack">
-                <span>HF Token</span>
-                <input class="search-input" id="env-hf-token" value="${escapeHtml(draft.hfToken)}" placeholder="hf_..." spellcheck="false" autocomplete="off">
-              </label>
-              <label class="field-stack">
-                <span>AnyRouter 2 API Key</span>
-                <input class="search-input" id="env-anyrouter2-api-key" value="${escapeHtml(draft.anyrouter2ApiKey)}" placeholder="填写 AnyRouter 2 token" spellcheck="false" autocomplete="off">
-              </label>
-              <label class="field-stack">
-                <span>CRS API Key</span>
-                <input class="search-input" id="env-crs-api-key" value="${escapeHtml(draft.crsApiKey)}" placeholder="填写 CRS token" spellcheck="false" autocomplete="off">
-              </label>
-              <label class="field-stack">
-                <span>SiliconFlow API Key</span>
-                <input class="search-input" id="env-siliconflow-api-key" value="${escapeHtml(draft.siliconflowApiKey)}" placeholder="填写 SiliconFlow token" spellcheck="false" autocomplete="off">
-              </label>
-            </div>
-          </section>
-
-          <section class="action-card action-card-compact workspace-section-anchor" data-workspace-section="channel-credentials">
-            <div class="action-card-header">
-              <div>
-                <p class="eyebrow">Gateway</p>
-                <h3 class="action-card-title">网关与消息通道</h3>
-              </div>
-            </div>
-            <div class="form-grid">
-              <label class="field-stack">
-                <span>Hermes Gateway Token</span>
-                <input class="search-input" id="env-hermes-gateway-token" value="${escapeHtml(draft.hermesGatewayToken)}" placeholder="gateway token" spellcheck="false" autocomplete="off">
-              </label>
-              <label class="field-stack">
-                <span>Telegram Bot Token</span>
-                <input class="search-input" id="env-telegram-bot-token" value="${escapeHtml(draft.telegramBotToken)}" placeholder="telegram bot token" spellcheck="false" autocomplete="off">
-              </label>
-              <label class="field-stack">
-                <span>Telegram Home Channel</span>
-                <input class="search-input" id="env-telegram-home-channel" value="${escapeHtml(draft.telegramHomeChannel)}" placeholder="home channel / chat id">
-              </label>
-              <label class="field-stack">
-                <span>Telegram Reply Mode</span>
-                <input class="search-input" id="env-telegram-reply-to-mode" value="${escapeHtml(draft.telegramReplyToMode)}" placeholder="inline / thread / reply">
-              </label>
-              <label class="field-stack">
-                <span>Discord Bot Token</span>
-                <input class="search-input" id="env-discord-bot-token" value="${escapeHtml(draft.discordBotToken)}" placeholder="discord bot token" spellcheck="false" autocomplete="off">
-              </label>
-              <label class="field-stack">
-                <span>Discord Home Channel</span>
-                <input class="search-input" id="env-discord-home-channel" value="${escapeHtml(draft.discordHomeChannel)}" placeholder="channel id / alias">
-              </label>
-              <label class="field-stack">
-                <span>Discord Reply Mode</span>
-                <input class="search-input" id="env-discord-reply-to-mode" value="${escapeHtml(draft.discordReplyToMode)}" placeholder="inline / thread / reply">
-              </label>
-              <label class="field-stack">
-                <span>Slack Bot Token</span>
-                <input class="search-input" id="env-slack-bot-token" value="${escapeHtml(draft.slackBotToken)}" placeholder="xoxb-..." spellcheck="false" autocomplete="off">
-              </label>
-            </div>
-            <div class="checkbox-row top-gap">
-              <label>
-                <input type="checkbox" id="env-whatsapp-enabled" ${draft.whatsappEnabled ? 'checked' : ''}>
-                <span>启用 WhatsApp 通道</span>
-              </label>
-            </div>
-          </section>
-
-          <section class="action-card action-card-compact workspace-section-anchor" data-workspace-section="runtime-env">
-            <div class="action-card-header">
-              <div>
-                <p class="eyebrow">Runtime</p>
-                <h3 class="action-card-title">终端与浏览器运行时</h3>
-              </div>
-            </div>
-            <div class="form-grid">
-              <label class="field-stack">
-                <span>Terminal Modal Image</span>
-                <input class="search-input" id="env-terminal-modal-image" value="${escapeHtml(draft.terminalModalImage)}" placeholder="debian_slim / ubuntu">
-              </label>
-              <label class="field-stack">
-                <span>Terminal Timeout</span>
-                <input class="search-input" id="env-terminal-timeout" value="${escapeHtml(draft.terminalTimeout ?? '')}" placeholder="120">
-              </label>
-              <label class="field-stack">
-                <span>Terminal Lifetime Seconds</span>
-                <input class="search-input" id="env-terminal-lifetime-seconds" value="${escapeHtml(draft.terminalLifetimeSeconds ?? '')}" placeholder="900">
-              </label>
-              <label class="field-stack">
-                <span>Browser Session Timeout</span>
-                <input class="search-input" id="env-browser-session-timeout" value="${escapeHtml(draft.browserSessionTimeout ?? '')}" placeholder="600">
-              </label>
-              <label class="field-stack">
-                <span>Browser Inactivity Timeout</span>
-                <input class="search-input" id="env-browser-inactivity-timeout" value="${escapeHtml(draft.browserInactivityTimeout ?? '')}" placeholder="90">
-              </label>
-            </div>
-            <p class="helper-text">这里直接写 modal / browser 运行时变量。</p>
-          </section>
-
-          <section class="action-card action-card-compact">
-            <div class="action-card-header">
-              <div>
-                <p class="eyebrow">Closure</p>
-                <h3 class="action-card-title">保存后建议动作</h3>
-              </div>
-            </div>
-            <div class="detail-list compact">
-              <div class="key-value-row">
-                <span>模型凭证</span>
-                <strong>${escapeHtml(draft.openaiApiKey || draft.anthropicApiKey || draft.openrouterApiKey || draft.googleApiKey || draft.hfToken ? '已有至少一个主模型密钥' : '尚未填写')}</strong>
-              </div>
-              <div class="key-value-row">
-                <span>消息通道</span>
-                <strong>${escapeHtml(draft.telegramBotToken || draft.discordBotToken || draft.slackBotToken ? '已有通道 token' : '尚未填写')}</strong>
-              </div>
-              <div class="key-value-row">
-                <span>Gateway</span>
-                <strong>${escapeHtml(draft.hermesGatewayToken ? 'Token 已填写' : 'Token 待补')}</strong>
-              </div>
-            </div>
-            <p class="helper-text">保存后建议立刻体检，再去 Gateway 或日志页验证。</p>
-          </section>
-        </div>
-      </section>
     </div>
   `;
 }
@@ -1495,7 +230,7 @@ function renderPage(view) {
 
   if (view.error || !view.data || !view.installation) {
     view.page.innerHTML = `
-      <div class="page-header">
+      <div class="page-header page-header-compact">
         <div class="panel-title-row">
           <h1 class="page-title">配置中心</h1>
         </div>
@@ -1533,7 +268,7 @@ function renderPage(view) {
   const actionBusy = Boolean(view.saving || view.runningDiagnostic || view.runningAction);
   const seed = relaySeed(view);
   const logsIntent = buildLogsDrilldownIntent(seed, {
-    description: '继续核对配置相关命令输出和运行日志。',
+    description: '继续核对配置相关回执和运行日志。',
     logName: snapshot?.gateway?.gatewayState === 'running' ? 'agent' : 'errors',
     contains: view.investigation?.context?.source || '',
     limit: '160',
@@ -1553,16 +288,16 @@ function renderPage(view) {
   });
 
   view.page.innerHTML = `
-    <div class="page-header">
+    <div class="page-header page-header-compact">
       <div class="panel-title-row">
         <h1 class="page-title">配置中心</h1>
         ${infoTipHtml('优先在客户端内直接完成模型、通道、toolsets、记忆和凭证接管；历史迁移动作被收进侧栏，不再抢主操作区。')}
       </div>
-      <p class="page-desc">优先在这里完成配置接管，再去扩展、网关和诊断页做运行态闭环。</p>
+      <p class="page-desc">先在这里完成配置接管，再去运行页验证闭环。</p>
     </div>
 
     ${view.investigation ? `
-      <div class="context-banner">
+      <div class="context-banner context-banner-compact">
         <div class="context-banner-header">
           <div class="context-banner-copy">
             <span class="context-banner-label">Drilldown</span>
@@ -1584,9 +319,8 @@ function renderPage(view) {
                 disabled: Boolean(view.runningDiagnostic),
               })
             : ''}
+          ${investigationPrimaryAction(view)}
           ${buttonHtml({ action: 'clear-investigation', label: '清除上下文' })}
-          ${buttonHtml({ action: 'goto-extensions', label: '进入扩展页' })}
-          ${buttonHtml({ action: 'goto-gateway', label: '进入 Gateway' })}
         </div>
       </div>
     ` : ''}
@@ -1594,7 +328,7 @@ function renderPage(view) {
     <div class="stat-cards stat-cards-4">
       <section class="stat-card">
         <div class="stat-card-header">
-          <span class="stat-card-label">Model</span>
+          <span class="stat-card-label">模型</span>
           ${statusDotHtml(data.summary.modelDefault && data.summary.modelProvider ? 'running' : 'warning')}
         </div>
         <div class="stat-card-value">${escapeHtml(data.summary.modelDefault || '待配置')}</div>
@@ -1602,7 +336,7 @@ function renderPage(view) {
       </section>
       <section class="stat-card">
         <div class="stat-card-header">
-          <span class="stat-card-label">Terminal</span>
+          <span class="stat-card-label">终端</span>
           ${statusDotHtml(data.summary.terminalBackend ? 'running' : 'warning')}
         </div>
         <div class="stat-card-value">${escapeHtml(data.summary.terminalBackend || '未配置')}</div>
@@ -1610,15 +344,15 @@ function renderPage(view) {
       </section>
       <section class="stat-card">
         <div class="stat-card-header">
-          <span class="stat-card-label">Toolsets / Tools</span>
+          <span class="stat-card-label">能力集 / 工具</span>
           ${statusDotHtml(enabledTools > 0 ? 'running' : 'warning')}
         </div>
         <div class="stat-card-value">${escapeHtml(`${data.summary.toolsets.length} / ${enabledTools}`)}</div>
-        <div class="stat-card-meta">${escapeHtml(`声明的 toolsets / 运行态启用 tools（总数 ${totalTools}）`)}</div>
+        <div class="stat-card-meta">${escapeHtml(`声明的能力集 / 运行态启用工具（总数 ${totalTools}）`)}</div>
       </section>
       <section class="stat-card">
         <div class="stat-card-header">
-          <span class="stat-card-label">Gateway / Memory</span>
+          <span class="stat-card-label">网关 / 记忆</span>
           ${statusDotHtml(data.summary.memoryEnabled ? 'running' : 'warning')}
         </div>
         <div class="stat-card-value">${escapeHtml(snapshot?.gateway?.gatewayState || '未检测到')}</div>
@@ -1629,24 +363,22 @@ function renderPage(view) {
     <div class="quick-actions">
       ${buttonHtml({ action: 'refresh', label: view.refreshing ? '同步中…' : '重新读取', kind: 'primary', disabled: view.refreshing })}
       ${buttonHtml({ action: 'diagnostic-config-check', label: view.runningDiagnostic === 'config-check' ? '配置体检…' : '配置体检', disabled: actionBusy })}
-      ${buttonHtml({ action: 'switch-editor-tab', label: '凭证 / 通道', attrs: { 'data-tab': 'credentials' } })}
-      ${buttonHtml({ action: 'switch-editor-tab', label: '模型 / Toolsets', attrs: { 'data-tab': 'control' } })}
-      ${buttonHtml({ action: 'goto-extensions', label: '扩展 / 插件' })}
-      ${buttonHtml({ action: 'goto-diagnostics', label: '进入诊断页' })}
+      ${buttonHtml({ action: 'focus-workspace', label: '模型工作台', attrs: { 'data-tab': 'control', 'data-section': 'model-presets' } })}
+      ${buttonHtml({ action: 'focus-workspace', label: '凭证 / 通道', attrs: { 'data-tab': 'credentials', 'data-section': 'provider-credentials' } })}
     </div>
 
     <section class="config-section">
       <div class="config-section-header">
         <div>
           <h2 class="config-section-title">配置工作台</h2>
-          <p class="config-section-desc">主区直改配置，侧栏负责导航和体检。</p>
+          <p class="config-section-desc">主区直改配置，侧栏负责导航和校验。</p>
         </div>
         <div class="toolbar">
           ${pillHtml(currentEditorBadge(view), 'neutral')}
           ${warnings.length > 0 ? pillHtml(`${warnings.length} 条提醒`, 'warn') : pillHtml('可直接编辑', 'good')}
         </div>
       </div>
-      <div class="workspace-shell workspace-shell-editor">
+      <div class="workspace-shell workspace-shell-editor workspace-shell-dense">
         <aside class="workspace-rail">
           ${renderConfigRail(view, {
             actionBusy,
@@ -1716,22 +448,22 @@ function renderPage(view) {
       </div>
     </section>
 
-    <div class="workspace-bottom-grid">
+    <div class="workspace-bottom-grid workspace-bottom-grid-dense">
       <section class="config-section">
         <div class="config-section-header">
           <div>
-            <h2 class="config-section-title">最近命令回显</h2>
-            <p class="config-section-desc">这里保留最近一次原始输出。</p>
+            <h2 class="config-section-title">最近动作回执</h2>
+            <p class="config-section-desc">这里只保留最后一次动作的原始回执。</p>
           </div>
         </div>
-        ${commandResultHtml(view.lastResult, '尚未执行命令', '保存、体检或执行历史迁移动作后，这里会保留最近一次原始结果。')}
+        ${commandResultHtml(view.lastResult, '尚未执行动作', '保存、体检或执行历史迁移动作后，这里会保留最近一次原始回执。')}
       </section>
 
       <section class="config-section">
         <div class="config-section-header">
           <div>
-            <h2 class="config-section-title">关联工作台</h2>
-            <p class="config-section-desc">改完就去相关页闭环验证。</p>
+            <h2 class="config-section-title">闭环入口</h2>
+            <p class="config-section-desc">改完后只保留高价值联动入口。</p>
           </div>
         </div>
         <div class="health-grid">
@@ -1742,7 +474,7 @@ function renderPage(view) {
             </div>
             <p>${escapeHtml(`${pluginTotal} 个插件目录 · toolsets ${data.summary.toolsets.length} 组 · runtime tools ${enabledTools} 个`)}</p>
             <div class="toolbar">
-              ${buttonHtml({ action: 'goto-extensions', label: '进入扩展页' })}
+              ${buttonHtml({ action: 'goto-extensions', label: '扩展页' })}
             </div>
           </section>
           <section class="action-card action-card-compact">
@@ -1752,7 +484,7 @@ function renderPage(view) {
             </div>
             <p>${escapeHtml(remoteJobs.length > 0 ? `当前有 ${remoteJobs.length} 个远端作业依赖 Gateway。` : '当前没有依赖 Gateway 的远端投递作业。')}</p>
             <div class="toolbar">
-              ${buttonHtml({ action: 'goto-gateway', label: '进入 Gateway' })}
+              ${buttonHtml({ action: 'goto-gateway', label: 'Gateway' })}
             </div>
           </section>
           <section class="action-card action-card-compact">
@@ -1762,18 +494,7 @@ function renderPage(view) {
             </div>
             <p>${escapeHtml(`Memory ${data.summary.memoryProvider || 'builtin-file'} · runtime ${extensions?.memoryRuntime.provider || '未读取'}`)}</p>
             <div class="toolbar">
-              ${buttonHtml({ action: 'goto-memory', label: '进入记忆页' })}
-            </div>
-          </section>
-          <section class="action-card action-card-compact">
-            <div class="health-card-header">
-              <strong>日志与诊断</strong>
-              ${pillHtml(view.lastResult?.result?.success ? '最近成功' : view.lastResult ? '最近失败' : '待验证', view.lastResult?.result?.success ? 'good' : view.lastResult ? 'warn' : 'neutral')}
-            </div>
-            <p>${escapeHtml(view.lastResult?.label ? `最近动作：${view.lastResult.label}` : '还没有保留任何命令或体检回显。')}</p>
-            <div class="toolbar">
-              ${buttonHtml({ action: 'goto-logs', label: '进入日志页' })}
-              ${buttonHtml({ action: 'goto-diagnostics', label: '进入诊断页' })}
+              ${buttonHtml({ action: 'goto-memory', label: '记忆页' })}
             </div>
           </section>
         </div>
@@ -1920,12 +641,20 @@ async function saveStructuredConfig(view) {
   view.saving = 'structured';
   renderPage(view);
   try {
-    const nextConfig = await api.saveStructuredConfig(view.controlDraft, view.profile);
+    const sanitizedDraft = {
+      ...view.controlDraft,
+      toolsets: uniqueValues(view.controlDraft.toolsets),
+      platformToolsets: normalizePlatformBindings(view.controlDraft.platformToolsets),
+    };
+    const nextConfig = await api.saveStructuredConfig(sanitizedDraft, view.profile);
     notify('success', '结构化配置已保存到 config.yaml。');
     view.data = nextConfig;
     view.configYaml = nextConfig.configYaml;
     view.envFile = nextConfig.envFile;
     view.controlDraft = cloneWorkspace(nextConfig.workspace);
+    view.platformBindingPlatformInput = '';
+    view.platformBindingToolsetsInput = '';
+    view.toolsetEntryInput = '';
     await Promise.all([
       loadShell(view.profile, { silent: true }),
       loadData(view, { refreshEditors: true, silent: true }),
@@ -2028,6 +757,120 @@ function syncDirtyPills(view) {
   }
 }
 
+function replaceSkillExternalDirs(view, values) {
+  view.controlDraft.skillsExternalDirs = uniqueValues(values);
+  syncDirtyPills(view);
+}
+
+function appendSkillExternalDirs(view, values) {
+  const normalized = splitLineValues(values.join('\n'));
+  if (!normalized.length) {
+    notify('info', '先输入至少一个 Skills 目录。');
+    return false;
+  }
+
+  const before = view.controlDraft.skillsExternalDirs.length;
+  replaceSkillExternalDirs(view, [...view.controlDraft.skillsExternalDirs, ...normalized]);
+  const added = view.controlDraft.skillsExternalDirs.length - before;
+  notify('success', added > 0 ? `已加入 ${added} 个外部 Skills 目录。` : '目录已存在，未重复加入。');
+  return true;
+}
+
+function replaceTopToolsets(view, values) {
+  view.controlDraft.toolsets = uniqueValues(values);
+  syncDirtyPills(view);
+}
+
+function toggleTopToolset(view, value) {
+  const target = String(value ?? '').trim();
+  if (!target) {
+    return;
+  }
+  const selected = uniqueValues(view.controlDraft.toolsets);
+  replaceTopToolsets(
+    view,
+    selected.includes(target)
+      ? selected.filter((item) => item !== target)
+      : [...selected, target],
+  );
+}
+
+function replacePlatformBindings(view, bindings) {
+  view.controlDraft.platformToolsets = [...(bindings ?? [])].map((item) => ({
+    platform: String(item?.platform ?? ''),
+    toolsets: uniqueValues(item?.toolsets ?? []),
+  }));
+  syncDirtyPills(view);
+}
+
+function updatePlatformBinding(view, index, patch) {
+  const bindings = [...(view.controlDraft.platformToolsets ?? [])];
+  const current = bindings[index];
+  if (!current) {
+    return;
+  }
+  bindings[index] = {
+    ...current,
+    ...patch,
+  };
+  replacePlatformBindings(view, bindings);
+}
+
+function addPlatformBinding(view, platformValue, toolsetsValue) {
+  const platform = String(platformValue ?? '').trim();
+  const toolsets = Array.isArray(toolsetsValue)
+    ? uniqueValues(toolsetsValue)
+    : splitLineValues(String(toolsetsValue ?? ''));
+
+  if (!platform) {
+    notify('info', '先填写平台标识，再加入绑定。');
+    return false;
+  }
+
+  if (!toolsets.length) {
+    notify('info', '至少补一组 toolset，平台绑定才能生效。');
+    return false;
+  }
+
+  const bindings = [...(view.controlDraft.platformToolsets ?? [])];
+  const existingIndex = bindings.findIndex((item) => String(item?.platform ?? '').trim().toLowerCase() === platform.toLowerCase());
+  if (existingIndex >= 0) {
+    bindings[existingIndex] = {
+      ...bindings[existingIndex],
+      platform,
+      toolsets: uniqueValues([...(bindings[existingIndex]?.toolsets ?? []), ...toolsets]),
+    };
+  } else {
+    bindings.push({ platform, toolsets });
+  }
+  replacePlatformBindings(view, bindings);
+  return true;
+}
+
+function removePlatformBinding(view, index) {
+  replacePlatformBindings(
+    view,
+    (view.controlDraft.platformToolsets ?? []).filter((_, itemIndex) => itemIndex !== index),
+  );
+}
+
+function toggleBindingToolset(view, index, value) {
+  const target = String(value ?? '').trim();
+  if (!target) {
+    return;
+  }
+  const current = view.controlDraft.platformToolsets?.[index];
+  if (!current) {
+    return;
+  }
+  const nextToolsets = uniqueValues(current.toolsets ?? []);
+  updatePlatformBinding(view, index, {
+    toolsets: nextToolsets.includes(target)
+      ? nextToolsets.filter((item) => item !== target)
+      : [...nextToolsets, target],
+  });
+}
+
 function syncWithPanelState(view) {
   const shell = getPanelState();
   if (shell.selectedProfile !== view.profile) {
@@ -2043,6 +886,12 @@ function syncWithPanelState(view) {
     view.controlDraft = cloneWorkspace();
     view.envDraft = cloneEnvWorkspace();
     view.envFile = '';
+    view.platformBindingPlatformInput = '';
+    view.platformBindingToolsetsInput = '';
+    view.skillDirBulkInput = '';
+    view.skillDirInput = '';
+    view.showSkillDirBulk = false;
+    view.toolsetEntryInput = '';
     void loadData(view);
     return;
   }
@@ -2165,20 +1014,108 @@ function bindEvents(view) {
     syncDirtyPills(view);
   });
 
-  view.page.querySelector('#control-toolsets')?.addEventListener('input', (event) => {
-    view.controlDraft.toolsets = splitLineValues(event.target.value);
-    syncDirtyPills(view);
+  const toolsetEntry = view.page.querySelector('#control-toolset-entry');
+  if (toolsetEntry) {
+    toolsetEntry.addEventListener('input', (event) => {
+      view.toolsetEntryInput = event.target.value;
+    });
+    toolsetEntry.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') {
+        return;
+      }
+      event.preventDefault();
+      const value = String(view.toolsetEntryInput || '').trim();
+      if (!value) {
+        notify('info', '先输入一个自定义 toolset。');
+        return;
+      }
+      toggleTopToolset(view, value);
+      view.toolsetEntryInput = '';
+      renderPage(view);
+    });
+  }
+
+  const platformBindingPlatform = view.page.querySelector('#control-platform-binding-platform');
+  if (platformBindingPlatform) {
+    platformBindingPlatform.addEventListener('input', (event) => {
+      view.platformBindingPlatformInput = event.target.value;
+    });
+  }
+
+  const platformBindingToolsets = view.page.querySelector('#control-platform-binding-toolsets');
+  if (platformBindingToolsets) {
+    platformBindingToolsets.addEventListener('input', (event) => {
+      view.platformBindingToolsetsInput = event.target.value;
+    });
+    platformBindingToolsets.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' || (!event.metaKey && !event.ctrlKey)) {
+        return;
+      }
+      event.preventDefault();
+      if (addPlatformBinding(view, view.platformBindingPlatformInput, view.platformBindingToolsetsInput)) {
+        view.platformBindingPlatformInput = '';
+        view.platformBindingToolsetsInput = '';
+        renderPage(view);
+      }
+    });
+  }
+
+  view.page.querySelectorAll('[data-binding-platform-index]').forEach((element) => {
+    element.addEventListener('input', (event) => {
+      const index = Number.parseInt(event.target.getAttribute('data-binding-platform-index') || '', 10);
+      if (Number.isNaN(index)) {
+        return;
+      }
+      updatePlatformBinding(view, index, { platform: event.target.value });
+    });
   });
 
-  view.page.querySelector('#control-platform-toolsets')?.addEventListener('input', (event) => {
-    view.controlDraft.platformToolsets = parsePlatformToolsets(event.target.value);
-    syncDirtyPills(view);
+  view.page.querySelectorAll('[data-binding-toolsets-index]').forEach((element) => {
+    element.addEventListener('input', (event) => {
+      const index = Number.parseInt(event.target.getAttribute('data-binding-toolsets-index') || '', 10);
+      if (Number.isNaN(index)) {
+        return;
+      }
+      updatePlatformBinding(view, index, { toolsets: splitLineValues(event.target.value) });
+    });
   });
 
-  view.page.querySelector('#control-skills-external-dirs')?.addEventListener('input', (event) => {
-    view.controlDraft.skillsExternalDirs = splitLineValues(event.target.value);
-    syncDirtyPills(view);
-  });
+  const skillDirEntry = view.page.querySelector('#control-skill-dir-entry');
+  if (skillDirEntry) {
+    skillDirEntry.addEventListener('input', (event) => {
+      view.skillDirInput = event.target.value;
+    });
+    skillDirEntry.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') {
+        return;
+      }
+      event.preventDefault();
+      const added = appendSkillExternalDirs(view, splitLineValues(view.skillDirInput || ''));
+      if (added) {
+        view.skillDirInput = '';
+        renderPage(view);
+      }
+    });
+  }
+
+  const skillDirBulk = view.page.querySelector('#control-skill-dir-bulk');
+  if (skillDirBulk) {
+    skillDirBulk.addEventListener('input', (event) => {
+      view.skillDirBulkInput = event.target.value;
+    });
+    skillDirBulk.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' || (!event.metaKey && !event.ctrlKey)) {
+        return;
+      }
+      event.preventDefault();
+      const added = appendSkillExternalDirs(view, splitLineValues(view.skillDirBulkInput || ''));
+      if (added) {
+        view.skillDirBulkInput = '';
+        view.showSkillDirBulk = false;
+        renderPage(view);
+      }
+    });
+  }
 
   bindEnvValue('#env-openai-api-key', 'openaiApiKey');
   bindEnvValue('#env-openrouter-api-key', 'openrouterApiKey');
@@ -2286,6 +1223,24 @@ function bindEvents(view) {
           }
           return;
         }
+        case 'apply-context-preset': {
+          const value = String(element.getAttribute('data-value') || '').trim();
+          view.controlDraft.contextEngine = value;
+          renderPage(view);
+          notify('success', `上下文引擎已切到 ${value || '默认值'}。`);
+          return;
+        }
+        case 'toggle-streaming-output':
+          view.controlDraft.streamingEnabled = !view.controlDraft.streamingEnabled;
+          renderPage(view);
+          notify('success', view.controlDraft.streamingEnabled ? '已开启流式输出。' : '已关闭流式输出。');
+          return;
+        case 'apply-base-url-value': {
+          view.controlDraft.modelBaseUrl = String(element.getAttribute('data-value') || '').trim();
+          renderPage(view);
+          notify('success', view.controlDraft.modelBaseUrl ? 'Base URL 已更新。' : '已清空 Base URL，改为跟随 provider 默认值。');
+          return;
+        }
         case 'apply-toolset-preset': {
           const preset = getToolsetPreset(element.getAttribute('data-preset'));
           if (!preset) {
@@ -2378,8 +1333,134 @@ function bindEvents(view) {
         case 'save-structured-env':
           await saveStructuredEnv(view);
           return;
+        case 'toggle-top-toolset':
+          toggleTopToolset(view, element.getAttribute('data-value'));
+          renderPage(view);
+          return;
+        case 'add-top-toolset': {
+          const value = String(view.toolsetEntryInput || '').trim();
+          if (!value) {
+            notify('info', '先输入一个自定义 toolset。');
+            return;
+          }
+          toggleTopToolset(view, value);
+          view.toolsetEntryInput = '';
+          renderPage(view);
+          return;
+        }
+        case 'clear-top-toolsets':
+          replaceTopToolsets(view, []);
+          renderPage(view);
+          return;
+        case 'add-platform-binding': {
+          if (addPlatformBinding(view, view.platformBindingPlatformInput, view.platformBindingToolsetsInput)) {
+            view.platformBindingPlatformInput = '';
+            view.platformBindingToolsetsInput = '';
+            renderPage(view);
+          }
+          return;
+        }
+        case 'add-platform-binding-preset': {
+          const presetId = String(element.getAttribute('data-preset') || '').trim();
+          const presetMap = {
+            'cli-default': { platform: 'cli', toolsets: ['hermes-cli'] },
+            'cli-dev': { platform: 'cli', toolsets: ['web', 'browser', 'terminal', 'file', 'skills', 'todo', 'memory', 'session_search', 'code_execution'] },
+            'telegram-link': { platform: 'telegram', toolsets: ['hermes-telegram'] },
+            'discord-link': { platform: 'discord', toolsets: ['hermes-discord'] },
+            'slack-link': { platform: 'slack', toolsets: ['hermes-slack'] },
+          };
+          const suggestion = presetMap[presetId];
+          if (suggestion && addPlatformBinding(view, suggestion.platform, suggestion.toolsets)) {
+            renderPage(view);
+          }
+          return;
+        }
+        case 'remove-platform-binding': {
+          const index = Number.parseInt(element.getAttribute('data-index') || '', 10);
+          if (Number.isNaN(index)) {
+            return;
+          }
+          removePlatformBinding(view, index);
+          renderPage(view);
+          return;
+        }
+        case 'clear-platform-bindings':
+          replacePlatformBindings(view, []);
+          renderPage(view);
+          return;
+        case 'toggle-binding-toolset': {
+          const index = Number.parseInt(element.getAttribute('data-index') || '', 10);
+          if (Number.isNaN(index)) {
+            return;
+          }
+          toggleBindingToolset(view, index, element.getAttribute('data-value'));
+          renderPage(view);
+          return;
+        }
+        case 'add-skill-external-dir': {
+          const added = appendSkillExternalDirs(view, splitLineValues(view.skillDirInput || ''));
+          if (added) {
+            view.skillDirInput = '';
+            renderPage(view);
+          }
+          return;
+        }
+        case 'add-skill-external-suggestion': {
+          const path = String(element.getAttribute('data-value') || '').trim();
+          if (!path) {
+            return;
+          }
+          if (appendSkillExternalDirs(view, [path])) {
+            renderPage(view);
+          }
+          return;
+        }
+        case 'remove-skill-external-dir': {
+          const path = String(element.getAttribute('data-path') || '').trim();
+          if (!path) {
+            return;
+          }
+          replaceSkillExternalDirs(
+            view,
+            view.controlDraft.skillsExternalDirs.filter((item) => item !== path),
+          );
+          notify('success', '已从外部 Skills 目录列表移除。');
+          renderPage(view);
+          return;
+        }
+        case 'open-skill-external-dir': {
+          const path = String(element.getAttribute('data-path') || '').trim();
+          if (!path) {
+            return;
+          }
+          await runFinderAction(view, 'finder:skills-external-dir', '外部 Skills 目录', path, false);
+          return;
+        }
+        case 'toggle-skill-dir-bulk':
+          view.showSkillDirBulk = !view.showSkillDirBulk;
+          renderPage(view);
+          return;
+        case 'merge-skill-external-bulk': {
+          const added = appendSkillExternalDirs(view, splitLineValues(view.skillDirBulkInput || ''));
+          if (added) {
+            view.skillDirBulkInput = '';
+            view.showSkillDirBulk = false;
+            renderPage(view);
+          }
+          return;
+        }
+        case 'clear-skill-dir-bulk':
+          view.skillDirBulkInput = '';
+          renderPage(view);
+          return;
         case 'reset-structured-config':
           view.controlDraft = cloneWorkspace(view.data.workspace);
+          view.platformBindingPlatformInput = '';
+          view.platformBindingToolsetsInput = '';
+          view.skillDirInput = '';
+          view.skillDirBulkInput = '';
+          view.showSkillDirBulk = false;
+          view.toolsetEntryInput = '';
           renderPage(view);
           return;
         case 'reset-structured-env':
@@ -2462,14 +1543,20 @@ export async function render() {
     loading: true,
     page,
     pendingSectionFocus: null,
+    platformBindingPlatformInput: '',
+    platformBindingToolsetsInput: '',
     profile: getPanelState().selectedProfile,
     refreshing: false,
     runningAction: null,
     runningDiagnostic: null,
     saving: null,
     skills: [],
+    skillDirBulkInput: '',
+    skillDirInput: '',
     showCompatibilityActions: false,
+    showSkillDirBulk: false,
     snapshot: null,
+    toolsetEntryInput: '',
     unsubscribe: null,
   };
 

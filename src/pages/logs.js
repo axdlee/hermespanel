@@ -13,8 +13,8 @@ import {
   buttonHtml,
   emptyStateHtml,
   escapeHtml,
+  keyValueRowsHtml,
   pillHtml,
-  statusDotHtml,
 } from './native-helpers';
 
 let activeView = null;
@@ -190,62 +190,70 @@ function renderPage(view) {
 
   const summary = logSummary(view);
   const logsDir = summary.logsDir;
+  const currentDiagnostic = inferDiagnosticCommand(view.logName, relaySeed(view).context);
+  const lineCount = String(view.data?.lines.length ?? 0);
 
   view.page.innerHTML = `
-    <div class="page-header">
+    <div class="page-header page-header-compact">
       <div class="panel-title-row">
         <h1 class="page-title">日志查看</h1>
         ${infoTipHtml('参考 clawpanel 的标签式日志页，主区域只保留日志切换、过滤和排障联动，不再用大段说明占位置。')}
       </div>
-      <p class="page-desc">直接读取 Hermes 本地日志文件，并把日志过滤、自动刷新和跨页排障联动做成桌面闭环。</p>
+      <p class="page-desc">把日志切换、过滤、自动刷新和跨页排障联动压成一个紧凑工作台。</p>
     </div>
+
+    <section class="workspace-summary-strip workspace-summary-strip-dense">
+      <section class="summary-mini-card">
+        <span class="summary-mini-label">当前实例</span>
+        <strong class="summary-mini-value">${escapeHtml(view.profile)}</strong>
+        <span class="summary-mini-meta">${escapeHtml(view.snapshot?.gateway?.gatewayState ?? '未检测到 Gateway')}</span>
+      </section>
+      <section class="summary-mini-card">
+        <span class="summary-mini-label">日志标签</span>
+        <strong class="summary-mini-value">${escapeHtml(LOG_OPTIONS.find((item) => item.key === view.logName)?.label || view.logName)}</strong>
+        <span class="summary-mini-meta">${escapeHtml(view.autoRefresh ? '5 秒自动刷新中' : '手动刷新模式')}</span>
+      </section>
+      <section class="summary-mini-card">
+        <span class="summary-mini-label">返回行数</span>
+        <strong class="summary-mini-value">${escapeHtml(lineCount)}</strong>
+        <span class="summary-mini-meta">${escapeHtml(view.data?.filePath || '当前还没有日志文件路径')}</span>
+      </section>
+      <section class="summary-mini-card">
+        <span class="summary-mini-label">关键词</span>
+        <strong class="summary-mini-value">${escapeHtml(view.contains || '未过滤')}</strong>
+        <span class="summary-mini-meta">${escapeHtml(view.level ? `级别 ${view.level}` : '未附加级别过滤')}</span>
+      </section>
+      <section class="summary-mini-card">
+        <span class="summary-mini-label">建议诊断</span>
+        <strong class="summary-mini-value">${escapeHtml(currentDiagnostic)}</strong>
+        <span class="summary-mini-meta">当前日志线索下更适合继续执行的封装诊断</span>
+      </section>
+    </section>
 
     <section class="config-section">
       <div class="config-section-header">
         <div>
-          <h2 class="config-section-title">日志工作台</h2>
-          <p class="config-section-desc">像 clawpanel 一样先切标签，再做关键词收缩，最后带着线索跳到诊断或配置页。</p>
+          <h2 class="config-section-title">日志控制台</h2>
+          <p class="config-section-desc">先切标签，再收窄过滤条件，最后带着线索继续去诊断、网关或配置工作台。</p>
         </div>
         <div class="toolbar">
           ${buttonHtml({ action: 'read-log', label: view.loading ? '读取中…' : '读取', kind: 'primary', disabled: view.loading })}
           ${buttonHtml({ action: 'toggle-auto-refresh', label: view.autoRefresh ? '自动刷新: 开' : '自动刷新: 关', kind: view.autoRefresh ? 'primary' : 'secondary' })}
         </div>
       </div>
-      <div class="tab-bar">
+      <div class="tab-bar tab-bar-dense">
         ${LOG_OPTIONS.map((item) => `
           <button type="button" class="tab ${item.key === view.logName ? 'active' : ''}" data-action="select-log-tab" data-log="${escapeHtml(item.key)}">
             ${escapeHtml(item.label)}
           </button>
         `).join('')}
       </div>
-      <div class="log-toolbar">
+      <div class="log-toolbar log-toolbar-dense">
         <input class="search-input narrow" id="logs-level-input" placeholder="level" value="${escapeHtml(view.level)}">
         <input class="search-input" id="logs-contains-input" placeholder="包含关键词" value="${escapeHtml(view.contains)}">
         <input class="search-input tiny" id="logs-limit-input" placeholder="120" value="${escapeHtml(view.limit)}">
         ${buttonHtml({ action: 'apply-filter', label: '应用过滤' })}
         ${buttonHtml({ action: 'clear-filter', label: '清空过滤' })}
-      </div>
-      <div class="metrics-grid metrics-grid-tight top-gap">
-        <div class="metric-card">
-          <p class="metric-label">当前 Profile</p>
-          <div class="metric-value">${escapeHtml(view.profile)}</div>
-          <p class="metric-hint">日志读取范围跟随当前选择的实例</p>
-        </div>
-        <div class="metric-card">
-          <p class="metric-label">Gateway</p>
-          <div class="metric-value">${escapeHtml(view.snapshot?.gateway?.gatewayState ?? '未检测到')}</div>
-          <p class="metric-hint">方便判断是服务层问题还是能力层问题</p>
-        </div>
-        <div class="metric-card">
-          <p class="metric-label">返回行数</p>
-          <div class="metric-value">${escapeHtml(String(view.data?.lines.length ?? 0))}</div>
-          <p class="metric-hint">${escapeHtml(view.data?.filePath || '当前还没有日志文件路径')}</p>
-        </div>
-        <div class="metric-card">
-          <p class="metric-label">最近更新时间</p>
-          <div class="metric-value">${escapeHtml(formatTimestamp(view.snapshot?.gateway?.updatedAt))}</div>
-          <p class="metric-hint">${view.autoRefresh ? '5 秒轮询中' : '手动刷新模式'}</p>
-        </div>
       </div>
     </section>
 
@@ -256,12 +264,12 @@ function renderPage(view) {
           <p class="config-section-desc">先用预设把范围收窄，再根据日志内容决定进入诊断、网关还是配置。</p>
         </div>
       </div>
-      <div class="workbench-grid">
+      <div class="control-card-grid control-card-grid-dense">
         ${PRESETS.map((preset) => `
           <section class="action-card action-card-compact">
             <div class="action-card-header">
               <div>
-                <p class="eyebrow">Preset</p>
+                <p class="eyebrow">预设</p>
                 <h3 class="action-card-title">${escapeHtml(preset.label)}</h3>
               </div>
               ${pillHtml(preset.logName, 'neutral')}
@@ -278,10 +286,10 @@ function renderPage(view) {
     ${
       view.investigation
         ? `
-          <div class="context-banner">
+          <div class="context-banner context-banner-compact">
             <div class="context-banner-header">
               <div class="context-banner-copy">
-                <span class="context-banner-label">Session Drilldown</span>
+                <span class="context-banner-label">排障上下文</span>
                 <strong class="context-banner-title">${escapeHtml(view.investigation.headline)}</strong>
                 <p class="context-banner-description">${escapeHtml(view.investigation.description)}</p>
               </div>
@@ -292,73 +300,126 @@ function renderPage(view) {
               </div>
             </div>
             <div class="context-banner-actions toolbar">
-              ${buttonHtml({ action: 'clear-investigation', label: '清除上下文' })}
-              ${buttonHtml({ action: 'goto-diagnostics', label: '继续做诊断' })}
-              ${buttonHtml({ action: 'goto-gateway', label: '带着线索进网关页' })}
-              ${buttonHtml({ action: 'goto-extensions', label: '带着线索进扩展页' })}
+              ${buttonHtml({ action: 'clear-investigation', label: '清除' })}
+              ${buttonHtml({ action: 'goto-diagnostics', label: '继续诊断' })}
+              ${buttonHtml({ action: 'goto-gateway', label: '进网关页' })}
+              ${buttonHtml({ action: 'goto-extensions', label: '进扩展页' })}
             </div>
           </div>
         `
         : ''
     }
 
-    <div class="two-column wide-left">
-      <section class="config-section">
-        <div class="config-section-header">
+    <div class="workspace-shell workspace-shell-dense">
+      <aside class="workspace-rail">
+        <div class="workspace-rail-header">
           <div>
-            <h2 class="config-section-title">联动入口</h2>
-            <p class="config-section-desc">日志不该孤立分析，必要时直接跳到诊断、网关、扩展或配置页面继续排查。</p>
+            <strong>联动入口</strong>
+            <p class="helper-text">日志不该孤立分析，必要时直接跳到诊断、网关、扩展或配置工作台继续排查。</p>
           </div>
-          <div class="toolbar">
-            ${buttonHtml({ action: 'open-logs-dir', label: '打开 logs', disabled: !logsDir })}
-            ${buttonHtml({ action: 'open-current-log', label: '定位当前日志', disabled: !view.data?.filePath })}
-          </div>
+          ${pillHtml(currentDiagnostic, 'warn')}
         </div>
-        <div class="health-grid">
-          <section class="health-card">
-            <div class="health-card-header">
+        <div class="list-stack">
+          <div class="list-card">
+            <div class="list-card-title">
               <strong>下一步诊断</strong>
-              ${pillHtml(inferDiagnosticCommand(view.logName, relaySeed(view).context), 'warn')}
+              ${pillHtml('推荐', 'good')}
             </div>
-            <p>结合当前日志类型，优先跳到诊断页执行更贴近的 Hermes 原生命令。</p>
-            <div class="toolbar">
+            <p>结合当前日志标签与过滤条件，优先去诊断页跑更贴近的封装诊断。</p>
+            <div class="toolbar top-gap">
               ${buttonHtml({ action: 'goto-diagnostics', label: '进入诊断页', kind: 'primary' })}
             </div>
-          </section>
-          <section class="health-card">
-            <div class="health-card-header">
+          </div>
+          <div class="list-card">
+            <div class="list-card-title">
               <strong>网关 / 能力面</strong>
-              ${pillHtml(view.logName.startsWith('gateway') ? 'gateway' : 'extensions')}
+              ${pillHtml(view.logName.startsWith('gateway') ? 'Gateway' : '能力面', 'neutral')}
             </div>
-            <p>网关日志优先去 Gateway 页，工具 / provider / skills 异常更适合继续去扩展页或配置页。</p>
+            <p>网关日志优先去 Gateway 页，工具、provider 或 skill 异常更适合继续去扩展页或配置页。</p>
+            <div class="toolbar top-gap">
+              ${buttonHtml({ action: 'goto-gateway', label: '网关页' })}
+              ${buttonHtml({ action: 'goto-extensions', label: '扩展页' })}
+              ${buttonHtml({ action: 'goto-config', label: '配置页' })}
+            </div>
+          </div>
+        </div>
+        <section class="workspace-rail-section">
+          <div class="workspace-rail-section-header">
+            <span class="workspace-rail-section-title">日志边界</span>
+            ${pillHtml(view.loading ? '读取中' : '已同步', view.loading ? 'warn' : 'good')}
+          </div>
+          ${keyValueRowsHtml([
+            { label: '日志目录', value: logsDir || '—' },
+            { label: '当前文件', value: view.data?.filePath || '—' },
+            { label: '关键词', value: view.contains || '—' },
+            { label: '级别', value: view.level || '—' },
+          ])}
+          <div class="workspace-rail-toolbar workspace-rail-toolbar-muted">
+            <div class="workspace-rail-toolbar-grid">
+              ${buttonHtml({ action: 'open-logs-dir', label: '打开 logs', disabled: !logsDir })}
+              ${buttonHtml({ action: 'open-current-log', label: '定位当前日志', disabled: !view.data?.filePath })}
+            </div>
+          </div>
+        </section>
+      </aside>
+
+      <div class="workspace-main">
+        <section class="workspace-main-card">
+          <div class="workspace-main-header">
+            <div>
+              <strong>日志内容</strong>
+              <p class="workspace-main-copy">支持标签切换、关键词高亮和自动刷新，更接近日常排障使用节奏。</p>
+            </div>
             <div class="toolbar">
-              ${buttonHtml({ action: 'goto-gateway', label: '进入网关页' })}
-              ${buttonHtml({ action: 'goto-extensions', label: '进入扩展页' })}
-              ${buttonHtml({ action: 'goto-config', label: '进入配置页' })}
+              ${pillHtml(LOG_OPTIONS.find((item) => item.key === view.logName)?.label || view.logName)}
+              ${pillHtml(view.loading ? '读取中' : '已同步', view.loading ? 'warn' : 'good')}
+            </div>
+          </div>
+          <div class="log-viewer log-viewer-tight">${renderLogLines(view)}</div>
+        </section>
+
+        <div class="workspace-bottom-grid workspace-bottom-grid-dense">
+          <section class="workspace-main-card">
+            <div class="workspace-main-header">
+              <div>
+                <strong>日志线索</strong>
+                <p class="workspace-main-copy">把当前日志症状继续带到诊断、配置和扩展工作台，避免重新描述上下文。</p>
+              </div>
+            </div>
+            <div class="health-grid health-grid-dense">
+              <section class="health-card">
+                <div class="health-card-header">
+                  <strong>最近更新时间</strong>
+                  ${pillHtml(view.autoRefresh ? '自动刷新' : '手动模式', view.autoRefresh ? 'good' : 'neutral')}
+                </div>
+                <p>${escapeHtml(formatTimestamp(view.snapshot?.gateway?.updatedAt))}</p>
+              </section>
+              <section class="health-card">
+                <div class="health-card-header">
+                  <strong>当前 Gateway</strong>
+                  ${pillHtml(view.snapshot?.gateway?.gatewayState ?? '未检测到', view.snapshot?.gateway?.gatewayState === 'running' ? 'good' : 'warn')}
+                </div>
+                <p>方便判断这是服务层问题还是能力层问题。</p>
+              </section>
+            </div>
+          </section>
+
+          <section class="workspace-main-card">
+            <div class="workspace-main-header">
+              <div>
+                <strong>继续下钻</strong>
+                <p class="workspace-main-copy">继续围绕当前日志关键词和文件范围，进入更适合的修复工作台。</p>
+              </div>
+            </div>
+            <div class="toolbar">
+              ${buttonHtml({ action: 'goto-diagnostics', label: '诊断页', kind: 'primary' })}
+              ${buttonHtml({ action: 'goto-gateway', label: 'Gateway 页' })}
+              ${buttonHtml({ action: 'goto-extensions', label: '扩展页' })}
+              ${buttonHtml({ action: 'goto-config', label: '配置页' })}
             </div>
           </section>
         </div>
-        <div class="detail-list compact top-gap">
-          <div class="key-value-row"><span>日志目录</span><strong>${escapeHtml(logsDir || '—')}</strong></div>
-          <div class="key-value-row"><span>当前文件</span><strong>${escapeHtml(view.data?.filePath || '—')}</strong></div>
-          <div class="key-value-row"><span>关键词</span><strong>${escapeHtml(view.contains || '—')}</strong></div>
-          <div class="key-value-row"><span>Level</span><strong>${escapeHtml(view.level || '—')}</strong></div>
-        </div>
-      </section>
-
-      <section class="config-section">
-        <div class="config-section-header">
-          <div>
-            <h2 class="config-section-title">日志内容</h2>
-            <p class="config-section-desc">支持标签切换、关键词高亮和自动刷新，更接近日常排障使用节奏。</p>
-          </div>
-          <div class="toolbar">
-            ${pillHtml(LOG_OPTIONS.find((item) => item.key === view.logName)?.label || view.logName)}
-            ${statusDotHtml(view.loading ? 'warning' : 'running')}
-          </div>
-        </div>
-        <div class="log-viewer log-viewer-tight">${renderLogLines(view)}</div>
-      </section>
+      </div>
     </div>
   `;
 

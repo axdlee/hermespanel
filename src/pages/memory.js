@@ -5,7 +5,6 @@ import {
   buildDiagnosticsDrilldownIntent,
   buildExtensionsDrilldownIntent,
 } from '../lib/drilldown';
-import { formatTimestamp } from '../lib/format';
 import {
   consumePageIntent,
   getPageIntent,
@@ -16,140 +15,21 @@ import {
 } from '../lib/panel-state';
 import {
   buttonHtml,
-  commandResultHtml,
   emptyStateHtml,
-  escapeHtml,
-  keyValueRowsHtml,
-  pillHtml,
 } from './native-helpers';
+import {
+  cloneWorkspace,
+  deriveMemoryWorkbenchState,
+  remainingChars,
+  renderMemoryWorkbench,
+} from './memory-workbench';
 
 let activeView = null;
-
-const MEMORY_BLUEPRINT = {
-  soul: {
-    eyebrow: 'Identity',
-    description: '系统身份层。',
-  },
-  memory: {
-    eyebrow: 'Persistent',
-    description: '长期事实与稳定偏好。',
-  },
-  user: {
-    eyebrow: 'User Profile',
-    description: '用户画像与交互偏好。',
-  },
-};
-
-function infoTipHtml(content) {
-  return `
-    <span class="info-tip" tabindex="0" aria-label="更多信息">
-      <span class="info-tip-trigger">?</span>
-      <span class="info-tip-bubble">${escapeHtml(content)}</span>
-    </span>
-  `;
-}
 
 function directoryOf(path) {
   const normalized = String(path ?? '').trim();
   const index = normalized.lastIndexOf('/');
   return index > 0 ? normalized.slice(0, index) : normalized;
-}
-
-function cloneWorkspace(workspace = {}) {
-  return {
-    ...workspace,
-    toolsets: [...(workspace.toolsets ?? [])],
-    platformToolsets: (workspace.platformToolsets ?? []).map((item) => ({
-      ...item,
-      toolsets: [...(item.toolsets ?? [])],
-    })),
-    skillsExternalDirs: [...(workspace.skillsExternalDirs ?? [])],
-  };
-}
-
-function memoryMeta(key) {
-  return MEMORY_BLUEPRINT[key] ?? MEMORY_BLUEPRINT.soul;
-}
-
-function limitForKey(key, summary) {
-  if (!summary) {
-    return null;
-  }
-  if (key === 'memory') {
-    return summary.memoryCharLimit ?? null;
-  }
-  if (key === 'user') {
-    return summary.userCharLimit ?? null;
-  }
-  return null;
-}
-
-function commandText(result) {
-  if (!result) {
-    return '';
-  }
-  return [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n\n') || '命令没有返回输出。';
-}
-
-function selectedSummary(view) {
-  return view.items.find((item) => item.key === view.selectedKey) ?? null;
-}
-
-function currentMeta(view) {
-  return memoryMeta(view.selectedKey);
-}
-
-function providerLabel(view) {
-  return view.config?.summary?.memoryProvider || 'builtin-file';
-}
-
-function runtimeProviderLabel(view) {
-  return view.extensions?.memoryRuntime?.provider || providerLabel(view);
-}
-
-function selectedLimit(view) {
-  return limitForKey(view.selectedKey, view.config?.summary ?? null);
-}
-
-function remainingChars(view) {
-  const limit = selectedLimit(view);
-  return limit == null ? null : limit - view.content.length;
-}
-
-function warningList(view) {
-  const summary = view.config?.summary ?? null;
-  const warnings = [];
-  const selected = selectedSummary(view);
-  const remaining = remainingChars(view);
-  const runtimeProvider = runtimeProviderLabel(view);
-
-  if (summary?.memoryEnabled === false) {
-    warnings.push('memory.memory_enabled 为 false，文件可编辑但运行态不会稳定使用。');
-  }
-  if (view.selectedKey === 'user' && summary?.userProfileEnabled === false) {
-    warnings.push('USER 画像当前关闭，USER.md 不会完整进入用户建模。');
-  }
-  if (view.selectedKey !== 'soul' && remaining != null && remaining < 0) {
-    warnings.push(`${view.detail?.label ?? view.selectedKey} 已超出字符预算。`);
-  }
-  if (!selected?.exists) {
-    warnings.push(`${view.detail?.label ?? view.selectedKey} 当前缺失，首次保存后才会落盘。`);
-  }
-  if ((view.dashboard?.counts.sessions ?? 0) === 0) {
-    warnings.push('当前还没有历史会话，记忆链路尚未经过真实使用验证。');
-  }
-  if (view.dashboard?.gateway?.gatewayState !== 'running') {
-    warnings.push('Gateway 未运行，消息平台侧记忆注入尚未验证。');
-  }
-  if (
-    summary?.memoryProvider
-    && view.extensions
-    && !runtimeProvider.toLowerCase().includes(summary.memoryProvider.toLowerCase())
-  ) {
-    warnings.push(`配置声明 provider=${summary.memoryProvider}，运行态回报为 ${runtimeProvider}。`);
-  }
-
-  return warnings;
 }
 
 function relaySeed(view) {
@@ -181,57 +61,14 @@ function applyIntent(view, intent, announce = true) {
 
 function renderSkeleton(view) {
   view.page.innerHTML = `
-    <div class="page-header">
+    <div class="page-header page-header-compact">
       <div class="panel-title-row">
         <h1 class="page-title">记忆工作台</h1>
       </div>
-      <p class="page-desc">正在同步记忆槽位、provider、插件和运行态信号。</p>
+      <p class="page-desc">正在同步槽位、Provider 和运行态信号。</p>
     </div>
     <div class="stat-cards">
       ${Array.from({ length: 6 }).map(() => '<div class="stat-card loading-placeholder" style="min-height:104px"></div>').join('')}
-    </div>
-  `;
-}
-
-function renderSlots(view) {
-  if (!view.items.length) {
-    return emptyStateHtml('暂无槽位', '当前没有读取到可管理的记忆文件。');
-  }
-
-  const summary = view.config?.summary ?? null;
-
-  return `
-    <div class="list-stack workspace-list-scroll">
-      ${view.items.map((item) => {
-        const meta = memoryMeta(item.key);
-        const itemLimit = limitForKey(item.key, summary);
-        const userProfileOff = item.key === 'user' && summary?.userProfileEnabled === false;
-        return `
-          <button
-            type="button"
-            class="list-card session-card ${view.selectedKey === item.key ? 'selected' : ''}"
-            data-action="select-slot"
-            data-key="${escapeHtml(item.key)}"
-          >
-            <div class="list-card-title">
-              <strong>${escapeHtml(item.label)}</strong>
-              <div class="pill-row">
-                ${pillHtml(item.exists ? '已存在' : '缺失', item.exists ? 'good' : 'warn')}
-                ${pillHtml(meta.eyebrow, 'neutral')}
-              </div>
-            </div>
-            <p>${escapeHtml(meta.description)}</p>
-            <div class="pill-row">
-              ${itemLimit != null ? pillHtml(`${itemLimit} chars`, 'neutral') : ''}
-              ${userProfileOff ? pillHtml('runtime off', 'warn') : ''}
-            </div>
-            <div class="meta-line">
-              <span>${escapeHtml(item.key)}</span>
-              <span>${escapeHtml(formatTimestamp(item.updatedAt))}</span>
-            </div>
-          </button>
-        `;
-      }).join('')}
     </div>
   `;
 }
@@ -281,11 +118,11 @@ function renderPage(view) {
 
   if (view.error || !view.config || !view.dashboard || !view.installation || !view.extensions) {
     view.page.innerHTML = `
-      <div class="page-header">
+      <div class="page-header page-header-compact">
         <div class="panel-title-row">
           <h1 class="page-title">记忆工作台</h1>
         </div>
-        <p class="page-desc">围绕记忆文件、provider、插件和校验动作做统一治理。</p>
+        <p class="page-desc">围绕记忆文件、Provider 和校验动作做统一治理。</p>
       </div>
       <section class="config-section">
         <div class="config-section-header">
@@ -304,18 +141,7 @@ function renderPage(view) {
     return;
   }
 
-  const summary = view.config.summary ?? null;
-  const selected = selectedSummary(view);
-  const warnings = warningList(view);
-  const current = currentMeta(view);
-  const runtimeProvider = runtimeProviderLabel(view);
-  const budgetRemaining = remainingChars(view);
-  const dirty = view.detail ? view.content !== view.detail.content : false;
-  const lineCount = view.content ? view.content.split(/\r?\n/).length : 0;
-  const readyCount = view.items.filter((item) => item.exists).length;
-  const actionBusy = Boolean(view.runningAction) || view.runningDiagnostic || Boolean(view.saving);
-  const outputText = view.lastResult ? commandText(view.lastResult.result) : (view.extensions.memoryRuntime.rawOutput || '暂无输出');
-  const outputLabel = view.lastResult?.label || 'memory status';
+  const state = deriveMemoryWorkbenchState(view);
   const seed = relaySeed(view);
   const configIntent = buildConfigDrilldownIntent(seed, {
     focus: 'memory',
@@ -326,302 +152,7 @@ function renderPage(view) {
     logName: 'agent',
   });
 
-  view.page.innerHTML = `
-    <div class="page-header">
-      <div class="panel-title-row">
-        <h1 class="page-title">记忆工作台</h1>
-        ${infoTipHtml('页面主区只保留槽位、编辑器、provider 和校验动作。说明信息尽量后置为提示，不再让文案抢掉编辑区和闭环动作的位置。')}
-      </div>
-      <p class="page-desc">编辑 SOUL / MEMORY / USER，核对 provider，再用体检和原始输出收口。</p>
-    </div>
-
-    <section class="config-section">
-      <div class="config-section-header">
-        <div>
-          <h2 class="config-section-title">运行摘要</h2>
-          <p class="config-section-desc">把文件层、provider 与运行态信号放在同一视野里看。</p>
-        </div>
-        <div class="toolbar">
-          ${buttonHtml({ action: 'refresh', label: view.refreshing ? '同步中…' : '刷新状态', disabled: actionBusy || view.refreshing })}
-          ${buttonHtml({ action: 'memory-status', label: view.runningDiagnostic ? '体检中…' : '记忆体检', kind: 'primary', disabled: actionBusy })}
-        </div>
-      </div>
-      <div class="compact-overview-grid">
-        <div class="shell-card">
-          <div class="shell-card-header">
-            <strong>当前 Profile</strong>
-            <div class="pill-row">
-              ${pillHtml(summary?.memoryEnabled ? 'Memory On' : 'Memory Off', summary?.memoryEnabled ? 'good' : 'warn')}
-              ${pillHtml(view.dashboard.gateway?.gatewayState ?? 'Gateway ?', view.dashboard.gateway?.gatewayState === 'running' ? 'good' : 'warn')}
-            </div>
-          </div>
-          ${keyValueRowsHtml([
-            { label: 'Profile', value: view.profile },
-            { label: 'Provider', value: runtimeProvider },
-            { label: 'User Profile', value: summary?.userProfileEnabled ? 'On' : 'Off' },
-            { label: '会话数', value: String(view.dashboard.counts.sessions ?? 0) },
-            { label: '插件数', value: String(view.extensions.plugins.installedCount) },
-          ])}
-        </div>
-        <div class="metrics-grid metrics-grid-tight">
-          <div class="metric-card">
-            <p class="metric-label">槽位</p>
-            <div class="metric-value">${escapeHtml(`${readyCount}/${view.items.length || 3}`)}</div>
-            <p class="metric-hint">SOUL / MEMORY / USER</p>
-          </div>
-          <div class="metric-card">
-            <p class="metric-label">Provider</p>
-            <div class="metric-value">${escapeHtml(runtimeProvider)}</div>
-            <p class="metric-hint">${escapeHtml(providerLabel(view) === runtimeProvider ? '配置与运行态一致' : '配置与运行态待核对')}</p>
-          </div>
-          <div class="metric-card">
-            <p class="metric-label">插件</p>
-            <div class="metric-value">${escapeHtml(String(view.extensions.plugins.installedCount))}</div>
-            <p class="metric-hint">plugins list 识别结果</p>
-          </div>
-          <div class="metric-card">
-            <p class="metric-label">Warnings</p>
-            <div class="metric-value">${escapeHtml(String(warnings.length))}</div>
-            <p class="metric-hint">预算、provider、gateway、会话</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    ${
-      view.investigation
-        ? `
-          <div class="context-banner">
-            <div class="context-banner-header">
-              <div class="context-banner-copy">
-                <span class="context-banner-label">Session Drilldown</span>
-                <strong class="context-banner-title">${escapeHtml(view.investigation.headline)}</strong>
-                <p class="context-banner-description">${escapeHtml(view.investigation.description)}</p>
-              </div>
-              <div class="context-banner-meta">
-                ${pillHtml(view.investigation.selectedKey ?? view.selectedKey, 'warn')}
-                ${pillHtml(view.investigation.context?.source ?? 'sessions')}
-              </div>
-            </div>
-            <div class="context-banner-actions toolbar">
-              ${buttonHtml({ action: 'clear-investigation', label: '清除上下文' })}
-              ${buttonHtml({ action: 'goto-config', label: '回到配置页' })}
-            </div>
-          </div>
-        `
-        : ''
-    }
-
-    <section class="config-section">
-      <div class="config-section-header">
-        <div>
-          <h2 class="config-section-title">闭环动作</h2>
-          <p class="config-section-desc">Provider、插件和文件编辑直接回到结构化工作台，不再停留在只读摘要。</p>
-        </div>
-      </div>
-      <div class="control-card-grid">
-        <section class="action-card action-card-compact">
-          <div class="action-card-header">
-            <div>
-              <p class="eyebrow">Provider</p>
-              <h3 class="action-card-title">记忆 Provider</h3>
-            </div>
-            ${pillHtml(summary?.memoryEnabled ? 'Enabled' : 'Disabled', summary?.memoryEnabled ? 'good' : 'warn')}
-          </div>
-          <p class="command-line">${escapeHtml(`memory ${summary?.memoryEnabled ? 'on' : 'off'} · provider ${providerLabel(view)} · runtime ${runtimeProvider}`)}</p>
-          <div class="toolbar">
-            ${buttonHtml({ action: 'memory-setup', label: '进入记忆配置', kind: 'primary', disabled: actionBusy })}
-            ${buttonHtml({ action: 'memory-status', label: view.runningDiagnostic ? '体检中…' : '状态体检', disabled: actionBusy })}
-            ${buttonHtml({ action: 'memory-off', label: view.runningAction === 'memory:off' ? '关闭中…' : '关闭记忆', kind: 'danger', disabled: actionBusy })}
-          </div>
-        </section>
-
-        <section class="action-card action-card-compact">
-          <div class="action-card-header">
-            <div>
-              <p class="eyebrow">Plugins</p>
-              <h3 class="action-card-title">插件与扩展 Provider</h3>
-            </div>
-            ${pillHtml(view.extensions.plugins.installedCount > 0 ? `${view.extensions.plugins.installedCount} 个` : '未安装', view.extensions.plugins.installedCount > 0 ? 'good' : 'neutral')}
-          </div>
-          <label class="field-stack">
-            <span>插件名</span>
-            <input class="search-input" id="memory-plugin-input" placeholder="byterover / owner/repo">
-          </label>
-          <p class="command-line">${escapeHtml(view.pluginInput.trim() || '先输入插件名，再直接安装 / 更新 / 移除或跳到扩展页继续治理。')}</p>
-          <div class="toolbar">
-            ${buttonHtml({ action: 'plugins-panel', label: '扩展工作台', disabled: actionBusy })}
-            ${buttonHtml({ action: 'plugin-install', label: view.runningAction === 'memory:plugin-install' ? '安装中…' : '安装', kind: 'primary', disabled: actionBusy || !view.installation.binaryFound || !view.pluginInput.trim() })}
-            ${buttonHtml({ action: 'plugin-update', label: view.runningAction === 'memory:plugin-update' ? '更新中…' : '更新', disabled: actionBusy || !view.installation.binaryFound || !view.pluginInput.trim() })}
-            ${buttonHtml({ action: 'plugin-remove', label: view.runningAction === 'memory:plugin-remove' ? '移除中…' : '移除', kind: 'danger', disabled: actionBusy || !view.installation.binaryFound || !view.pluginInput.trim() })}
-          </div>
-        </section>
-
-        <section class="action-card action-card-compact">
-          <div class="action-card-header">
-            <div>
-              <p class="eyebrow">Workspace</p>
-              <h3 class="action-card-title">记忆物料</h3>
-            </div>
-            ${pillHtml(view.detail?.exists ? '已落盘' : '未落盘', view.detail?.exists ? 'good' : 'warn')}
-          </div>
-          <p class="command-line">${escapeHtml(view.detail?.path || view.config.hermesHome)}</p>
-          <div class="toolbar">
-            ${buttonHtml({ action: 'open-home', label: '打开 Home', disabled: actionBusy })}
-            ${buttonHtml({ action: 'open-current-file', label: '定位当前文件', disabled: actionBusy || !view.detail?.path })}
-            ${buttonHtml({ action: 'open-current-dir', label: '打开目录', disabled: actionBusy || !view.detail?.path })}
-            ${buttonHtml({ action: 'goto-diagnostics', label: '去做诊断' })}
-          </div>
-        </section>
-
-        <section class="action-card action-card-compact">
-          <div class="action-card-header">
-            <div>
-              <p class="eyebrow">Runtime</p>
-              <h3 class="action-card-title">运行态信号</h3>
-            </div>
-            ${pillHtml(warnings.length === 0 ? '稳定' : `${warnings.length} 条`, warnings.length === 0 ? 'good' : 'warn')}
-          </div>
-          <p class="command-line">${escapeHtml(`provider ${runtimeProvider} · sessions ${view.dashboard.counts.sessions ?? 0} · gateway ${view.dashboard.gateway?.gatewayState ?? 'unknown'}`)}</p>
-          ${
-            warnings.length > 0
-              ? `
-                <div class="warning-stack">
-                  ${warnings.slice(0, 2).map((warning) => `<div class="warning-item">${escapeHtml(warning)}</div>`).join('')}
-                </div>
-              `
-              : '<p class="helper-text">当前没有明显的记忆侧阻塞项。</p>'
-          }
-        </section>
-      </div>
-    </section>
-
-    <div class="workspace-shell workspace-shell-editor">
-      <section class="workspace-rail">
-        <div class="workspace-rail-header">
-          <div>
-            <h2 class="config-section-title">记忆槽位</h2>
-            <p class="config-section-desc">只保留 SOUL / MEMORY / USER 三个核心槽位，优先把编辑区让给内容本身。</p>
-          </div>
-          ${infoTipHtml('槽位卡片只负责文件层。是否真正参与运行时注入，还要结合 provider、开关、字符预算和 gateway 状态一起判断。')}
-        </div>
-        ${renderSlots(view)}
-      </section>
-
-      <div class="workspace-main">
-        <section class="workspace-main-card">
-          <div class="workspace-main-header">
-            <div>
-              <div class="panel-title-row">
-                <h2 class="config-section-title">${escapeHtml(view.detail?.label || '记忆内容')}</h2>
-                ${pillHtml(current.eyebrow, 'neutral')}
-                <span id="memory-budget-pill" class="pill pill-${budgetRemaining == null ? 'neutral' : budgetRemaining < 0 ? 'bad' : budgetRemaining < 160 ? 'warn' : 'good'}">
-                  ${escapeHtml(budgetRemaining == null ? '无限制' : `剩余 ${budgetRemaining}`)}
-                </span>
-                <span id="memory-dirty-pill" class="pill pill-${dirty ? 'warn' : 'good'}">
-                  ${dirty ? '未保存' : '已同步'}
-                </span>
-              </div>
-              <p class="workspace-main-copy">${escapeHtml(current.description)}</p>
-            </div>
-            <div class="toolbar">
-              ${buttonHtml({ action: 'save', label: view.saving === 'save' ? '保存中…' : '仅保存', disabled: actionBusy || !view.detail })}
-              ${buttonHtml({ action: 'save-verify', label: view.saving === 'verify' ? '保存并校验…' : '保存并校验', kind: 'primary', disabled: actionBusy || !view.detail })}
-            </div>
-          </div>
-          ${
-            view.detail
-              ? `
-                <div class="detail-list compact">
-                  <div class="key-value-row"><span>路径</span><strong>${escapeHtml(view.detail.path)}</strong></div>
-                  <div class="key-value-row"><span>存在</span><strong>${escapeHtml(String(view.detail.exists))}</strong></div>
-                  <div class="key-value-row"><span>最近修改</span><strong>${escapeHtml(formatTimestamp(selected?.updatedAt))}</strong></div>
-                  <div class="key-value-row"><span>字符数</span><strong id="memory-char-count">${escapeHtml(String(view.content.length))}</strong></div>
-                  <div class="key-value-row"><span>行数</span><strong id="memory-line-count">${escapeHtml(String(lineCount))}</strong></div>
-                  <div class="key-value-row"><span>字符预算</span><strong>${escapeHtml(selectedLimit(view) == null ? '—' : String(selectedLimit(view)))}</strong></div>
-                  <div class="key-value-row"><span>Provider</span><strong>${escapeHtml(runtimeProvider)}</strong></div>
-                </div>
-                <textarea class="workspace-editor" id="memory-editor" spellcheck="false"></textarea>
-              `
-              : emptyStateHtml('未选择文件', '从左侧选择一个槽位开始编辑。')
-          }
-        </section>
-
-        <div class="workspace-bottom-grid">
-          <section class="workspace-main-card">
-            <div class="workspace-main-header">
-              <div>
-                <h2 class="config-section-title">运行态与预算</h2>
-                <p class="config-section-desc">配置声明、运行态 provider 和字符预算放在一起核对。</p>
-              </div>
-              ${pillHtml(runtimeProvider, runtimeProvider === 'builtin-file' ? 'good' : 'neutral')}
-            </div>
-            <div class="health-grid">
-              <section class="health-card">
-                <div class="health-card-header">
-                  <strong>Provider</strong>
-                  ${pillHtml(runtimeProvider, providerLabel(view) === runtimeProvider ? 'good' : 'warn')}
-                </div>
-                <p>${escapeHtml(`配置声明 ${providerLabel(view)}，运行态回报 ${runtimeProvider}。`)}</p>
-              </section>
-              <section class="health-card">
-                <div class="health-card-header">
-                  <strong>Memory Switch</strong>
-                  ${pillHtml(summary?.memoryEnabled ? '已开启' : '已关闭', summary?.memoryEnabled ? 'good' : 'warn')}
-                </div>
-                <p>关闭后文件仍可编辑，但不会稳定参与记忆闭环。</p>
-              </section>
-              <section class="health-card">
-                <div class="health-card-header">
-                  <strong>User Profile</strong>
-                  ${pillHtml(summary?.userProfileEnabled ? '已开启' : '已关闭', summary?.userProfileEnabled ? 'good' : 'warn')}
-                </div>
-                <p>USER.md 是否参与建模，完全由这个开关决定。</p>
-              </section>
-              <section class="health-card">
-                <div class="health-card-header">
-                  <strong>Budget</strong>
-                  ${pillHtml(selectedLimit(view) == null ? '—' : String(selectedLimit(view)), budgetRemaining != null && budgetRemaining < 0 ? 'bad' : 'good')}
-                </div>
-                <p>${escapeHtml(`当前编辑对象剩余 ${budgetRemaining == null ? '—' : budgetRemaining} 字符。`)}</p>
-              </section>
-            </div>
-            ${
-              warnings.length > 0
-                ? `
-                  <div class="warning-stack top-gap">
-                    ${warnings.map((warning) => `<div class="warning-item">${escapeHtml(warning)}</div>`).join('')}
-                  </div>
-                `
-                : ''
-            }
-          </section>
-
-          <section class="workspace-main-card">
-            <div class="workspace-main-header">
-              <div>
-                <h2 class="config-section-title">最近动作与原始输出</h2>
-                <p class="config-section-desc">保留最近一次保存、插件动作或状态体检结果。</p>
-              </div>
-              <div class="toolbar">
-                ${buttonHtml({ action: 'goto-config', label: '回到配置页' })}
-                ${buttonHtml({ action: 'goto-diagnostics', label: '进入诊断页' })}
-              </div>
-            </div>
-            ${commandResultHtml(view.lastResult, '尚未执行动作', '保存记忆、插件治理或状态体检后，这里会保留最近一次结果。')}
-            <div class="top-gap">
-              <div class="detail-list compact">
-                <div class="key-value-row"><span>当前显示</span><strong>${escapeHtml(outputLabel)}</strong></div>
-                <div class="key-value-row"><span>运行态 Provider</span><strong>${escapeHtml(runtimeProvider)}</strong></div>
-                <div class="key-value-row"><span>插件数</span><strong>${escapeHtml(String(view.extensions.plugins.installedCount))}</strong></div>
-              </div>
-              <pre class="code-block compact-code top-gap">${escapeHtml(outputText)}</pre>
-            </div>
-          </section>
-        </div>
-      </div>
-    </div>
-  `;
+  view.page.innerHTML = renderMemoryWorkbench(view, state);
 
   bindEvents(view, { configIntent, diagnosticsIntent });
 
