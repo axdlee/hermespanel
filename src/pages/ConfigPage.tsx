@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { Button, ContextBanner, EmptyState, InfoTip, KeyValueRow, LoadingState, MetricCard, Panel, Pill, Toolbar } from '../components/ui';
+import { Button, ContextBanner, EmptyState, InfoTip, KeyValueRow, LoadingState, Panel, Pill, Toolbar } from '../components/ui';
 import { RuntimePostureView } from '../components/runtime-posture';
 import { api } from '../lib/api';
 import { handoffToTerminal, openFinderLocation } from '../lib/desktop';
@@ -26,12 +26,64 @@ const CONFIG_WORKBENCH_KEYS: DiagnosticKind[] = [
 ];
 
 type ConfigTabKey = 'overview' | 'files' | 'advanced';
+type ConfigOverviewViewKey = 'launch' | 'status' | 'checks';
+type ConfigFileFocusKey = 'config' | 'env';
+type ConfigFilesViewKey = 'editor' | 'signals' | 'output';
+type ConfigAdvancedViewKey = 'actions' | 'posture' | 'output';
 
 const CONFIG_TABS: Array<{ key: ConfigTabKey; label: string; hint: string }> = [
-  { key: 'overview', label: '常用总览', hint: '先看推荐下一步、当前判断和常用体检。' },
-  { key: 'files', label: '文件与保存', hint: '集中修改 config.yaml 与 .env。' },
-  { key: 'advanced', label: '高级接管', hint: '低频但必要的官方向导与 CLI 接管动作。' },
+  { key: 'overview', label: '常用设置', hint: '先看推荐下一步、当前判断和常用体检。' },
+  { key: 'files', label: '原始文件', hint: '按需修改 config.yaml 与 .env。' },
+  { key: 'advanced', label: '进阶接管', hint: '低频但必要的官方向导与 CLI 接管动作。' },
 ];
+
+const CONFIG_OVERVIEW_VIEWS: Array<{
+  key: ConfigOverviewViewKey;
+  label: string;
+  icon: string;
+  hint: string;
+}> = [
+  { key: 'launch', label: '常用去向', icon: '🚀', hint: '先决定要去改配置、做体检，还是继续去能力链路。' },
+  { key: 'status', label: '当前判断', icon: '🌤️', hint: '只看最核心的配置结论和提醒，不再默认连着体检区一起铺开。' },
+  { key: 'checks', label: '快速体检', icon: '🩺', hint: '最常用的 4 个体检命令单独收成一个工作面。' },
+];
+
+const CONFIG_FILES_VIEWS: Array<{
+  key: ConfigFilesViewKey;
+  label: string;
+  icon: string;
+  hint: string;
+}> = [
+  { key: 'editor', label: '文件编辑', icon: '✍️', hint: '默认只专注当前正在改的那份文件，另一份文件收进辅助区。' },
+  { key: 'signals', label: '闭环信号', icon: '🔗', hint: '文件改完后，再来看配置声明和运行态有没有对齐。' },
+  { key: 'output', label: '最近输出', icon: '🧾', hint: 'Hermes 原生命令回显只放在这里，不默认占住编辑区。' },
+];
+
+const CONFIG_ADVANCED_VIEWS: Array<{
+  key: ConfigAdvancedViewKey;
+  label: string;
+  icon: string;
+  hint: string;
+}> = [
+  { key: 'actions', label: '接管动作', icon: '🛠️', hint: '低频但必要的官方向导和接管动作集中在这里。' },
+  { key: 'posture', label: '运行姿态', icon: '🧭', hint: '需要判断配置、扩展、cron 和技能是不是同一条链路时再展开。' },
+  { key: 'output', label: '最近输出', icon: '🧾', hint: '最近一次接管或体检输出后置到这里，不和动作区混在一起。' },
+];
+
+function configWorkbenchIcon(key: DiagnosticKind) {
+  switch (key) {
+    case 'config-check':
+      return '🩺';
+    case 'memory-status':
+      return '🧠';
+    case 'gateway-status':
+      return '📡';
+    case 'doctor':
+      return '🧭';
+    default:
+      return '🛠️';
+  }
+}
 
 function isDiagnosticCommandDefinition(
   value: DiagnosticCommandDefinition | undefined,
@@ -93,6 +145,10 @@ function runtimeWarnings(
 
 export function ConfigPage({ notify, profile, navigate, pageIntent, consumePageIntent }: PageProps) {
   const [activeTab, setActiveTab] = useState<ConfigTabKey>('overview');
+  const [overviewView, setOverviewView] = useState<ConfigOverviewViewKey>('launch');
+  const [fileFocus, setFileFocus] = useState<ConfigFileFocusKey>('config');
+  const [filesView, setFilesView] = useState<ConfigFilesViewKey>('editor');
+  const [advancedView, setAdvancedView] = useState<ConfigAdvancedViewKey>('actions');
   const [data, setData] = useState<ConfigDocuments | null>(null);
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
   const [installation, setInstallation] = useState<InstallationSnapshot | null>(null);
@@ -225,9 +281,14 @@ export function ConfigPage({ notify, profile, navigate, pageIntent, consumePageI
   }
 
   useEffect(() => {
+    setActiveTab('overview');
+    setOverviewView('launch');
     setLastDiagnostic(null);
     setLastResultLabel(null);
     setLastResult(null);
+    setFileFocus('config');
+    setFilesView('editor');
+    setAdvancedView('actions');
     void load({ refreshEditors: true });
   }, [profile]);
 
@@ -238,6 +299,9 @@ export function ConfigPage({ notify, profile, navigate, pageIntent, consumePageI
 
     setInvestigation(pageIntent);
     setActiveTab('overview');
+    setOverviewView('launch');
+    setFilesView('editor');
+    setAdvancedView('actions');
     notify('info', `${pageIntent.headline} 已带入配置工作台。`);
     consumePageIntent();
   }, [consumePageIntent, notify, pageIntent]);
@@ -275,8 +339,27 @@ export function ConfigPage({ notify, profile, navigate, pageIntent, consumePageI
   const backendReady = Boolean(data.summary.terminalBackend);
   const toolingReady = data.summary.toolsets.length > 0 && enabledToolCount(extensions) > 0;
   const memoryRuntimeReady = data.summary.memoryEnabled !== false && !(extensions?.memoryRuntime.provider.includes('none') ?? true);
-  const overviewWarnings = warnings.slice(0, 4);
+  const configStartReadiness = modelReady && backendReady
+    ? (configDirty || envDirty ? '待保存草稿' : '可以继续')
+    : '先补核心配置';
+  const configStartHint = !modelReady
+    ? '先补齐 provider 和默认模型。'
+    : !backendReady
+      ? '先确认 terminal backend，避免后续工具链执行不稳定。'
+      : configDirty || envDirty
+        ? '当前已有草稿修改，建议先保存再做体检。'
+        : '基础配置已经成形，可以继续做体检或核对上下游工作台。';
+  const focusedFileLabel = fileFocus === 'config' ? 'config.yaml' : '.env';
+  const focusedFilePath = fileFocus === 'config' ? data.configPath : data.envPath;
+  const focusedFileDirty = fileFocus === 'config' ? configDirty : envDirty;
+  const secondaryFileLabel = fileFocus === 'config' ? '.env' : 'config.yaml';
+  const secondaryFilePath = fileFocus === 'config' ? data.envPath : data.configPath;
+  const secondaryFileDirty = fileFocus === 'config' ? envDirty : configDirty;
+  const overviewWarnings = warnings.slice(0, 3);
   const remainingWarningCount = Math.max(0, warnings.length - overviewWarnings.length);
+  const activeFilesView = CONFIG_FILES_VIEWS.find((item) => item.key === filesView) ?? CONFIG_FILES_VIEWS[0];
+  const activeAdvancedView = CONFIG_ADVANCED_VIEWS.find((item) => item.key === advancedView) ?? CONFIG_ADVANCED_VIEWS[0];
+  const activeOverviewView = CONFIG_OVERVIEW_VIEWS.find((item) => item.key === overviewView) ?? CONFIG_OVERVIEW_VIEWS[0];
 
   const recentResultSection = (
     <Panel title="最近校验输出" subtitle="保留 Hermes 原生命令回显，避免把配置页做成另一个解释器。">
@@ -543,26 +626,29 @@ export function ConfigPage({ notify, profile, navigate, pageIntent, consumePageI
           </Toolbar>
         )}
       >
-        <div className="hero-grid">
-          <div className="hero-copy">
-            <p className="hero-title">Hermes Core Setup</p>
-            <p className="hero-subtitle">模型、工具、记忆和体检在这里收束成一条更顺手的配置路径。</p>
-            <div className="detail-list">
-              <KeyValueRow label="当前 Profile" value={profile} />
-              <KeyValueRow label="Hermes Home" value={data.hermesHome} />
-              <KeyValueRow label="默认模型" value={data.summary.modelDefault || '—'} />
-              <KeyValueRow label="Model Provider" value={data.summary.modelProvider || '—'} />
-              <KeyValueRow label="Gateway" value={snapshot?.gateway?.gatewayState ?? '未检测到'} />
-              <KeyValueRow label="Context Engine" value={data.summary.contextEngine || '—'} />
-            </div>
-          </div>
-          <div className="metrics-grid">
-            <MetricCard label="Model" value={data.summary.modelDefault || '—'} hint={data.summary.modelProvider || '未配置 provider'} />
-            <MetricCard label="Backend" value={data.summary.terminalBackend || '—'} hint={data.summary.terminalCwd || '未声明工作目录'} />
-            <MetricCard label="Toolsets / Tools" value={`${data.summary.toolsets.length} / ${enabledToolCount(extensions)}`} hint="声明的 toolsets 数 / 运行态启用 tools 数" />
-            <MetricCard label="Cron / 远端" value={`${jobs.length} / ${remoteJobs.length}`} hint="总作业数 / 依赖 gateway 的作业数" />
-          </div>
+        <div className="workspace-summary-strip">
+          <section className="summary-mini-card">
+            <span className="summary-mini-label">当前起点</span>
+            <strong className="summary-mini-value">{configStartReadiness}</strong>
+            <span className="summary-mini-meta">{configStartHint}</span>
+          </section>
+          <section className="summary-mini-card">
+            <span className="summary-mini-label">模型 / Provider</span>
+            <strong className="summary-mini-value">{data.summary.modelDefault || '未配置模型'}</strong>
+            <span className="summary-mini-meta">{data.summary.modelProvider || 'provider 未配置'}</span>
+          </section>
+          <section className="summary-mini-card">
+            <span className="summary-mini-label">终端与工具</span>
+            <strong className="summary-mini-value">{data.summary.terminalBackend || '未配置 backend'}</strong>
+            <span className="summary-mini-meta">{`${data.summary.toolsets.length} 个 toolset / ${enabledToolCount(extensions)} 个运行态 tools`}</span>
+          </section>
+          <section className="summary-mini-card">
+            <span className="summary-mini-label">上下游链路</span>
+            <strong className="summary-mini-value">{snapshot?.gateway?.gatewayState ?? 'gateway 未检测到'}</strong>
+            <span className="summary-mini-meta">{`${extensions?.memoryRuntime.provider || 'memory 未读取'} / ${remoteJobs.length} 个远端作业`}</span>
+          </section>
         </div>
+        <p className="helper-text top-gap">配置中心只承接高频核心参数。文件保存、体检和高级向导仍然都在当前页，但已经按层级后置，不会一上来全部铺开。</p>
       </Panel>
 
       {investigation ? (
@@ -609,259 +695,348 @@ export function ConfigPage({ notify, profile, navigate, pageIntent, consumePageI
       {activeTab === 'overview' ? (
         <>
           <Panel
-            title="推荐下一步"
-            subtitle="先把模型、终端、工具和记忆这几件高频事项处理好，再决定是否要进入文件编辑或高级接管。"
+            title="总览入口"
+            subtitle="总览页继续拆成二级工作面，默认只展开一个主区块，避免配置首页一次铺太多块。"
           >
-            <div className="list-stack">
-              <div className="list-card">
-                <div className="list-card-title">
-                  <strong>先确认模型、Provider 和终端后端</strong>
-                  <Pill tone={modelReady && backendReady ? 'good' : 'warn'}>
-                    {modelReady && backendReady ? '核心已就绪' : '建议先处理'}
-                  </Pill>
-                </div>
-                <p>如果默认模型、provider 或 terminal backend 还没稳定，后面的工具链、记忆链路和消息链路都会变得难判断。</p>
-                <div className="meta-line">
-                  <span>{data.summary.modelProvider || 'provider 未配置'} / {data.summary.modelDefault || 'model 未配置'}</span>
-                  <span>{data.summary.terminalBackend || 'terminal backend 未配置'}</span>
-                </div>
-                <Toolbar>
-                  <Button kind="primary" onClick={() => setActiveTab('files')}>
-                    去文件与保存
-                  </Button>
-                  <Button onClick={() => navigate('profiles')}>
-                    切换实例
-                  </Button>
-                </Toolbar>
-              </div>
-
-              <div className="list-card">
-                <div className="list-card-title">
-                  <strong>保存配置后优先做一次体检</strong>
-                  <Pill tone={configDirty || envDirty ? 'warn' : warnings.length > 0 ? 'warn' : 'good'}>
-                    {configDirty || envDirty ? '有未保存修改' : '可以直接体检'}
-                  </Pill>
-                </div>
-                <p>建议把“改配置”和“看运行态”绑在一起，保存后马上做 `config-check`，这样最容易发现文件态与运行态不一致的问题。</p>
-                <div className="meta-line">
-                  <span>{configDirty || envDirty ? '当前有草稿改动' : '当前文件已同步'}</span>
-                  <span>{lastResultLabel ?? '尚未执行最近一次体检'}</span>
-                </div>
-                <Toolbar>
-                  <Button kind="primary" onClick={() => void runDiagnostic('config-check')} disabled={runningDiagnostic !== null}>
-                    {runningDiagnostic === 'config-check' ? '配置体检中…' : '运行配置体检'}
-                  </Button>
-                  <Button onClick={() => setActiveTab('files')}>
-                    去编辑配置文件
-                  </Button>
-                </Toolbar>
-              </div>
-
-              <div className="list-card">
-                <div className="list-card-title">
-                  <strong>工具、记忆和消息链路分别去对应工作台核对</strong>
-                  <Pill tone={toolingReady && memoryRuntimeReady && snapshot?.gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
-                    {toolingReady && memoryRuntimeReady && snapshot?.gateway?.gatewayState === 'running' ? '闭环较完整' : '仍需交叉核对'}
-                  </Pill>
-                </div>
-                <p>配置中心只负责总开关与核心参数，技能、扩展、记忆和 Gateway 的细节建议去对应工作台查看，避免把所有复杂度都堆在一个页面里。</p>
-                <div className="meta-line">
-                  <span>{data.summary.toolsets.length} 个 toolset / {enabledToolCount(extensions)} 个运行态 tools</span>
-                  <span>{extensions?.memoryRuntime.provider || 'memory runtime 未读取'} / {snapshot?.gateway?.gatewayState ?? 'gateway 未检测到'}</span>
-                </div>
-                <Toolbar>
-                  <Button kind="primary" onClick={() => navigate('extensions')}>
-                    查看扩展与工具
-                  </Button>
-                  <Button onClick={() => navigate('memory')}>
-                    查看记忆与 Provider
-                  </Button>
-                  <Button onClick={() => navigate('gateway')}>
-                    查看 Gateway
-                  </Button>
-                </Toolbar>
-              </div>
-            </div>
-          </Panel>
-
-          <Panel title="当前判断" subtitle="把核心配置状态收成摘要，新手先看这里就能知道现在先修什么。">
-            <div className="health-grid">
-              <section className="health-card">
-                <div className="health-card-header">
-                  <strong>Provider / Model</strong>
-                  <Pill tone={modelReady ? 'good' : 'warn'}>
-                    {modelReady ? '已就绪' : '缺失'}
-                  </Pill>
-                </div>
-                <p>{data.summary.modelProvider || '未配置 provider'} / {data.summary.modelDefault || '未配置 model'}</p>
-              </section>
-              <section className="health-card">
-                <div className="health-card-header">
-                  <strong>Terminal Backend</strong>
-                  <Pill tone={backendReady ? 'good' : 'warn'}>
-                    {data.summary.terminalBackend || '未配置'}
-                  </Pill>
-                </div>
-                <p>{data.summary.terminalCwd || '当前未声明工作目录，工具执行上下文可能不稳定。'}</p>
-              </section>
-              <section className="health-card">
-                <div className="health-card-header">
-                  <strong>Toolsets / Tools</strong>
-                  <Pill tone={toolingReady ? 'good' : 'warn'}>
-                    {enabledToolCount(extensions)}/{totalToolCount(extensions)}
-                  </Pill>
-                </div>
-                <p>{data.summary.toolsets.join(', ') || '当前没有配置 toolsets。'}</p>
-              </section>
-              <section className="health-card">
-                <div className="health-card-header">
-                  <strong>Context / Memory</strong>
-                  <Pill tone={data.summary.contextEngine && memoryRuntimeReady ? 'good' : 'warn'}>
-                    {data.summary.contextEngine || '未配置'}
-                  </Pill>
-                </div>
-                <p>
-                  Memory Provider {data.summary.memoryProvider || 'builtin-file'} · 用户画像 {String(data.summary.userProfileEnabled ?? false)} ·
-                  Gateway {snapshot?.gateway?.gatewayState ?? '未检测到'}
-                </p>
-              </section>
-            </div>
-            {overviewWarnings.length > 0 ? (
-              <>
-                <div className="warning-stack">
-                  {overviewWarnings.map((warning) => (
-                    <div className="warning-item" key={warning}>
-                      {warning}
-                    </div>
-                  ))}
-                </div>
-                {remainingWarningCount > 0 ? (
-                  <p className="helper-text top-gap">其余 {remainingWarningCount} 条提醒继续收在“文件与保存”和“高级接管”里。</p>
-                ) : null}
-              </>
-            ) : (
-              <EmptyState title="配置较完整" description="当前没有明显的运行态配置风险，可以继续去技能页或诊断页验证闭环。" />
-            )}
-          </Panel>
-
-          <Panel
-            title="运行姿态与分流"
-            subtitle="这里比首页多带了扩展、cron 和技能上下文，更适合判断这个 profile 的真实能力编排是否闭环。"
-          >
-            <RuntimePostureView posture={posture} navigate={navigate} />
-          </Panel>
-
-          <Panel title="常用体检" subtitle="把最常用的四类体检收在这里，复杂接管动作继续留在高级页。">
-            <div className="workbench-grid">
-              {workbenchCommands.map((command) => (
-                <section className="action-card" key={command.key}>
-                  <div className="action-card-header">
-                    <div>
-                      <p className="eyebrow">{command.scope === 'capability' ? 'Capability' : 'Runtime'}</p>
-                      <h3 className="action-card-title">{command.label}</h3>
-                    </div>
-                    <Pill tone={command.kind === 'primary' ? 'good' : 'neutral'}>{command.key}</Pill>
-                  </div>
-                  <p className="action-card-copy">{command.description}</p>
-                  <p className="helper-text">{command.cli}</p>
-                  <Toolbar>
-                    <Button
-                      kind={command.kind}
-                      onClick={() => void runDiagnostic(command.key)}
-                      disabled={runningDiagnostic !== null}
-                    >
-                      {runningDiagnostic === command.key ? `${command.label}…` : `执行 ${command.label}`}
-                    </Button>
-                    <Button onClick={() => navigate(command.relatedPage)}>进入相关页</Button>
-                  </Toolbar>
-                </section>
+            <div className="workspace-shortcut-grid dashboard-launcher-grid">
+              {CONFIG_OVERVIEW_VIEWS.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  className={`workspace-shortcut-card dashboard-shortcut-card ${overviewView === item.key ? 'active' : ''}`}
+                  onClick={() => setOverviewView(item.key)}
+                >
+                  <strong><span className="dashboard-shortcut-icon">{item.icon}</span>{item.label}</strong>
+                  <span>{item.hint}</span>
+                </button>
               ))}
             </div>
-            <p className="helper-text">
-              推荐顺序：保存配置后先做 `config-check`，再看 `memory-status` 和 `gateway-status`，如果仍不清楚就执行 `doctor`。
-            </p>
+            <p className="helper-text top-gap">{activeOverviewView.hint}</p>
           </Panel>
+
+          {overviewView === 'launch' ? (
+            <Panel
+              title="常用去向"
+              subtitle="首页只保留真正高频的 4 条去向，原始文件和接管向导继续后置到下一层。"
+            >
+              <div className="workspace-shortcut-grid dashboard-launcher-grid">
+                <button
+                  type="button"
+                  className="workspace-shortcut-card dashboard-shortcut-card"
+                  onClick={() => {
+                    setFileFocus('config');
+                    setFilesView('editor');
+                    setActiveTab('files');
+                  }}
+                >
+                  <strong><span className="dashboard-shortcut-icon">⚙️</span>核心参数</strong>
+                  <span>{modelReady && backendReady ? `${data.summary.modelProvider} / ${data.summary.modelDefault}` : '先补 provider、模型与 terminal backend'}</span>
+                </button>
+                <button
+                  type="button"
+                  className="workspace-shortcut-card dashboard-shortcut-card"
+                  onClick={() => void runDiagnostic('config-check')}
+                  disabled={runningDiagnostic !== null}
+                >
+                  <strong><span className="dashboard-shortcut-icon">🩺</span>配置体检</strong>
+                  <span>{configDirty || envDirty ? '有草稿时建议先保存再体检' : lastResultLabel || '立即检查文件态与运行态是否一致'}</span>
+                </button>
+                <button
+                  type="button"
+                  className="workspace-shortcut-card dashboard-shortcut-card"
+                  onClick={() => navigate('extensions')}
+                >
+                  <strong><span className="dashboard-shortcut-icon">🧩</span>能力链路</strong>
+                  <span>{toolingReady ? `${data.summary.toolsets.length} 个 toolset / ${enabledToolCount(extensions)} 个运行态 tools` : '继续核对 tools、skills 与插件叠层'}</span>
+                </button>
+                <button
+                  type="button"
+                  className="workspace-shortcut-card dashboard-shortcut-card"
+                  onClick={() => {
+                    setAdvancedView('actions');
+                    setActiveTab('advanced');
+                  }}
+                >
+                  <strong><span className="dashboard-shortcut-icon">🛠️</span>进阶接管</strong>
+                  <span>{memoryRuntimeReady && snapshot?.gateway?.gatewayState === 'running' ? '向导和接管动作已后置到进阶层' : '记忆、插件和 Gateway 仍建议继续核对'}</span>
+                </button>
+              </div>
+              <p className="helper-text top-gap">总览页现在只负责决定下一步去哪里，不再同时铺开多张解释型卡片。</p>
+            </Panel>
+          ) : null}
+
+          {overviewView === 'status' ? (
+            <Panel title="当前判断" subtitle="首页只保留最关键的四个配置结论，让你先知道现在该修哪一段。">
+              <div className="workspace-summary-strip">
+                <section className="summary-mini-card">
+                  <span className="summary-mini-label">模型</span>
+                  <strong className="summary-mini-value">{modelReady ? '已就绪' : '待补齐'}</strong>
+                  <span className="summary-mini-meta">{`${data.summary.modelProvider || 'provider 未配置'} / ${data.summary.modelDefault || 'model 未配置'}`}</span>
+                </section>
+                <section className="summary-mini-card">
+                  <span className="summary-mini-label">终端后端</span>
+                  <strong className="summary-mini-value">{data.summary.terminalBackend || '未配置'}</strong>
+                  <span className="summary-mini-meta">{data.summary.terminalCwd || '当前未声明工作目录。'}</span>
+                </section>
+                <section className="summary-mini-card">
+                  <span className="summary-mini-label">工具与 Skill</span>
+                  <strong className="summary-mini-value">{toolingReady ? '已成形' : '待补齐'}</strong>
+                  <span className="summary-mini-meta">{`${data.summary.toolsets.length} 个 toolset / ${enabledToolCount(extensions)}/${totalToolCount(extensions)} 个运行态 tools`}</span>
+                </section>
+                <section className="summary-mini-card">
+                  <span className="summary-mini-label">记忆与网关</span>
+                  <strong className="summary-mini-value">{data.summary.contextEngine || 'context 未配置'}</strong>
+                  <span className="summary-mini-meta">{`Memory ${data.summary.memoryProvider || 'builtin-file'} / Gateway ${snapshot?.gateway?.gatewayState ?? '未检测到'}`}</span>
+                </section>
+              </div>
+              <div className="detail-list compact top-gap">
+                <KeyValueRow label="当前起点" value={configStartReadiness} />
+                <KeyValueRow label="文件状态" value={configDirty || envDirty ? '有未保存草稿' : '文件已同步'} />
+                <KeyValueRow label="最近结果" value={lastResultLabel ?? '尚未执行最近一次体检'} />
+              </div>
+              {overviewWarnings.length > 0 ? (
+                <>
+                  <div className="warning-stack">
+                    {overviewWarnings.map((warning) => (
+                      <div className="warning-item" key={warning}>
+                        {warning}
+                      </div>
+                    ))}
+                  </div>
+                  {remainingWarningCount > 0 ? (
+                    <p className="helper-text top-gap">其余 {remainingWarningCount} 条提醒继续收在“文件与保存”和“高级接管”里。</p>
+                  ) : null}
+                </>
+              ) : (
+                <EmptyState title="配置较完整" description="当前没有明显的运行态配置风险，可以继续去技能页或诊断页验证闭环。" />
+              )}
+              <Toolbar>
+                <Button kind="primary" onClick={() => { setFilesView('signals'); setActiveTab('files'); }}>查看闭环信号</Button>
+                <Button onClick={() => setOverviewView('checks')}>继续做体检</Button>
+              </Toolbar>
+            </Panel>
+          ) : null}
+
+          {overviewView === 'checks' ? (
+            <Panel title="快速体检" subtitle="只保留 4 个最常用入口，完整接管与原始回显继续留在文件层和进阶层。">
+              <div className="workspace-shortcut-grid dashboard-launcher-grid">
+                {workbenchCommands.map((command) => (
+                  <button
+                    key={command.key}
+                    type="button"
+                    className="workspace-shortcut-card dashboard-shortcut-card"
+                    onClick={() => void runDiagnostic(command.key)}
+                    disabled={runningDiagnostic !== null}
+                  >
+                    <strong><span className="dashboard-shortcut-icon">{configWorkbenchIcon(command.key)}</span>{command.label}</strong>
+                    <span>{runningDiagnostic === command.key ? `${command.label} 执行中…` : command.description}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="detail-list compact top-gap">
+                <KeyValueRow label="推荐顺序" value="先 config-check，再 memory-status / gateway-status，最后 doctor" />
+                <KeyValueRow label="最近动作" value={lastResultLabel ?? '尚未执行最近一次体检'} />
+              </div>
+              <Toolbar>
+                <Button kind="primary" onClick={() => { setFilesView('editor'); setActiveTab('files'); }}>去文件与保存</Button>
+                <Button onClick={() => { setAdvancedView('actions'); setActiveTab('advanced'); }}>去进阶接管</Button>
+              </Toolbar>
+            </Panel>
+          ) : null}
         </>
       ) : null}
 
       {activeTab === 'files' ? (
         <>
           <Panel
-            title="文件编辑工作区"
-            subtitle="日常配置建议只在这里完成：修改文件、保存、体检，然后再看闭环信号。"
+            title="文件与保存入口"
+            subtitle="文件编辑、闭环信号和最近输出拆成子视图，默认只展开当前工作面。"
             aside={(
               <Toolbar>
                 <Pill tone={configDirty || envDirty ? 'warn' : 'good'}>
                   {configDirty || envDirty ? '有未保存修改' : '文件已同步'}
                 </Pill>
-                <Button onClick={() => void runDiagnostic('config-check')} disabled={runningDiagnostic !== null}>
-                  {runningDiagnostic === 'config-check' ? '体检中…' : '保存后体检'}
-                </Button>
               </Toolbar>
             )}
           >
-            <div className="detail-list compact">
-              <KeyValueRow label="建议顺序" value="修改文件 → 保存 → 配置体检 → 看闭环信号" />
-              <KeyValueRow label="config.yaml" value={data.configPath} />
-              <KeyValueRow label=".env" value={data.envPath} />
+            <div className="workspace-shortcut-grid dashboard-launcher-grid">
+              {CONFIG_FILES_VIEWS.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  className={`workspace-shortcut-card dashboard-shortcut-card ${filesView === item.key ? 'active' : ''}`}
+                  onClick={() => setFilesView(item.key)}
+                >
+                  <strong><span className="dashboard-shortcut-icon">{item.icon}</span>{item.label}</strong>
+                  <span>{item.hint}</span>
+                </button>
+              ))}
             </div>
+            <p className="helper-text top-gap">{activeFilesView.hint}</p>
           </Panel>
 
-          <div className="two-column">
-            <Panel
-              title="config.yaml"
-              aside={(
+          {filesView === 'editor' ? (
+            <>
+              <Panel
+                title="原始文件工作区"
+                subtitle="需要直接改文件时，再进入这一层；一次只专注编辑一份文件，保存后再做体检。"
+              >
+                <div className="workspace-summary-strip">
+                  <section className="summary-mini-card">
+                    <span className="summary-mini-label">建议顺序</span>
+                    <strong className="summary-mini-value">先选文件，再保存，再体检</strong>
+                    <span className="summary-mini-meta">修改文件 → 保存 → 配置体检 → 看闭环信号</span>
+                  </section>
+                  <section className="summary-mini-card">
+                    <span className="summary-mini-label">当前焦点</span>
+                    <strong className="summary-mini-value">{focusedFileLabel}</strong>
+                    <span className="summary-mini-meta">{focusedFilePath}</span>
+                  </section>
+                  <section className="summary-mini-card">
+                    <span className="summary-mini-label">另一份文件</span>
+                    <strong className="summary-mini-value">{secondaryFileLabel}</strong>
+                    <span className="summary-mini-meta">{secondaryFileDirty ? '存在未保存修改' : '当前没有未保存修改'}</span>
+                  </section>
+                  <section className="summary-mini-card">
+                    <span className="summary-mini-label">最近体检</span>
+                    <strong className="summary-mini-value">{lastResultLabel ?? '尚未执行'}</strong>
+                    <span className="summary-mini-meta">{configDirty || envDirty ? '建议先保存当前草稿' : '可以直接运行 config-check'}</span>
+                  </section>
+                </div>
+                <p className="helper-text top-gap">小白通常只需要处理当前正在改的那一份文件；另一份文件的状态会保留在辅助区里，不再同时把两个大编辑器都铺开。</p>
                 <Toolbar>
-                  {configDirty && <Pill tone="warn">未保存</Pill>}
-                  <Button kind="primary" onClick={() => void saveConfig()} disabled={saving !== null || runningDiagnostic !== null}>
-                    {saving === 'config' ? '保存中…' : '保存 YAML'}
-                  </Button>
-                  <Button onClick={() => void saveConfig(true)} disabled={saving !== null || runningDiagnostic !== null}>
-                    {saving === 'config' ? '保存中…' : '保存并体检'}
+                  {fileFocus === 'config' ? (
+                    <Button kind="primary" onClick={() => setFileFocus('config')}>正在编辑 config.yaml</Button>
+                  ) : (
+                    <Button onClick={() => setFileFocus('config')}>切到 config.yaml</Button>
+                  )}
+                  {fileFocus === 'env' ? (
+                    <Button kind="primary" onClick={() => setFileFocus('env')}>正在编辑 .env</Button>
+                  ) : (
+                    <Button onClick={() => setFileFocus('env')}>切到 .env</Button>
+                  )}
+                  <Button onClick={() => void openInFinder(focusedFilePath, focusedFileLabel, true)}>定位当前文件</Button>
+                  <Button onClick={() => void runDiagnostic('config-check')} disabled={runningDiagnostic !== null}>
+                    {runningDiagnostic === 'config-check' ? '体检中…' : '保存后体检'}
                   </Button>
                 </Toolbar>
-              )}
-            >
-              <textarea
-                className="editor"
-                value={configYaml}
-                onChange={(event) => setConfigYaml(event.target.value)}
-                spellCheck={false}
-              />
-            </Panel>
+              </Panel>
 
-            <Panel
-              title=".env"
-              aside={(
-                <Toolbar>
-                  {envDirty && <Pill tone="warn">未保存</Pill>}
-                  <Button kind="primary" onClick={() => void saveEnv()} disabled={saving !== null || runningDiagnostic !== null}>
-                    {saving === 'env' ? '保存中…' : '保存 ENV'}
-                  </Button>
-                  <Button onClick={() => void saveEnv(true)} disabled={saving !== null || runningDiagnostic !== null}>
-                    {saving === 'env' ? '保存中…' : '保存并体检'}
-                  </Button>
-                </Toolbar>
-              )}
-            >
-              <textarea
-                className="editor"
-                value={envFile}
-                onChange={(event) => setEnvFile(event.target.value)}
-                spellCheck={false}
-              />
-            </Panel>
-          </div>
+              <div className="two-column wide-left">
+                <Panel
+                  title={focusedFileLabel}
+                  aside={(
+                    <Toolbar>
+                      {focusedFileDirty ? <Pill tone="warn">未保存</Pill> : <Pill tone="good">已同步</Pill>}
+                      {fileFocus === 'config' ? (
+                        <>
+                          <Button kind="primary" onClick={() => void saveConfig()} disabled={saving !== null || runningDiagnostic !== null}>
+                            {saving === 'config' ? '保存中…' : '保存 YAML'}
+                          </Button>
+                          <Button onClick={() => void saveConfig(true)} disabled={saving !== null || runningDiagnostic !== null}>
+                            {saving === 'config' ? '保存中…' : '保存并体检'}
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button kind="primary" onClick={() => void saveEnv()} disabled={saving !== null || runningDiagnostic !== null}>
+                            {saving === 'env' ? '保存中…' : '保存 ENV'}
+                          </Button>
+                          <Button onClick={() => void saveEnv(true)} disabled={saving !== null || runningDiagnostic !== null}>
+                            {saving === 'env' ? '保存中…' : '保存并体检'}
+                          </Button>
+                        </>
+                      )}
+                    </Toolbar>
+                  )}
+                >
+                  {fileFocus === 'config' ? (
+                    <textarea
+                      className="editor"
+                      value={configYaml}
+                      onChange={(event) => setConfigYaml(event.target.value)}
+                      spellCheck={false}
+                    />
+                  ) : (
+                    <textarea
+                      className="editor"
+                      value={envFile}
+                      onChange={(event) => setEnvFile(event.target.value)}
+                      spellCheck={false}
+                    />
+                  )}
+                </Panel>
 
-          {closureSignalsSection}
-          {recentResultSection}
+                <Panel
+                  title="辅助区"
+                  subtitle="把另一份文件和常用操作收在旁边，避免一次看到两个大编辑器。"
+                >
+                  <div className="detail-list compact">
+                    <KeyValueRow label="当前编辑" value={focusedFileLabel} />
+                    <KeyValueRow label="当前路径" value={focusedFilePath} />
+                    <KeyValueRow label="另一份文件" value={secondaryFileLabel} />
+                    <KeyValueRow label="另一份路径" value={secondaryFilePath} />
+                    <KeyValueRow label="另一份状态" value={secondaryFileDirty ? '有未保存修改' : '当前已同步'} />
+                  </div>
+                  <Toolbar>
+                    <Button onClick={() => setFileFocus(fileFocus === 'config' ? 'env' : 'config')}>
+                      切到 {secondaryFileLabel}
+                    </Button>
+                    <Button onClick={() => void openInFinder(secondaryFilePath, secondaryFileLabel, true)}>
+                      定位 {secondaryFileLabel}
+                    </Button>
+                    <Button onClick={() => setFilesView('signals')}>
+                      看闭环信号
+                    </Button>
+                  </Toolbar>
+                  <p className="helper-text">
+                    `config.yaml` 更适合模型、Provider、toolsets 和上下文策略；`.env` 更适合密钥、Base URL 和环境变量覆盖。
+                  </p>
+                </Panel>
+              </div>
+            </>
+          ) : null}
+
+          {filesView === 'signals' ? closureSignalsSection : null}
+          {filesView === 'output' ? recentResultSection : null}
         </>
       ) : null}
 
       {activeTab === 'advanced' ? (
         <>
-          {advancedActionsSection}
-          {recentResultSection}
+          <Panel
+            title="进阶接管入口"
+            subtitle="接管动作、运行姿态和最近输出拆成子视图，默认只展开当前工作面。"
+          >
+            <div className="workspace-shortcut-grid dashboard-launcher-grid">
+              {CONFIG_ADVANCED_VIEWS.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  className={`workspace-shortcut-card dashboard-shortcut-card ${advancedView === item.key ? 'active' : ''}`}
+                  onClick={() => setAdvancedView(item.key)}
+                >
+                  <strong><span className="dashboard-shortcut-icon">{item.icon}</span>{item.label}</strong>
+                  <span>{item.hint}</span>
+                </button>
+              ))}
+            </div>
+            <p className="helper-text top-gap">{activeAdvancedView.hint}</p>
+          </Panel>
+          {advancedView === 'posture' ? (
+            <Panel
+              title="运行姿态与分流"
+              subtitle="这里带上了扩展、cron 和技能上下文，更适合在熟悉配置后继续判断真实闭环。"
+            >
+              <RuntimePostureView posture={posture} navigate={navigate} />
+              <Toolbar className="top-gap">
+                <Button kind="primary" onClick={() => setAdvancedView('actions')}>去接管动作</Button>
+                <Button onClick={() => setAdvancedView('output')}>查看最近输出</Button>
+              </Toolbar>
+            </Panel>
+          ) : null}
+          {advancedView === 'actions' ? advancedActionsSection : null}
+          {advancedView === 'output' ? recentResultSection : null}
         </>
       ) : null}
     </div>

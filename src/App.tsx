@@ -41,9 +41,9 @@ const NAV_GROUPS: Array<{
 }> = [
   {
     id: 'starter',
-    label: '常用工作台',
-    eyebrow: '新手先看',
-    summary: '把最常用的状态查看、实例切换、配置维护和技能启用放在最前面。',
+    label: '开始使用',
+    eyebrow: '先做这几步',
+    summary: '先看总览，再处理实例、配置和技能，这一组就是日常最高频入口。',
     items: [
       { key: 'dashboard', label: '总览', eyebrow: 'Overview', description: '先看 Hermes 是否可用、哪里需要处理。', badge: '常用', mark: '总' },
       { key: 'profiles', label: '实例', eyebrow: 'Profiles', description: '切换默认实例，进入对应工作台。', badge: '常用', mark: '例' },
@@ -53,9 +53,9 @@ const NAV_GROUPS: Array<{
   },
   {
     id: 'operations',
-    label: '运行与排障',
-    eyebrow: '运行中用',
-    summary: '遇到链路异常、平台问题或状态不一致时，直接在这里闭环定位与修复。',
+    label: '排查与恢复',
+    eyebrow: '有问题再来',
+    summary: '当链路异常、状态不一致或平台接入失败时，再来这里集中排查。',
     items: [
       { key: 'gateway', label: '通道与网关', eyebrow: 'Gateway', description: '平台接入、通道状态和运行控制。', mark: '网' },
       { key: 'diagnostics', label: '诊断与修复', eyebrow: 'Doctor', description: '执行体检、比对运行态并快速回路。', mark: '诊' },
@@ -64,9 +64,9 @@ const NAV_GROUPS: Array<{
   },
   {
     id: 'advanced',
-    label: '更多能力与资料',
-    eyebrow: '按需展开',
-    summary: '扩展、记忆、会话和定时任务按需展开，不打扰首次上手，需要时也能随时进入。',
+    label: '资料与进阶',
+    eyebrow: '需要时再开',
+    summary: '扩展、记忆、会话和定时任务都收在这里，不打扰第一次使用，需要时再打开。',
     collapsible: true,
     defaultCollapsed: true,
     items: [
@@ -295,8 +295,19 @@ export default function App() {
   const gatewayTone = shellDashboard?.gateway?.gatewayState === 'running' ? 'good' : 'warn';
   const cliTone = shellInstallation?.binaryFound ? 'good' : 'bad';
   const memoryTone = shellDashboard?.config.memoryEnabled ? 'good' : 'warn';
-  const pluginCount = shellExtensions?.plugins.installedCount ?? 0;
-  const envTone = viewedProfile?.envExists ? 'good' : 'warn';
+  const profileSummaryLine = [
+    viewedProfile?.modelDefault ?? shellDashboard?.config.modelDefault ?? '模型待配置',
+    viewedProfile?.gatewayState ?? shellDashboard?.gateway?.gatewayState ?? '网关待确认',
+    `${viewedProfile?.skillCount ?? shellDashboard?.counts.skills ?? 0} skills`,
+    viewedProfile?.envExists ? '环境已就绪' : '环境待补齐',
+  ].join(' · ');
+  const routeHint = activePage === 'dashboard'
+    ? '推荐顺序：总览 → 配置 → 技能 → 通道'
+    : activeGroup.id === 'starter'
+      ? '先完成当前页，再回总览看下一步'
+      : activeGroup.id === 'operations'
+        ? '排查顺序：诊断 → 日志 → 通道'
+        : '进阶内容按需展开，不影响日常使用';
 
   function toggleSidebar() {
     setSidebarCollapsed((current) => {
@@ -333,8 +344,8 @@ export default function App() {
 
         {!sidebarCollapsed ? (
           <div className="sidebar-guide-card">
-            <strong>先做常用，再按需展开高级功能</strong>
-            <p>先从常用工作台开始，遇到问题再进运行与排障，更多能力和资料默认收起，避免第一次就被复杂配置淹没。</p>
+            <strong>先走“总览 → 配置 → 技能”</strong>
+            <p>默认只保留高频入口，排查和资料都继续后置。</p>
           </div>
         ) : null}
 
@@ -360,7 +371,7 @@ export default function App() {
               </div>
               {!collapsedNavGroups[group.id] || group.items.some((item) => item.key === activePage) ? (
                 <>
-                  <p className="sidebar-section-summary">{group.summary}</p>
+                  {activeGroup.id === group.id ? <p className="sidebar-section-summary">{group.summary}</p> : null}
                   <nav className="sidebar-nav">
                     {group.items.map((item) => (
                       <button
@@ -374,7 +385,7 @@ export default function App() {
                         <span className="nav-item-copy">
                           <span className="nav-item-eyebrow">{item.eyebrow}</span>
                           <strong>{item.label}</strong>
-                          <small>{item.description}</small>
+                          {activePage === item.key ? <small>{item.description}</small> : null}
                         </span>
                         {item.badge ? <span className="nav-item-badge">{item.badge}</span> : null}
                       </button>
@@ -395,36 +406,14 @@ export default function App() {
                 {selectedProfile === activeProfile ? '正在查看默认实例。' : '当前是浏览实例，不会影响默认实例。'}
               </p>
             </div>
-            <Pill tone={selectedProfile === activeProfile ? 'good' : 'neutral'}>
-              {selectedProfile === activeProfile ? '默认实例' : '浏览中'}
-            </Pill>
+            <Pill tone={selectedProfile === activeProfile ? 'good' : 'neutral'}>{selectedProfile === activeProfile ? '默认实例' : '浏览中'}</Pill>
           </div>
-          <div className="sidebar-status-grid">
-            <div className="sidebar-status-item">
-              <span>模型</span>
-              <strong>{viewedProfile?.modelDefault ?? shellDashboard?.config.modelDefault ?? '—'}</strong>
-            </div>
-            <div className="sidebar-status-item">
-              <span>网关</span>
-              <strong>{viewedProfile?.gatewayState ?? shellDashboard?.gateway?.gatewayState ?? '—'}</strong>
-            </div>
-            <div className="sidebar-status-item">
-              <span>会话</span>
-              <strong>{viewedProfile?.sessionCount ?? shellDashboard?.counts.sessions ?? 0}</strong>
-            </div>
-            <div className="sidebar-status-item">
-              <span>技能</span>
-              <strong>{viewedProfile?.skillCount ?? shellDashboard?.counts.skills ?? 0}</strong>
-            </div>
-            <div className="sidebar-status-item">
-              <span>环境</span>
-              <strong>{viewedProfile?.envExists ? '已就绪' : '待补齐'}</strong>
-            </div>
-            <div className="sidebar-status-item">
-              <span>插件</span>
-              <strong>{pluginCount}</strong>
-            </div>
+          <div className="sidebar-pill-row">
+            <Pill tone={cliTone}>CLI {shellInstallation?.binaryFound ? '已接管' : '待安装'}</Pill>
+            <Pill tone={gatewayTone}>网关 {viewedProfile?.gatewayState ?? shellDashboard?.gateway?.gatewayState ?? '—'}</Pill>
+            <Pill tone={memoryTone}>记忆 {shellDashboard?.config.memoryEnabled ? '已开启' : '已关闭'}</Pill>
           </div>
+          <p className="sidebar-status-copy">{profileSummaryLine}</p>
           <Toolbar className="sidebar-status-toolbar">
             <Button onClick={() => void loadShell(selectedProfile, { silent: true })} disabled={shellBusy}>
               {shellBusy ? '同步中…' : '刷新摘要'}
@@ -440,8 +429,8 @@ export default function App() {
         </section>
 
         <div className="sidebar-note sidebar-footnote">
-          <p>常用前置，高级后置</p>
-          <span>模型、实例、技能前置展示；扩展、记忆、会话与定时任务收进高级区。</span>
+          <p>先把常用走通</p>
+          <span>总览、实例、配置、技能优先；资料与进阶默认收起。</span>
         </div>
       </aside>
 
@@ -454,13 +443,12 @@ export default function App() {
                 <h1>{PAGE_TITLES[activePage]}</h1>
                 <p className="topbar-subtitle">{activeMeta.description}</p>
               </div>
-              <InfoTip content={`当前页聚焦：${PAGE_HINTS[activePage]} 常用入口已前置，高级能力可从“高级与资料”继续展开。`} />
+              <InfoTip content={`当前页聚焦：${PAGE_HINTS[activePage]} 常用入口已前置，更深的资料和进阶能力可从“资料与进阶”继续展开。`} />
             </div>
             <div className="topbar-context">
               <Pill tone={cliTone}>CLI {shellInstallation?.binaryFound ? '已接管' : '待安装'}</Pill>
               <Pill tone={gatewayTone}>网关 {shellDashboard?.gateway?.gatewayState ?? 'unknown'}</Pill>
               <Pill tone={memoryTone}>记忆 {shellDashboard?.config.memoryEnabled ? '已开启' : '已关闭'}</Pill>
-              <Pill tone={envTone}>环境 {viewedProfile?.envExists ? '已就绪' : '待补齐'}</Pill>
             </div>
           </div>
           <div className="topbar-actions">
@@ -480,19 +468,13 @@ export default function App() {
                   ))}
                 </select>
               </div>
-              <div className="topbar-status">
-                <div className="topbar-badge">{activeGroup.label}</div>
-                <div className="profile-meta">
-                  <strong>默认实例：{activeProfile}</strong>
-                  <span>
-                    当前查看：{selectedProfile}
-                    {profiles ? ` · 共 ${profiles.profiles.length} 个实例` : ''}
-                  </span>
-                </div>
-              </div>
               <div className="profile-meta">
-                <strong>{activePage === 'dashboard' ? '推荐入口：总览 → 实例 → 配置 → 技能' : `当前页：${PAGE_TITLES[activePage]}`}</strong>
-                <span>{activeGroup.summary}</span>
+                <strong>当前查看：{selectedProfile}</strong>
+                <span>
+                  {routeHint}
+                  {profiles ? ` · 共 ${profiles.profiles.length} 个实例` : ''}
+                  {shellExtensions ? ` · 扩展 ${shellExtensions.plugins.installedCount}` : ''}
+                </span>
               </div>
               <Toolbar className="shell-toolbar">
                 <Button onClick={() => void loadProfiles(selectedProfile)} disabled={loadingProfiles}>

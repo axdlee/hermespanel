@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { Button, ContextBanner, EmptyState, InfoTip, KeyValueRow, LoadingState, MetricCard, Panel, Pill, Toolbar } from '../components/ui';
+import { Button, ContextBanner, EmptyState, InfoTip, KeyValueRow, LoadingState, Panel, Pill, Toolbar } from '../components/ui';
 import { RuntimePostureView } from '../components/runtime-posture';
 import { api } from '../lib/api';
 import { handoffToTerminal, openFinderLocation } from '../lib/desktop';
@@ -34,6 +34,8 @@ const LOG_OPTIONS = [
 ] as const;
 
 type DiagnosticsTabKey = 'quick' | 'repair' | 'artifacts';
+type DiagnosticsRepairViewKey = 'actions' | 'runtime' | 'checks' | 'context';
+type DiagnosticsCheckViewKey = 'runtime' | 'capability';
 
 const DIAGNOSTICS_TABS: Array<{ key: DiagnosticsTabKey; label: string; hint: string }> = [
   { key: 'quick', label: '快速处理', hint: '先看主链路风险，再执行安全体检。' },
@@ -41,9 +43,46 @@ const DIAGNOSTICS_TABS: Array<{ key: DiagnosticsTabKey; label: string; hint: str
   { key: 'artifacts', label: '日志与材料', hint: '回看命令结果、日志和相关文件。' },
 ];
 
+const DIAGNOSTICS_REPAIR_VIEWS: Array<{
+  key: DiagnosticsRepairViewKey;
+  label: string;
+  icon: string;
+  hint: string;
+}> = [
+  { key: 'actions', label: '修复动作', icon: '🛠️', hint: '把真正能修问题的官方入口和桌面动作收在这一层。' },
+  { key: 'runtime', label: '运行姿态', icon: '🧭', hint: '只在需要判断整条链路是不是同一套运行态时再展开。' },
+  { key: 'checks', label: '完整体检', icon: '🩺', hint: '所有深度命令继续收在这里，一次只看一个命令面。' },
+  { key: 'context', label: '排障上下文', icon: '🗂️', hint: '真实本地状态和材料索引后置到这里，不默认占满页面。' },
+];
+
+const DIAGNOSTICS_CHECK_VIEWS: Array<{
+  key: DiagnosticsCheckViewKey;
+  label: string;
+  icon: string;
+  hint: string;
+}> = [
+  { key: 'runtime', label: '运行体检', icon: '📡', hint: '网关、模型、执行后端和链路运行态的完整检查。' },
+  { key: 'capability', label: '能力体检', icon: '🧩', hint: '技能、插件、tools 与 memory 能力面的完整检查。' },
+];
+
 const QUICK_DIAGNOSTIC_COMMANDS = ['doctor', 'gateway-status', 'config-check', 'memory-status']
   .map((key) => getDiagnosticCommand(key))
   .filter((item): item is DiagnosticCommandDefinition => Boolean(item));
+
+function diagnosticsShortcutIcon(key: DiagnosticKind) {
+  switch (key) {
+    case 'doctor':
+      return '🩺';
+    case 'gateway-status':
+      return '📡';
+    case 'config-check':
+      return '⚙️';
+    case 'memory-status':
+      return '🧠';
+    default:
+      return '🛠️';
+  }
+}
 
 function directoryOf(path: string) {
   const normalized = path.trim();
@@ -94,6 +133,8 @@ function DiagnosticCommandGrid(props: {
 
 export function DiagnosticsPage({ notify, profile, navigate, pageIntent, consumePageIntent }: PageProps) {
   const [activeTab, setActiveTab] = useState<DiagnosticsTabKey>('quick');
+  const [repairView, setRepairView] = useState<DiagnosticsRepairViewKey>('actions');
+  const [checkView, setCheckView] = useState<DiagnosticsCheckViewKey>('runtime');
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
   const [config, setConfig] = useState<ConfigDocuments | null>(null);
   const [installation, setInstallation] = useState<InstallationSnapshot | null>(null);
@@ -205,6 +246,8 @@ export function DiagnosticsPage({ notify, profile, navigate, pageIntent, consume
     setLastKind(null);
     setLastActionLabel(null);
     setLogName('gateway.error');
+    setRepairView('actions');
+    setCheckView('runtime');
     setLogPreview(null);
     void Promise.all([
       loadContext(),
@@ -220,6 +263,8 @@ export function DiagnosticsPage({ notify, profile, navigate, pageIntent, consume
     setInvestigation(pageIntent);
     const nextLogName = pageIntent.logName ?? 'gateway.error';
     setActiveTab(pageIntent.logName ? 'artifacts' : 'quick');
+    setRepairView('actions');
+    setCheckView('runtime');
     setLogName(nextLogName);
     void loadLogPreview(nextLogName, true);
     notify('info', `${pageIntent.headline} 已带入诊断工作台。`);
@@ -270,9 +315,29 @@ export function DiagnosticsPage({ notify, profile, navigate, pageIntent, consume
     }
     return Array.from(new Set(warnings));
   }, [failingJobs.length, installation, jobs, missingReferencedSkills, posture, skills.length, snapshot]);
-  const quickWarnings = combinedWarnings.slice(0, 4);
+  const quickWarnings = combinedWarnings.slice(0, 3);
   const remainingWarningCount = Math.max(0, combinedWarnings.length - quickWarnings.length);
+  const diagnosticsStartReadiness = installation && !installation.binaryFound
+    ? '先补齐 CLI 安装'
+    : snapshot?.gateway?.gatewayState !== 'running' && remoteJobs.length > 0
+      ? '先修网关主链路'
+      : missingReferencedSkills.length > 0
+        ? '先补技能与能力面'
+        : combinedWarnings.length > 0
+          ? '先跑常用体检'
+          : '可以直接做定向排查';
+  const diagnosticsStartHint = installation && !installation.binaryFound
+    ? 'CLI 本体不在时，后面的网关、配置、技能和插件问题大多都只是表象。'
+    : snapshot?.gateway?.gatewayState !== 'running' && remoteJobs.length > 0
+      ? '当前已经有远端作业依赖投递链路，先恢复 gateway，再看平台连接和日志材料。'
+      : missingReferencedSkills.length > 0
+        ? 'jobs.json 已经引用能力，但本地技能或工具面不完整，建议先补齐再继续排障。'
+        : combinedWarnings.length > 0
+          ? '先跑最常用的安全体检，再决定是不是需要进入深度修复。'
+          : '当前没有明显结构性阻塞，可以直接按会话、日志或具体症状做定向定位。';
   const selectedLogLabel = LOG_OPTIONS.find((item) => item.key === logName)?.label ?? logName;
+  const activeRepairView = DIAGNOSTICS_REPAIR_VIEWS.find((item) => item.key === repairView) ?? DIAGNOSTICS_REPAIR_VIEWS[0];
+  const activeCheckView = DIAGNOSTICS_CHECK_VIEWS.find((item) => item.key === checkView) ?? DIAGNOSTICS_CHECK_VIEWS[0];
 
   if (loading && !snapshot && !config && !installation) {
     return <LoadingState label="正在构建 Hermes 诊断工作台上下文。" />;
@@ -520,32 +585,37 @@ export function DiagnosticsPage({ notify, profile, navigate, pageIntent, consume
           </Toolbar>
         )}
       >
-        <div className="hero-grid">
-          <div className="hero-copy">
-            <p className="hero-title">Hermes Diagnostic Workbench</p>
-            <p className="hero-subtitle">先汇总主链路风险，再执行命令。</p>
-            <div className="detail-list">
-              <KeyValueRow label="当前 Profile" value={snapshot?.profileName ?? profile} />
-              <KeyValueRow label="Hermes Binary" value={snapshot?.hermesBinary ?? '—'} />
-              <KeyValueRow label="Hermes Home" value={snapshot?.hermesHome ?? '—'} />
-              <KeyValueRow
-                label="Gateway"
-                value={(
-                  <Pill tone={snapshot?.gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
-                    {snapshot?.gateway?.gatewayState ?? '未检测到'}
-                  </Pill>
-                )}
-              />
-              <KeyValueRow label="Context Engine" value={config?.summary.contextEngine || '—'} />
-              <KeyValueRow label="记忆 Provider" value={config?.summary.memoryProvider || 'builtin-file'} />
-            </div>
+        <p className="helper-text">
+          先在快速处理里完成最常见判断，深度修复和日志材料都已经拆去后面的子层，不再让首页先像运维控制台。
+        </p>
+        <div className="workspace-summary-strip top-gap">
+          <div className="summary-mini-card">
+            <span className="summary-mini-label">起步判断</span>
+            <strong className="summary-mini-value">{diagnosticsStartReadiness}</strong>
+            <span className="summary-mini-meta">{diagnosticsStartHint}</span>
           </div>
-          <div className="metrics-grid">
-            <MetricCard label="高优先项" value={posture.priorities.length} hint="共享运行姿态汇总后的优先修正项" />
-            <MetricCard label="远端作业" value={remoteJobs.length} hint="依赖 gateway / delivery 的 cron 作业" />
-            <MetricCard label="缺 Skill 引用" value={missingReferencedSkills.length} hint="jobs.json 引用了但本地没扫到" />
-            <MetricCard label="运行 Tools" value={`${enabledToolCount(extensions)} / ${totalToolCount(extensions)}`} hint="启用 tools / 全量 tools" />
-            <MetricCard label="本地技能 / 插件" value={`${skills.length} / ${pluginsCount(extensions)}`} hint="目录扫描 skills / 插件层覆盖" />
+          <div className="summary-mini-card">
+            <span className="summary-mini-label">当前 Profile</span>
+            <strong className="summary-mini-value">{snapshot?.profileName ?? profile}</strong>
+            <span className="summary-mini-meta">{snapshot?.hermesHome ?? 'Hermes Home 待确认'}</span>
+          </div>
+          <div className="summary-mini-card">
+            <span className="summary-mini-label">主链路</span>
+            <strong className="summary-mini-value">
+              {installation?.binaryFound ? (snapshot?.gateway?.gatewayState === 'running' ? 'CLI 与 Gateway 已接通' : 'CLI 已就绪 / 网关待确认') : 'CLI 缺失'}
+            </strong>
+            <span className="summary-mini-meta">
+              {snapshot?.hermesBinary ?? 'Hermes Binary 未检测到'} · {remoteJobs.length} 个远端作业
+            </span>
+          </div>
+          <div className="summary-mini-card">
+            <span className="summary-mini-label">能力面</span>
+            <strong className="summary-mini-value">
+              {enabledToolCount(extensions)} tools / {skills.length} skills
+            </strong>
+            <span className="summary-mini-meta">
+              {config?.summary.contextEngine || 'Context Engine 未配置'} · Memory {config?.summary.memoryProvider || 'builtin-file'} · 插件 {pluginsCount(extensions)}
+            </span>
           </div>
         </div>
       </Panel>
@@ -595,71 +665,47 @@ export function DiagnosticsPage({ notify, profile, navigate, pageIntent, consume
       {activeTab === 'quick' ? (
         <>
           <Panel
-            title="推荐下一步"
-            subtitle="先按推荐路径走，默认只保留最常用的判断和体检，复杂命令与原始输出都已经后置。"
+            title="常用去向"
+            subtitle="首页只保留最常用的 4 条诊断路径，复杂修复和材料查看继续后置。"
           >
-            <div className="list-stack">
-              <div className="list-card">
-                <div className="list-card-title">
-                  <strong>先确认 Hermes 是否正常活着</strong>
-                  <Pill tone={installation?.binaryFound && snapshot?.gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
-                    {installation?.binaryFound ? '主链路已接通' : '先补齐基础运行'}
-                  </Pill>
-                </div>
-                <p>先确认 CLI、本地安装和 gateway 状态，再决定是不是要继续深挖配置或能力面。</p>
-                <div className="meta-line">
-                  <span>{installation?.binaryFound ? 'CLI 已检测到' : 'CLI 尚未检测到'}</span>
-                  <span>{snapshot?.gateway?.gatewayState === 'running' ? 'Gateway 正在运行' : 'Gateway 待确认'}</span>
-                </div>
-                <Toolbar>
-                  <Button kind="primary" onClick={() => void run('doctor')} disabled={actionBusy}>
-                    {running === 'doctor' ? '健康检查…' : '运行健康检查'}
-                  </Button>
-                  <Button onClick={() => void run('gateway-status')} disabled={actionBusy}>
-                    {running === 'gateway-status' ? '网关状态…' : '查看网关状态'}
-                  </Button>
-                </Toolbar>
-              </div>
-
-              <div className="list-card">
-                <div className="list-card-title">
-                  <strong>再核对配置和能力面</strong>
-                  <Pill tone={config?.summary.contextEngine && missingReferencedSkills.length === 0 ? 'good' : 'warn'}>
-                    {config?.summary.contextEngine || '配置待补齐'}
-                  </Pill>
-                </div>
-                <p>模型、Context Engine、Skills、Memory 和 Tools 没对齐时，最容易出现“明明装了却没生效”。</p>
-                <div className="meta-line">
-                  <span>{missingReferencedSkills.length === 0 ? 'Skill 引用已对齐' : `缺 ${missingReferencedSkills.length} 个 Skill`}</span>
-                  <span>{enabledToolCount(extensions)} / {totalToolCount(extensions)} 个 Tools 已启用</span>
-                </div>
-                <Toolbar>
-                  <Button kind="primary" onClick={() => void run('config-check')} disabled={actionBusy}>
-                    {running === 'config-check' ? '配置体检…' : '执行配置体检'}
-                  </Button>
-                  <Button onClick={() => navigate('config')}>进入配置页</Button>
-                  <Button onClick={() => navigate('skills')}>进入技能页</Button>
-                </Toolbar>
-              </div>
-
-              <div className="list-card">
-                <div className="list-card-title">
-                  <strong>最后看日志和原始材料</strong>
-                  <Pill tone={result || logPreview ? 'good' : 'neutral'}>
-                    {result || logPreview ? '材料已就位' : '等待新记录'}
-                  </Pill>
-                </div>
-                <p>最近命令结果、相关日志和原始输出已经集中到材料层，不再默认铺满排障首页。</p>
-                <div className="meta-line">
-                  <span>{lastActionLabel ?? '尚无最近动作'}</span>
-                  <span>{selectedLogLabel}</span>
-                </div>
-                <Toolbar>
-                  <Button kind="primary" onClick={() => setActiveTab('artifacts')}>打开日志与材料</Button>
-                  <Button onClick={() => navigate('logs')}>进入日志页</Button>
-                </Toolbar>
-              </div>
+            <div className="workspace-shortcut-grid dashboard-launcher-grid">
+              <button
+                type="button"
+                className="workspace-shortcut-card dashboard-shortcut-card"
+                onClick={() => void run('doctor')}
+                disabled={actionBusy}
+              >
+                <strong><span className="dashboard-shortcut-icon">🩺</span>健康检查</strong>
+                <span>{installation?.binaryFound ? '先确认 CLI、依赖和基础环境是否正常' : 'CLI 未就绪时建议先从这里开始'}</span>
+              </button>
+              <button
+                type="button"
+                className="workspace-shortcut-card dashboard-shortcut-card"
+                onClick={() => void run('gateway-status')}
+                disabled={actionBusy}
+              >
+                <strong><span className="dashboard-shortcut-icon">📡</span>网关与交付</strong>
+                <span>{remoteJobs.length > 0 ? `${remoteJobs.length} 个远端作业依赖 gateway` : '当前主要是本地执行链路'}</span>
+              </button>
+              <button
+                type="button"
+                className="workspace-shortcut-card dashboard-shortcut-card"
+                onClick={() => void run('config-check')}
+                disabled={actionBusy}
+              >
+                <strong><span className="dashboard-shortcut-icon">⚙️</span>配置与能力</strong>
+                <span>{missingReferencedSkills.length === 0 ? '配置链路可以直接核对' : `当前还缺 ${missingReferencedSkills.length} 个引用技能`}</span>
+              </button>
+              <button
+                type="button"
+                className="workspace-shortcut-card dashboard-shortcut-card"
+                onClick={() => setActiveTab('artifacts')}
+              >
+                <strong><span className="dashboard-shortcut-icon">🧾</span>日志与材料</strong>
+                <span>{result || logPreview ? '最近输出和日志已经就位' : '需要时再展开原始材料层'}</span>
+              </button>
             </div>
+            <p className="helper-text top-gap">快速处理页现在只负责决定下一步去哪里，不再先把多张说明卡和深层信息同时摊开。</p>
           </Panel>
 
           <div className="two-column wide-left">
@@ -716,24 +762,30 @@ export function DiagnosticsPage({ notify, profile, navigate, pageIntent, consume
               )}
 
               <Toolbar>
-                <Button kind="primary" onClick={() => setActiveTab('repair')}>打开深度修复</Button>
+                <Button kind="primary" onClick={() => { setRepairView('actions'); setActiveTab('repair'); }}>打开深度修复</Button>
                 <Button onClick={() => navigate('gateway')}>进入网关页</Button>
                 <Button onClick={() => navigate('memory')}>进入记忆页</Button>
               </Toolbar>
             </Panel>
 
             <Panel
-              title="常用体检"
-              subtitle="只保留最常用的四项体检，完整命令集合已经收进“深度修复”。"
+              title="快速体检"
+              subtitle="把最常用的 4 项体检改成快捷入口，不再默认铺满命令卡。"
             >
-              <DiagnosticCommandGrid
-                commands={QUICK_DIAGNOSTIC_COMMANDS}
-                running={running}
-                navigate={navigate}
-                onRun={run}
-                showCli={false}
-                showRelatedPageButton={false}
-              />
+              <div className="workspace-shortcut-grid dashboard-launcher-grid">
+                {QUICK_DIAGNOSTIC_COMMANDS.map((command) => (
+                  <button
+                    key={command.key}
+                    type="button"
+                    className="workspace-shortcut-card dashboard-shortcut-card"
+                    onClick={() => void run(command.key)}
+                    disabled={running !== null}
+                  >
+                    <strong><span className="dashboard-shortcut-icon">{diagnosticsShortcutIcon(command.key)}</span>{command.label}</strong>
+                    <span>{running === command.key ? `${command.label} 执行中…` : command.description}</span>
+                  </button>
+                ))}
+              </div>
               <div className="detail-list compact top-gap">
                 <KeyValueRow label="最近动作" value={lastActionLabel ?? '尚无最近动作'} />
                 <KeyValueRow label="默认日志" value={selectedLogLabel} />
@@ -741,81 +793,123 @@ export function DiagnosticsPage({ notify, profile, navigate, pageIntent, consume
               </div>
               <Toolbar>
                 <Button kind="primary" onClick={() => setActiveTab('artifacts')}>查看日志与材料</Button>
-                <Button onClick={() => setActiveTab('repair')}>查看完整体检</Button>
+                <Button onClick={() => { setRepairView('checks'); setCheckView('runtime'); setActiveTab('repair'); }}>查看完整体检</Button>
               </Toolbar>
             </Panel>
           </div>
-
-          <Panel
-            title="运行姿态"
-            subtitle="需要判断模型、执行后端、记忆和网关是不是同一条链路时，再往下展开这一层。"
-          >
-            <RuntimePostureView posture={posture} navigate={navigate} />
-          </Panel>
         </>
       ) : null}
 
       {activeTab === 'repair' ? (
         <>
-          {repairActionsSection}
-
-          <div className="two-column wide-left">
-            <Panel
-              title="完整运行体检"
-              subtitle="这里保留所有运行态相关体检命令，适合已经确认需要进一步深挖时使用。"
-            >
-              <DiagnosticCommandGrid
-                commands={RUNTIME_DIAGNOSTIC_COMMANDS}
-                running={running}
-                navigate={navigate}
-                onRun={run}
-              />
-            </Panel>
-
-            <Panel
-              title="完整能力体检"
-              subtitle="技能、插件、工具和记忆链路的完整核验动作都收在这里，不再默认占用首页。"
-            >
-              <DiagnosticCommandGrid
-                commands={CAPABILITY_DIAGNOSTIC_COMMANDS}
-                running={running}
-                navigate={navigate}
-                onRun={run}
-              />
-            </Panel>
-          </div>
-
           <Panel
-            title="排障上下文"
-            subtitle="这里展示的都是当前 profile 的真实本地状态，适合在执行命令前先扫一眼。"
+            title="深度修复入口"
+            subtitle="修复动作、运行姿态、完整体检和排障上下文拆成子视图，默认只展开一个工作面。"
           >
-            {snapshot && config ? (
-              <div className="detail-list">
-                <KeyValueRow label="当前 Profile" value={snapshot.profileName} />
-                <KeyValueRow label="默认模型" value={config.summary.modelDefault ?? '—'} />
-                <KeyValueRow label="提供商" value={config.summary.modelProvider ?? '—'} />
-                <KeyValueRow label="Base URL" value={config.summary.modelBaseUrl ?? '—'} />
-                <KeyValueRow label="终端后端" value={config.summary.terminalBackend ?? '—'} />
-                <KeyValueRow label="工作目录" value={config.summary.terminalCwd ?? '—'} />
-                <KeyValueRow label="Context Engine" value={config.summary.contextEngine ?? '—'} />
-                <KeyValueRow
-                  label="Toolsets"
-                  value={config.summary.toolsets.length ? config.summary.toolsets.join(', ') : '—'}
-                />
-                <KeyValueRow label="记忆功能" value={String(config.summary.memoryEnabled ?? false)} />
-                <KeyValueRow label="用户画像" value={String(config.summary.userProfileEnabled ?? false)} />
-                <KeyValueRow label="MEMORY / USER 上限" value={`${config.summary.memoryCharLimit ?? '—'} / ${config.summary.userCharLimit ?? '—'}`} />
-                <KeyValueRow label="本地技能数" value={skills.length} />
-                <KeyValueRow label="运行工具" value={`${enabledToolCount(extensions)} / ${totalToolCount(extensions)}`} />
-                <KeyValueRow label="插件数" value={pluginsCount(extensions)} />
-                <KeyValueRow label="Memory Runtime" value={extensions?.memoryRuntime.provider ?? '—'} />
-                <KeyValueRow label="Cron 作业数" value={jobs.length} />
-                <KeyValueRow label="远端投递作业" value={remoteJobs.length} />
-              </div>
-            ) : (
-              <EmptyState title="上下文未就绪" description="暂时还没有读取到 dashboard、config 与 cron 摘要。" />
-            )}
+            <div className="workspace-shortcut-grid dashboard-launcher-grid">
+              {DIAGNOSTICS_REPAIR_VIEWS.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  className={`workspace-shortcut-card dashboard-shortcut-card ${repairView === item.key ? 'active' : ''}`}
+                  onClick={() => setRepairView(item.key)}
+                >
+                  <strong><span className="dashboard-shortcut-icon">{item.icon}</span>{item.label}</strong>
+                  <span>{item.hint}</span>
+                </button>
+              ))}
+            </div>
+            <p className="helper-text top-gap">{activeRepairView.hint}</p>
           </Panel>
+
+          {repairView === 'actions' ? repairActionsSection : null}
+
+          {repairView === 'runtime' ? (
+            <Panel
+              title="运行姿态"
+              subtitle="只在需要判断模型、执行后端、记忆和网关是不是同一条链路时，再在这里展开。"
+            >
+              <RuntimePostureView posture={posture} navigate={navigate} />
+              <Toolbar className="top-gap">
+                <Button kind="primary" onClick={() => { setRepairView('checks'); setCheckView('runtime'); }}>继续做运行体检</Button>
+                <Button onClick={() => setRepairView('context')}>查看排障上下文</Button>
+              </Toolbar>
+            </Panel>
+          ) : null}
+
+          {repairView === 'checks' ? (
+            <Panel
+              title="完整体检"
+              subtitle="所有深度命令收在这一层，运行态和能力面一次只展开一个命令面。"
+            >
+              <div className="workspace-shortcut-grid dashboard-launcher-grid">
+                {DIAGNOSTICS_CHECK_VIEWS.map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    className={`workspace-shortcut-card dashboard-shortcut-card ${checkView === item.key ? 'active' : ''}`}
+                    onClick={() => setCheckView(item.key)}
+                  >
+                    <strong><span className="dashboard-shortcut-icon">{item.icon}</span>{item.label}</strong>
+                    <span>{item.hint}</span>
+                  </button>
+                ))}
+              </div>
+              <p className="helper-text top-gap">{activeCheckView.hint}</p>
+              <div className="top-gap">
+                <DiagnosticCommandGrid
+                  commands={checkView === 'runtime' ? RUNTIME_DIAGNOSTIC_COMMANDS : CAPABILITY_DIAGNOSTIC_COMMANDS}
+                  running={running}
+                  navigate={navigate}
+                  onRun={run}
+                />
+              </div>
+              <Toolbar className="top-gap">
+                <Button kind="primary" onClick={() => setActiveTab('artifacts')}>查看命令输出</Button>
+                <Button onClick={() => setRepairView('actions')}>回到修复动作</Button>
+              </Toolbar>
+            </Panel>
+          ) : null}
+
+          {repairView === 'context' ? (
+            <Panel
+              title="排障上下文"
+              subtitle="这里只展示当前 profile 的真实本地状态，执行深度命令前先扫一眼就够了。"
+            >
+              {snapshot && config ? (
+                <>
+                  <div className="detail-list">
+                    <KeyValueRow label="当前 Profile" value={snapshot.profileName} />
+                    <KeyValueRow label="默认模型" value={config.summary.modelDefault ?? '—'} />
+                    <KeyValueRow label="提供商" value={config.summary.modelProvider ?? '—'} />
+                    <KeyValueRow label="Base URL" value={config.summary.modelBaseUrl ?? '—'} />
+                    <KeyValueRow label="终端后端" value={config.summary.terminalBackend ?? '—'} />
+                    <KeyValueRow label="工作目录" value={config.summary.terminalCwd ?? '—'} />
+                    <KeyValueRow label="Context Engine" value={config.summary.contextEngine ?? '—'} />
+                    <KeyValueRow
+                      label="Toolsets"
+                      value={config.summary.toolsets.length ? config.summary.toolsets.join(', ') : '—'}
+                    />
+                    <KeyValueRow label="记忆功能" value={String(config.summary.memoryEnabled ?? false)} />
+                    <KeyValueRow label="用户画像" value={String(config.summary.userProfileEnabled ?? false)} />
+                    <KeyValueRow label="MEMORY / USER 上限" value={`${config.summary.memoryCharLimit ?? '—'} / ${config.summary.userCharLimit ?? '—'}`} />
+                    <KeyValueRow label="本地技能数" value={skills.length} />
+                    <KeyValueRow label="运行工具" value={`${enabledToolCount(extensions)} / ${totalToolCount(extensions)}`} />
+                    <KeyValueRow label="插件数" value={pluginsCount(extensions)} />
+                    <KeyValueRow label="Memory Runtime" value={extensions?.memoryRuntime.provider ?? '—'} />
+                    <KeyValueRow label="Cron 作业数" value={jobs.length} />
+                    <KeyValueRow label="远端投递作业" value={remoteJobs.length} />
+                  </div>
+                  <Toolbar className="top-gap">
+                    <Button kind="primary" onClick={() => setRepairView('checks')}>去完整体检</Button>
+                    <Button onClick={() => setActiveTab('artifacts')}>查看日志与材料</Button>
+                  </Toolbar>
+                </>
+              ) : (
+                <EmptyState title="上下文未就绪" description="暂时还没有读取到 dashboard、config 与 cron 摘要。" />
+              )}
+            </Panel>
+          ) : null}
         </>
       ) : null}
 

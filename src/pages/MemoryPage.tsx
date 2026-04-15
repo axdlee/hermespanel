@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { Button, ContextBanner, EmptyState, InfoTip, KeyValueRow, LoadingState, MetricCard, Panel, Pill, Toolbar } from '../components/ui';
+import { Button, ContextBanner, EmptyState, InfoTip, KeyValueRow, LoadingState, Panel, Pill, Toolbar } from '../components/ui';
 import { api } from '../lib/api';
 import { handoffToTerminal, openFinderLocation } from '../lib/desktop';
 import { formatTimestamp } from '../lib/format';
@@ -16,11 +16,24 @@ import type {
 import { isMemoryPageIntent, type MemoryPageIntent, type PageProps } from './types';
 
 type MemoryTabKey = 'overview' | 'editor' | 'runtime';
+type MemoryRuntimeViewKey = 'control' | 'workspace' | 'summary' | 'output';
 
 const MEMORY_TABS: Array<{ key: MemoryTabKey; label: string; hint: string }> = [
   { key: 'overview', label: '常用总览', hint: '先看槽位、provider 和当前链路判断。' },
   { key: 'editor', label: '编辑槽位', hint: '集中编辑 SOUL / MEMORY / USER 槽位内容。' },
   { key: 'runtime', label: 'Provider 与材料', hint: '低频接管、插件操作和原始输出都收在这里。' },
+];
+
+const MEMORY_RUNTIME_VIEWS: Array<{
+  key: MemoryRuntimeViewKey;
+  label: string;
+  icon: string;
+  hint: string;
+}> = [
+  { key: 'control', label: '开关与 Provider', icon: '🧠', hint: '先看开关、Provider 和插件入口，CLI 接管继续后置在这里。' },
+  { key: 'workspace', label: '记忆物料', icon: '🗂️', hint: '需要定位 HOME、当前文件或目录时，再进入这里。' },
+  { key: 'summary', label: '当前运行判断', icon: '🔎', hint: '把 Provider、预算和链路提醒压成一层摘要。' },
+  { key: 'output', label: '最近回执', icon: '🧾', hint: '最近一次体检或接管动作的回显继续收在这一层。' },
 ];
 
 const MEMORY_BLUEPRINT = {
@@ -61,6 +74,19 @@ function memoryMeta(key: string) {
   return MEMORY_BLUEPRINT[key as keyof typeof MEMORY_BLUEPRINT] ?? MEMORY_BLUEPRINT.soul;
 }
 
+function memorySlotIcon(key: string) {
+  if (key === 'soul') {
+    return '🫧';
+  }
+  if (key === 'memory') {
+    return '📚';
+  }
+  if (key === 'user') {
+    return '🙂';
+  }
+  return '🧠';
+}
+
 function commandOutput(result: CommandRunResult | null) {
   if (!result) {
     return '';
@@ -78,11 +104,11 @@ export function MemoryPage({ notify, profile, navigate, pageIntent, consumePageI
   const [selectedKey, setSelectedKey] = useState('soul');
   const [detail, setDetail] = useState<MemoryFileDetail | null>(null);
   const [content, setContent] = useState('');
-  const [pluginInput, setPluginInput] = useState('');
   const [runningDesktopAction, setRunningDesktopAction] = useState<string | null>(null);
   const [lastCommandLabel, setLastCommandLabel] = useState<string | null>(null);
   const [lastCommand, setLastCommand] = useState<CommandRunResult | null>(null);
   const [activeTab, setActiveTab] = useState<MemoryTabKey>('overview');
+  const [runtimeView, setRuntimeView] = useState<MemoryRuntimeViewKey>('control');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<'save' | 'verify' | null>(null);
   const [runningDiagnostic, setRunningDiagnostic] = useState(false);
@@ -103,12 +129,6 @@ export function MemoryPage({ notify, profile, navigate, pageIntent, consumePageI
       setSnapshot(nextSnapshot);
       setInstallation(nextInstallation);
       setExtensions(nextExtensions);
-      setPluginInput((current) =>
-        current.trim()
-        || nextExtensions.plugins.items[0]
-        || nextExtensions.memoryRuntime.installedPlugins[0]?.name
-        || '',
-      );
 
       const chosen = nextKey ?? selectedKey ?? files[0]?.key ?? 'soul';
       setSelectedKey(chosen);
@@ -204,6 +224,7 @@ export function MemoryPage({ notify, profile, navigate, pageIntent, consumePageI
     setLastCommand(null);
     setLastCommandLabel(null);
     setActiveTab('overview');
+    setRuntimeView('control');
     void load();
   }, [profile]);
 
@@ -234,7 +255,6 @@ export function MemoryPage({ notify, profile, navigate, pageIntent, consumePageI
   const dirty = detail ? content !== detail.content : false;
   const lineCount = content ? content.split(/\r?\n/).length : 0;
   const readyCount = items.filter((item) => item.exists).length;
-  const pluginTerminalName = pluginInput.trim();
   const warnings: string[] = [];
 
   if (summary?.memoryEnabled === false) {
@@ -270,93 +290,97 @@ export function MemoryPage({ notify, profile, navigate, pageIntent, consumePageI
   const actionBusy = runningDesktopAction !== null || saving !== null || runningDiagnostic;
   const outputLabel = lastCommandLabel ?? 'memory status';
   const outputText = lastCommand ? commandOutput(lastCommand) : extensions.memoryRuntime.rawOutput || '暂无输出';
+  const memoryStartReadiness = summary?.memoryEnabled === false
+    ? '先打开 Memory'
+    : selectedKey === 'user' && summary?.userProfileEnabled === false
+      ? '先打开画像'
+      : !selectedSummary?.exists
+        ? '先落盘槽位'
+        : dirty
+          ? '先保存校验'
+          : providerLabel !== runtimeProviderLabel
+            ? '核对 Provider'
+            : warnings.length > 0
+              ? '补做运行核对'
+              : '可以继续维护';
+  const memoryStartHint = summary?.memoryEnabled === false
+    ? 'memory 开关关闭时，文件虽然还能编辑，但不会稳定进入 Hermes 的长期记忆链路。'
+    : selectedKey === 'user' && summary?.userProfileEnabled === false
+      ? '当前正在维护 USER 槽位，但 User Profile 开关未开启，建议先在配置中心打开。'
+      : !selectedSummary?.exists
+        ? `${detail?.label ?? selectedKey} 还没有落盘，先保存一次再做后续体检更稳妥。`
+        : dirty
+          ? '当前内容有改动，优先保存并校验，避免文件态和运行态对不上。'
+          : providerLabel !== runtimeProviderLabel
+            ? `配置声明 ${providerLabel}，但运行态回报 ${runtimeProviderLabel}，建议先核对配置与扩展侧。`
+            : warnings.length > 0
+              ? '当前仍有一些链路提醒，建议看完首页判断后再进入 Provider 与材料。'
+              : '当前槽位、开关和 Provider 看起来都正常，可以继续编辑或做一次真实会话验证。';
   const overviewWarnings = warnings.slice(0, 4);
   const remainingWarningCount = Math.max(0, warnings.length - overviewWarnings.length);
   const overviewSection = (
     <>
       <Panel
-        title="推荐下一步"
-        subtitle="先选槽位、再保存并校验，低频 Provider 接管和原始输出都已经后置到后面的子模块。"
+        title="常用去向"
+        subtitle="首页只保留最常用的 4 个入口，低频 Provider 接管、路径定位和原始输出都继续后置。"
       >
-        <div className="list-stack">
-          <div className="list-card">
-            <div className="list-card-title">
-              <strong>先确认当前要维护的槽位</strong>
-              <Pill tone={selectedSummary?.exists ? 'good' : 'warn'}>
-                {detail?.label ?? selectedKey}
-              </Pill>
-            </div>
-            <p>{detail ? `${detail.label} ${detail.exists ? '已经落盘' : '还未落盘'}，现在可以直接继续编辑。` : '先选一个槽位，再决定要不要进入编辑器。'}</p>
-            <div className="meta-line">
-              <span>{currentMeta.eyebrow}</span>
-              <span>{formatTimestamp(selectedSummary?.updatedAt)}</span>
-            </div>
-            <Toolbar>
-              <Button kind="primary" onClick={() => setActiveTab('editor')}>
-                编辑当前槽位
-              </Button>
-              <Button onClick={() => detail?.path && void openInFinder(detail.path, detail.label, true)} disabled={!detail?.path || actionBusy}>
-                定位当前文件
-              </Button>
-            </Toolbar>
-          </div>
-
-          <div className="list-card">
-            <div className="list-card-title">
-              <strong>保存后优先做一次记忆体检</strong>
-              <Pill tone={dirty ? 'warn' : warnings.length > 0 ? 'warn' : 'good'}>
-                {dirty ? '有未保存内容' : '可以直接体检'}
-              </Pill>
-            </div>
-            <p>先保存并校验，就能确认文件层、Provider 和运行态是不是对得上。</p>
-            <div className="meta-line">
-              <span>{content.length} 字符 / {lineCount} 行</span>
-              <span>{remainingChars == null ? '无预算限制' : `剩余 ${remainingChars}`}</span>
-            </div>
-            <Toolbar>
-              <Button
-                kind="primary"
-                onClick={() => (dirty ? void save(true) : void runMemoryStatus())}
-                disabled={actionBusy}
-              >
-                {dirty ? (saving === 'verify' ? '保存并校验…' : '保存并校验') : (runningDiagnostic ? '体检中…' : '运行记忆体检')}
-              </Button>
-              <Button onClick={() => setActiveTab('runtime')}>
-                打开 Provider 与材料
-              </Button>
-            </Toolbar>
-          </div>
-
-          <div className="list-card">
-            <div className="list-card-title">
-              <strong>Provider、开关和用户画像优先在客户端里核对</strong>
-              <Pill tone={providerLabel === runtimeProviderLabel ? 'good' : 'warn'}>
-                {runtimeProviderLabel}
-              </Pill>
-            </div>
-            <p>记忆 Provider、memory 开关和 USER 画像都应先在客户端里确认，再决定是否进入命令接管层。</p>
-            <div className="meta-line">
-              <span>{summary?.memoryEnabled ? 'Memory 已开启' : 'Memory 已关闭'}</span>
-              <span>{summary?.userProfileEnabled ? 'User Profile 已开启' : 'User Profile 已关闭'}</span>
-            </div>
-            <Toolbar>
-              <Button kind="primary" onClick={() => navigate('config')}>
-                进入配置中心
-              </Button>
-              <Button onClick={() => setActiveTab('runtime')}>
-                查看运行态材料
-              </Button>
-            </Toolbar>
-          </div>
+        <div className="workspace-shortcut-grid dashboard-launcher-grid">
+          <button
+            type="button"
+            className="workspace-shortcut-card dashboard-shortcut-card"
+            onClick={() => setActiveTab('editor')}
+          >
+            <strong><span className="dashboard-shortcut-icon">✏️</span>编辑当前槽位</strong>
+            <span>{detail ? `${detail.label} · ${detail.exists ? '已落盘，可直接续写' : '还未落盘，适合先保存一次'}` : '进入编辑器后再选择要维护的槽位'}</span>
+          </button>
+          <button
+            type="button"
+            className="workspace-shortcut-card dashboard-shortcut-card"
+            onClick={() => (dirty ? void save(true) : void runMemoryStatus())}
+            disabled={actionBusy}
+          >
+            <strong><span className="dashboard-shortcut-icon">🩺</span>保存并校验</strong>
+            <span>
+              {dirty
+                ? `当前有未保存修改 · ${content.length} 字符 / ${lineCount} 行`
+                : warnings.length > 0
+                  ? `${warnings.length} 条提醒待核对，适合先跑一次体检`
+                  : '当前可以直接做一次记忆体检'}
+            </span>
+          </button>
+          <button
+            type="button"
+            className="workspace-shortcut-card dashboard-shortcut-card"
+            onClick={() => navigate('config')}
+          >
+            <strong><span className="dashboard-shortcut-icon">⚙️</span>配置开关</strong>
+            <span>
+              {summary?.memoryEnabled
+                ? `${providerLabel} · ${summary?.userProfileEnabled ? '画像已开启' : '画像待开启'}`
+                : 'Memory 当前关闭，建议先去配置中心打开'}
+            </span>
+          </button>
+          <button
+            type="button"
+            className="workspace-shortcut-card dashboard-shortcut-card"
+            onClick={() => {
+              setRuntimeView('control');
+              setActiveTab('runtime');
+            }}
+          >
+            <strong><span className="dashboard-shortcut-icon">🧠</span>Provider 与材料</strong>
+            <span>{lastCommand ? `最近已有 ${outputLabel} 回执，可继续下钻` : '低频接管、工作材料和原始回显都收在这里'}</span>
+          </button>
         </div>
+        <p className="helper-text top-gap">首页不再直接堆长卡片和命令区，只保留起步入口。</p>
       </Panel>
 
       <div className="two-column wide-left">
         <Panel
           title="槽位速览"
-          subtitle="只保留 SOUL / MEMORY / USER 的关键状态和编辑入口，不把整个编辑器直接堆到首页。"
+          subtitle="SOUL / MEMORY / USER 只展示轻量状态卡，点一下再进入对应槽位。"
         >
-          <div className="list-stack">
+          <div className="workspace-shortcut-grid dashboard-launcher-grid">
             {items.map((item) => {
               const meta = memoryMeta(item.key);
               const runtimeLimit = limitForKey(item.key, summary);
@@ -364,101 +388,68 @@ export function MemoryPage({ notify, profile, navigate, pageIntent, consumePageI
               const isCurrent = selectedKey === item.key;
 
               return (
-                <div className="list-card" key={item.key}>
-                  <div className="list-card-title">
-                    <strong>{item.label}</strong>
-                    <div className="pill-row">
-                      <Pill tone={item.exists ? 'good' : 'warn'}>
-                        {item.exists ? '已存在' : '缺失'}
-                      </Pill>
-                      {isCurrent ? <Pill tone="neutral">当前</Pill> : null}
-                    </div>
-                  </div>
-                  <p>{meta.description}</p>
-                  <div className="pill-row">
-                    <Pill tone="neutral">{meta.eyebrow}</Pill>
-                    {runtimeLimit != null ? <Pill tone="neutral">{runtimeLimit} chars</Pill> : null}
-                    {userProfileOff ? <Pill tone="warn">runtime off</Pill> : null}
-                  </div>
-                  <div className="meta-line">
-                    <span>{item.key}</span>
-                    <span>{formatTimestamp(item.updatedAt)}</span>
-                  </div>
-                  <Toolbar>
-                    <Button
-                      kind="primary"
-                      onClick={() => {
-                        void selectItem(item.key);
-                        setActiveTab('editor');
-                      }}
-                    >
-                      编辑 {item.label}
-                    </Button>
-                    <Button onClick={() => item.key !== selectedKey && void selectItem(item.key)}>
-                      设为当前
-                    </Button>
-                  </Toolbar>
-                </div>
+                <button
+                  type="button"
+                  key={item.key}
+                  className={`workspace-shortcut-card dashboard-shortcut-card ${isCurrent ? 'active' : ''}`}
+                  onClick={() => {
+                    void selectItem(item.key);
+                    setActiveTab('editor');
+                  }}
+                >
+                  <strong><span className="dashboard-shortcut-icon">{memorySlotIcon(item.key)}</span>{item.label}</strong>
+                  <span>
+                    {item.exists
+                      ? `${meta.description} · ${runtimeLimit == null ? '无预算上限' : `上限 ${runtimeLimit}`}${userProfileOff ? ' · 画像未开启' : ''}`
+                      : '还未落盘，点进编辑器保存后即可加入记忆链路'}
+                  </span>
+                </button>
               );
             })}
           </div>
+          <p className="helper-text top-gap">点击卡片直接进入对应槽位编辑，首页不再展开详细字段和多按钮列表。</p>
         </Panel>
 
         <Panel
           title="当前判断"
-          subtitle="把 provider、预算、会话和网关状态收成摘要，新手先看这里就能判断记忆链路是不是通的。"
+          subtitle="把起步判断、Provider、预算和链路验证压成一层摘要，新手先看这里就够了。"
         >
-          <div className="health-grid">
-            <section className="health-card">
-              <div className="health-card-header">
-                <strong>Provider</strong>
-                <Pill tone={providerLabel === runtimeProviderLabel ? 'good' : 'warn'}>
-                  {runtimeProviderLabel}
-                </Pill>
-              </div>
-              <p>配置声明 {providerLabel}，运行态回报 {runtimeProviderLabel}。</p>
+          <div className="workspace-summary-strip">
+            <section className="summary-mini-card">
+              <span className="summary-mini-label">起步判断</span>
+              <strong className="summary-mini-value">{memoryStartReadiness}</strong>
+              <span className="summary-mini-meta">{memoryStartHint}</span>
             </section>
-            <section className="health-card">
-              <div className="health-card-header">
-                <strong>Memory Switch</strong>
-                <Pill tone={summary?.memoryEnabled ? 'good' : 'warn'}>
-                  {summary?.memoryEnabled ? '已开启' : '已关闭'}
-                </Pill>
-              </div>
-              <p>关闭后文件仍可编辑，但不会稳定参与记忆闭环。</p>
+            <section className="summary-mini-card">
+              <span className="summary-mini-label">Provider 对齐</span>
+              <strong className="summary-mini-value">{runtimeProviderLabel}</strong>
+              <span className="summary-mini-meta">
+                {providerLabel === runtimeProviderLabel ? '配置与运行态一致' : `配置声明为 ${providerLabel}`}
+              </span>
             </section>
-            <section className="health-card">
-              <div className="health-card-header">
-                <strong>User Profile</strong>
-                <Pill tone={summary?.userProfileEnabled ? 'good' : 'warn'}>
-                  {summary?.userProfileEnabled ? '已开启' : '已关闭'}
-                </Pill>
-              </div>
-              <p>USER.md 是否参与建模，完全由这个开关决定。</p>
+            <section className="summary-mini-card">
+              <span className="summary-mini-label">当前预算</span>
+              <strong className="summary-mini-value">
+                {remainingChars == null ? '无限制' : `${remainingChars}`}
+              </strong>
+              <span className="summary-mini-meta">
+                {selectedLimit == null ? '当前槽位没有额外字符预算' : `预算上限 ${selectedLimit} 字符`}
+              </span>
             </section>
-            <section className="health-card">
-              <div className="health-card-header">
-                <strong>当前预算</strong>
-                <Pill tone={remainingChars != null && remainingChars < 0 ? 'bad' : remainingChars != null && remainingChars < 160 ? 'warn' : 'good'}>
-                  {remainingChars ?? '—'}
-                </Pill>
-              </div>
-              <p>{detail?.label ?? selectedKey} 当前剩余 {remainingChars ?? '—'} 字符。</p>
+            <section className="summary-mini-card">
+              <span className="summary-mini-label">链路验证</span>
+              <strong className="summary-mini-value">
+                {snapshot?.gateway?.gatewayState === 'running' ? 'Gateway 已连通' : 'Gateway 待验证'}
+              </strong>
+              <span className="summary-mini-meta">
+                {snapshot?.counts.sessions ?? 0} 条会话记录 · {extensions.plugins.installedCount} 个插件
+              </span>
             </section>
-          </div>
-
-          <div className="detail-list compact top-gap">
-            <KeyValueRow label="当前槽位" value={detail?.label ?? selectedKey} />
-            <KeyValueRow label="当前 Profile" value={profile} />
-            <KeyValueRow label="会话数" value={snapshot?.counts.sessions ?? 0} />
-            <KeyValueRow label="Gateway" value={snapshot?.gateway?.gatewayState ?? '未检测到'} />
-            <KeyValueRow label="插件数" value={extensions.plugins.installedCount} />
-            <KeyValueRow label="字符数 / 行数" value={`${content.length} / ${lineCount}`} />
           </div>
 
           {overviewWarnings.length > 0 ? (
             <>
-              <div className="warning-stack">
+              <div className="warning-stack top-gap">
                 {overviewWarnings.map((warning) => (
                   <div className="warning-item" key={warning}>
                     {warning}
@@ -470,7 +461,7 @@ export function MemoryPage({ notify, profile, navigate, pageIntent, consumePageI
               ) : null}
             </>
           ) : (
-            <EmptyState title="当前没有额外提醒" description="记忆链路看起来是连通的，可以继续进入编辑器完善内容。" />
+            <p className="helper-text top-gap">当前没有额外提醒，记忆链路看起来是连通的，可以直接继续编辑或做一次真实会话验证。</p>
           )}
         </Panel>
       </div>
@@ -570,34 +561,84 @@ export function MemoryPage({ notify, profile, navigate, pageIntent, consumePageI
   const runtimeSection = (
     <>
       <Panel
-        title="记忆接管动作"
-        subtitle="setup、off、plugins、Finder"
+        title="运行与材料入口"
+        subtitle="开关、工作材料、摘要判断和原始回显一次只展开一层，避免这一页重新变重。"
         tip={(
-          <InfoTip content="只保留闭环动作，不在页内重复摆满跨页导航。真正需要的说明交给悬浮提示和命令回显。"/>
+          <InfoTip content="Provider、开关和插件治理优先去配置中心与扩展页。CLI 接管只放在这里，避免首页被低频动作占满。"/>
         )}
       >
-        <div className="control-card-grid">
-          <section className="action-card action-card-compact">
+        <div className="workspace-shortcut-grid dashboard-launcher-grid">
+          {MEMORY_RUNTIME_VIEWS.map((view) => (
+            <button
+              key={view.key}
+              type="button"
+              className={`workspace-shortcut-card dashboard-shortcut-card ${runtimeView === view.key ? 'active' : ''}`}
+              onClick={() => setRuntimeView(view.key)}
+            >
+              <strong><span className="dashboard-shortcut-icon">{view.icon}</span>{view.label}</strong>
+              <span>{view.hint}</span>
+            </button>
+          ))}
+        </div>
+        <p className="helper-text top-gap">默认层不再把开关、路径、警告和原始输出一次全部铺开，只先让你选一个需要进入的子模块。</p>
+      </Panel>
+
+      {runtimeView === 'control' ? (
+        <Panel
+          title="开关与 Provider"
+          subtitle="配置优先留在客户端，真正需要接管时再显式使用 CLI。"
+          aside={(
+            <Toolbar>
+              <Button kind="primary" onClick={() => navigate('config')}>进入配置中心</Button>
+              <Button onClick={() => navigate('extensions')}>管理插件</Button>
+              <Button onClick={() => void runMemoryStatus()} disabled={actionBusy}>
+                {runningDiagnostic ? '体检中…' : '状态体检'}
+              </Button>
+            </Toolbar>
+          )}
+        >
+          <div className="workspace-summary-strip">
+            <section className="summary-mini-card">
+              <span className="summary-mini-label">运行 Provider</span>
+              <strong className="summary-mini-value">{runtimeProviderLabel}</strong>
+              <span className="summary-mini-meta">
+                {providerLabel === runtimeProviderLabel ? '与配置一致' : `配置声明为 ${providerLabel}`}
+              </span>
+            </section>
+            <section className="summary-mini-card">
+              <span className="summary-mini-label">Memory 开关</span>
+              <strong className="summary-mini-value">{summary?.memoryEnabled ? '已开启' : '已关闭'}</strong>
+              <span className="summary-mini-meta">关闭后文件不会稳定进入长期记忆链路</span>
+            </section>
+            <section className="summary-mini-card">
+              <span className="summary-mini-label">User 画像</span>
+              <strong className="summary-mini-value">{summary?.userProfileEnabled ? '已开启' : '已关闭'}</strong>
+              <span className="summary-mini-meta">决定 USER.md 是否真正参与建模</span>
+            </section>
+            <section className="summary-mini-card">
+              <span className="summary-mini-label">插件安装态</span>
+              <strong className="summary-mini-value">{extensions.plugins.installedCount}</strong>
+              <span className="summary-mini-meta">{extensions.memoryRuntime.installedPlugins.length} 个插件进入记忆运行态</span>
+            </section>
+          </div>
+          <p className="helper-text top-gap">插件安装、Provider 选择和开关配置优先在客户端完成，CLI 接管只保留给异常场景。</p>
+          <section className="action-card action-card-compact top-gap">
             <div className="action-card-header">
               <div>
-                <p className="eyebrow">Provider</p>
-                <h3 className="action-card-title">记忆 Provider</h3>
+                <p className="eyebrow">Terminal Handoff</p>
+                <h3 className="action-card-title">需要时再接管 Hermes 命令</h3>
               </div>
-              <Pill tone={summary?.memoryEnabled ? 'good' : 'warn'}>
-                {summary?.memoryEnabled ? 'Enabled' : 'Disabled'}
+              <Pill tone={installation.binaryFound ? 'good' : 'warn'}>
+                {installation.binaryFound ? 'CLI 可用' : 'CLI 未检测到'}
               </Pill>
             </div>
-            <p className="command-line">hermes memory setup · hermes memory status · hermes memory off</p>
+            <p className="command-line">{'hermes memory setup / hermes memory off'}</p>
             <Toolbar>
               <Button
-                kind="primary"
                 onClick={() => void openInTerminal('memory:setup', '记忆 Provider', 'hermes memory setup')}
                 disabled={actionBusy || !installation.binaryFound}
               >
-                {runningDesktopAction === 'memory:setup' ? 'Provider…' : 'Provider 向导'}
-              </Button>
-              <Button onClick={() => void runMemoryStatus()} disabled={actionBusy}>
-                {runningDiagnostic ? '体检中…' : '状态体检'}
+                {runningDesktopAction === 'memory:setup' ? '接管中…' : 'CLI 接管'}
               </Button>
               <Button
                 kind="danger"
@@ -608,181 +649,145 @@ export function MemoryPage({ notify, profile, navigate, pageIntent, consumePageI
               </Button>
             </Toolbar>
           </section>
+        </Panel>
+      ) : null}
 
-          <section className="action-card action-card-compact">
-            <div className="action-card-header">
-              <div>
-                <p className="eyebrow">Plugins</p>
-                <h3 className="action-card-title">插件与扩展 Provider</h3>
-              </div>
-              <Pill tone={extensions.plugins.installedCount > 0 ? 'good' : 'neutral'}>
-                {extensions.plugins.installedCount > 0 ? `${extensions.plugins.installedCount} 个` : '未安装'}
-              </Pill>
-            </div>
-            <label className="field-stack">
-              <span>插件名</span>
-              <input
-                className="search-input"
-                value={pluginInput}
-                onChange={(event) => setPluginInput(event.target.value)}
-                placeholder="byterover / owner/repo"
-                disabled={actionBusy}
-              />
-            </label>
-            <p className="command-line">
-              {pluginTerminalName
-                ? `hermes plugins install ${pluginTerminalName} · hermes plugins update ${pluginTerminalName} · hermes plugins remove ${pluginTerminalName}`
-                : 'hermes plugins · 输入插件名后可 install / update / remove'}
-            </p>
-            <Toolbar>
-              <Button
-                onClick={() => void openInTerminal('memory:plugins-panel', '插件面板', 'hermes plugins')}
-                disabled={actionBusy || !installation.binaryFound}
-              >
-                {runningDesktopAction === 'memory:plugins-panel' ? '插件面板…' : '插件面板'}
-              </Button>
-              <Button
-                kind="primary"
-                onClick={() => void openInTerminal('memory:plugin-install', '安装插件', `hermes plugins install ${pluginTerminalName}`)}
-                disabled={actionBusy || !installation.binaryFound || !pluginTerminalName}
-              >
-                {runningDesktopAction === 'memory:plugin-install' ? '安装中…' : '安装'}
-              </Button>
-              <Button
-                onClick={() => void openInTerminal('memory:plugin-update', '更新插件', `hermes plugins update ${pluginTerminalName}`)}
-                disabled={actionBusy || !installation.binaryFound || !pluginTerminalName}
-              >
-                {runningDesktopAction === 'memory:plugin-update' ? '更新中…' : '更新'}
-              </Button>
-              <Button
-                kind="danger"
-                onClick={() => void openInTerminal('memory:plugin-remove', '移除插件', `hermes plugins remove ${pluginTerminalName}`, `确定移除插件 ${pluginTerminalName || ''} 吗？`)}
-                disabled={actionBusy || !installation.binaryFound || !pluginTerminalName}
-              >
-                {runningDesktopAction === 'memory:plugin-remove' ? '移除中…' : '移除'}
-              </Button>
-            </Toolbar>
-          </section>
-
-          <section className="action-card action-card-compact">
-            <div className="action-card-header">
-              <div>
-                <p className="eyebrow">Workspace</p>
-                <h3 className="action-card-title">记忆物料</h3>
-              </div>
-              <Pill tone={detail?.exists ? 'good' : 'warn'}>
-                {detail?.exists ? '已落盘' : '未落盘'}
-              </Pill>
-            </div>
-            <p className="command-line">{detail?.path || config.hermesHome}</p>
-            <Toolbar>
-              <Button onClick={() => void openInFinder(config.hermesHome, 'Hermes Home')} disabled={actionBusy}>
-                打开 Home
-              </Button>
-              <Button onClick={() => detail?.path && void openInFinder(detail.path, detail.label, true)} disabled={actionBusy || !detail?.path}>
-                定位当前文件
-              </Button>
-              <Button onClick={() => detail?.path && void openInFinder(directoryOf(detail.path), '记忆目录')} disabled={actionBusy || !detail?.path}>
-                打开目录
-              </Button>
-            </Toolbar>
-          </section>
-
-          <section className="action-card action-card-compact">
-            <div className="action-card-header">
-              <div>
-                <p className="eyebrow">Runtime</p>
-                <h3 className="action-card-title">运行态信号</h3>
-              </div>
-              <Pill tone={warnings.length === 0 ? 'good' : 'warn'}>
-                {warnings.length === 0 ? '稳定' : `${warnings.length} 条`}
-              </Pill>
-            </div>
-            <p className="command-line">
-              provider {runtimeProviderLabel} · sessions {snapshot?.counts.sessions ?? 0} · gateway {snapshot?.gateway?.gatewayState ?? 'unknown'}
-            </p>
-            {warnings.length > 0 ? (
-              <div className="warning-stack">
-                {warnings.slice(0, 2).map((warning) => (
-                  <div className="warning-item" key={warning}>
-                    {warning}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="helper-text">当前没有明显的记忆侧阻塞项。</p>
-            )}
-          </section>
-        </div>
-      </Panel>
-
-      <Panel
-        title="运行态与回显"
-        subtitle="provider、预算、原始输出"
-        tip={<InfoTip content="这里保留最近一次记忆命令或 memory status 的真实输出，方便你对照结构化卡片，避免再跳到别页找上下文。"/>}
-      >
-        <div className="health-grid">
-          <section className="health-card">
-            <div className="health-card-header">
-              <strong>Provider</strong>
-              <Pill tone={runtimeProviderLabel === 'builtin-file' ? 'good' : 'neutral'}>{runtimeProviderLabel}</Pill>
-            </div>
-            <p>配置声明 {providerLabel}，运行态回报 {runtimeProviderLabel}。</p>
-          </section>
-          <section className="health-card">
-            <div className="health-card-header">
-              <strong>Memory Switch</strong>
-              <Pill tone={summary?.memoryEnabled ? 'good' : 'warn'}>
-                {summary?.memoryEnabled ? '已开启' : '已关闭'}
-              </Pill>
-            </div>
-            <p>关闭后文件仍可编辑，但不会稳定参与记忆闭环。</p>
-          </section>
-          <section className="health-card">
-            <div className="health-card-header">
-              <strong>User Profile</strong>
-              <Pill tone={summary?.userProfileEnabled ? 'good' : 'warn'}>
-                {summary?.userProfileEnabled ? '已开启' : '已关闭'}
-              </Pill>
-            </div>
-            <p>USER.md 是否参与建模，完全由这个开关决定。</p>
-          </section>
-          <section className="health-card">
-            <div className="health-card-header">
-              <strong>Budget</strong>
-              <Pill tone={remainingChars != null && remainingChars < 0 ? 'bad' : 'good'}>
-                {selectedLimit ?? '—'}
-              </Pill>
-            </div>
-            <p>当前编辑对象剩余 {remainingChars ?? '—'} 字符。</p>
-          </section>
-        </div>
-
-        {warnings.length > 0 ? (
-          <div className="warning-stack top-gap">
-            {warnings.map((warning) => (
-              <div className="warning-item" key={warning}>
-                {warning}
-              </div>
-            ))}
-          </div>
-        ) : null}
-
+      {runtimeView === 'workspace' ? (
         <Panel
-          className="panel-nested top-gap"
-          title={outputLabel}
-          subtitle={lastCommand ? '最近一次命令回显' : '当前 memory status 原始输出'}
+          title="记忆物料"
+          subtitle="需要定位 Hermes Home、当前文件或目录时，再进入这一层。"
+        >
+          <div className="workspace-shortcut-grid dashboard-launcher-grid">
+            <button
+              type="button"
+              className="workspace-shortcut-card dashboard-shortcut-card"
+              onClick={() => void openInFinder(config.hermesHome, 'Hermes Home')}
+              disabled={actionBusy}
+            >
+              <strong><span className="dashboard-shortcut-icon">🏠</span>Hermes Home</strong>
+              <span>{config.hermesHome}</span>
+            </button>
+            <button
+              type="button"
+              className="workspace-shortcut-card dashboard-shortcut-card"
+              onClick={() => detail?.path && void openInFinder(detail.path, detail.label, true)}
+              disabled={actionBusy || !detail?.path}
+            >
+              <strong><span className="dashboard-shortcut-icon">📄</span>当前文件</strong>
+              <span>{detail?.path || '当前槽位还没有落盘文件'}</span>
+            </button>
+            <button
+              type="button"
+              className="workspace-shortcut-card dashboard-shortcut-card"
+              onClick={() => detail?.path && void openInFinder(directoryOf(detail.path), '记忆目录')}
+              disabled={actionBusy || !detail?.path}
+            >
+              <strong><span className="dashboard-shortcut-icon">🗂️</span>记忆目录</strong>
+              <span>{detail?.path ? directoryOf(detail.path) : '当前没有可定位的目录'}</span>
+            </button>
+            <button
+              type="button"
+              className="workspace-shortcut-card dashboard-shortcut-card"
+              onClick={() => setActiveTab('editor')}
+            >
+              <strong><span className="dashboard-shortcut-icon">✏️</span>回到编辑器</strong>
+              <span>{detail?.label ? `继续维护 ${detail.label}` : '返回槽位编辑页继续修改内容'}</span>
+            </button>
+          </div>
+          <div className="detail-list compact top-gap">
+            <KeyValueRow label="当前槽位" value={detail?.label ?? selectedKey} />
+            <KeyValueRow label="当前文件路径" value={detail?.path || '尚未落盘'} />
+            <KeyValueRow label="Hermes Home" value={config.hermesHome} />
+          </div>
+        </Panel>
+      ) : null}
+
+      {runtimeView === 'summary' ? (
+        <Panel
+          title="当前运行判断"
+          subtitle="把 Provider、开关、预算和链路提醒压成一眼能看懂的摘要。"
+          aside={(
+            <Toolbar>
+              <Button onClick={() => void runMemoryStatus()} disabled={actionBusy}>
+                {runningDiagnostic ? '刷新中…' : '刷新判断'}
+              </Button>
+              <Button onClick={() => navigate('config')}>去配置中心</Button>
+            </Toolbar>
+          )}
+        >
+          <div className="workspace-summary-strip">
+            <section className="summary-mini-card">
+              <span className="summary-mini-label">运行 Provider</span>
+              <strong className="summary-mini-value">{runtimeProviderLabel}</strong>
+              <span className="summary-mini-meta">
+                {providerLabel === runtimeProviderLabel ? '与配置一致' : `配置是 ${providerLabel}`}
+              </span>
+            </section>
+            <section className="summary-mini-card">
+              <span className="summary-mini-label">Memory 开关</span>
+              <strong className="summary-mini-value">{summary?.memoryEnabled ? '已开启' : '已关闭'}</strong>
+              <span className="summary-mini-meta">关闭后文件不会稳定进入记忆链路</span>
+            </section>
+            <section className="summary-mini-card">
+              <span className="summary-mini-label">当前预算</span>
+              <strong className="summary-mini-value">{remainingChars == null ? '无限制' : `${remainingChars}`}</strong>
+              <span className="summary-mini-meta">
+                {selectedLimit == null ? '当前槽位没有预算限制' : `当前上限 ${selectedLimit} 字符`}
+              </span>
+            </section>
+            <section className="summary-mini-card">
+              <span className="summary-mini-label">链路验证</span>
+              <strong className="summary-mini-value">
+                {snapshot?.gateway?.gatewayState === 'running' ? 'Gateway 已连通' : 'Gateway 待验证'}
+              </strong>
+              <span className="summary-mini-meta">
+                {snapshot?.counts.sessions ?? 0} 条会话记录 · {extensions.plugins.installedCount} 个插件
+              </span>
+            </section>
+          </div>
+          {warnings.length > 0 ? (
+            <div className="warning-stack top-gap">
+              {warnings.map((warning) => (
+                <div className="warning-item" key={warning}>
+                  {warning}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="helper-text top-gap">当前没有明显的记忆侧阻塞项，更适合直接维护槽位或做一次真实会话验证。</p>
+          )}
+        </Panel>
+      ) : null}
+
+      {runtimeView === 'output' ? (
+        <Panel
+          title="最近回执"
+          subtitle="这里只保留最近一次体检或接管动作的原始输出，不再和其他运行材料混排。"
+          aside={(
+            <Toolbar>
+              <Button onClick={() => void runMemoryStatus()} disabled={actionBusy}>
+                {runningDiagnostic ? '刷新中…' : '刷新回显'}
+              </Button>
+              <Button onClick={() => setRuntimeView('summary')}>查看判断</Button>
+            </Toolbar>
+          )}
         >
           {lastCommand ? (
             <div className="detail-list compact">
+              <KeyValueRow label="标题" value={outputLabel} />
               <KeyValueRow label="命令" value={lastCommand.command} />
               <KeyValueRow label="结果" value={lastCommand.success ? 'success' : 'failed'} />
               <KeyValueRow label="退出码" value={lastCommand.exitCode} />
             </div>
-          ) : null}
-          <pre className="code-block compact-code">{outputText}</pre>
+          ) : (
+            <div className="detail-list compact">
+              <KeyValueRow label="当前显示" value={outputLabel} />
+              <KeyValueRow label="来源" value="memory status 原始输出" />
+            </div>
+          )}
+          <pre className="code-block compact-code top-gap">{outputText}</pre>
         </Panel>
-      </Panel>
+      ) : null}
     </>
   );
 
@@ -803,31 +808,32 @@ export function MemoryPage({ notify, profile, navigate, pageIntent, consumePageI
           </Toolbar>
         )}
       >
-        <div className="compact-overview-grid">
-          <div className="shell-card">
-            <div className="shell-card-header">
-              <strong>运行摘要</strong>
-              <div className="pill-row">
-                <Pill tone={summary?.memoryEnabled ? 'good' : 'warn'}>{summary?.memoryEnabled ? 'Memory On' : 'Memory Off'}</Pill>
-                <Pill tone={snapshot?.gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
-                  {snapshot?.gateway?.gatewayState ?? 'Gateway ?'}
-                </Pill>
-              </div>
-            </div>
-            <div className="detail-list compact">
-              <KeyValueRow label="当前 Profile" value={profile} />
-              <KeyValueRow label="Provider" value={runtimeProviderLabel} />
-              <KeyValueRow label="User Profile" value={summary?.userProfileEnabled ? 'On' : 'Off'} />
-              <KeyValueRow label="会话数" value={snapshot?.counts.sessions ?? 0} />
-              <KeyValueRow label="插件数" value={extensions.plugins.installedCount} />
-            </div>
-          </div>
-          <div className="metrics-grid metrics-grid-tight">
-            <MetricCard label="槽位" value={`${readyCount}/${items.length || 3}`} hint="SOUL / MEMORY / USER" />
-            <MetricCard label="Provider" value={runtimeProviderLabel} hint={providerLabel === runtimeProviderLabel ? '配置与运行态一致' : '配置与运行态需核对'} />
-            <MetricCard label="Plugins" value={extensions.plugins.installedCount} hint="plugins list" />
-            <MetricCard label="Warnings" value={warnings.length} hint="预算、provider、gateway、会话" />
-          </div>
+        <p className="helper-text">
+          默认顺序：先看起步判断，再选槽位编辑，保存后做一次记忆体检，低频的 Provider 接管和原始回显都收在后面的子模块。
+        </p>
+        <div className="workspace-summary-strip">
+          <section className="summary-mini-card">
+            <span className="summary-mini-label">起步判断</span>
+            <strong className="summary-mini-value">{memoryStartReadiness}</strong>
+            <span className="summary-mini-meta">{memoryStartHint}</span>
+          </section>
+          <section className="summary-mini-card">
+            <span className="summary-mini-label">当前槽位</span>
+            <strong className="summary-mini-value">{detail?.label ?? selectedKey}</strong>
+            <span className="summary-mini-meta">{currentMeta.description}</span>
+          </section>
+          <section className="summary-mini-card">
+            <span className="summary-mini-label">已就绪槽位</span>
+            <strong className="summary-mini-value">{`${readyCount}/${items.length || 3}`}</strong>
+            <span className="summary-mini-meta">SOUL / MEMORY / USER 已落盘数量</span>
+          </section>
+          <section className="summary-mini-card">
+            <span className="summary-mini-label">运行 Provider</span>
+            <strong className="summary-mini-value">{runtimeProviderLabel}</strong>
+            <span className="summary-mini-meta">
+              {warnings.length > 0 ? `${warnings.length} 条提醒待处理` : '当前没有额外提醒'}
+            </span>
+          </section>
         </div>
       </Panel>
 

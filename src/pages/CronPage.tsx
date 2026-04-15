@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { api } from '../lib/api';
 import { formatTimestamp, truncate } from '../lib/format';
-import { cronTone, hasCronFailure, isRemoteDelivery, uniqueCount } from '../lib/runtime';
+import { cronTone, hasCronFailure, isRemoteDelivery } from '../lib/runtime';
 import type {
   CommandRunResult,
   CronCreateRequest,
@@ -18,6 +18,10 @@ import type { PageProps } from './types';
 
 type EditorMode = 'create' | 'edit' | null;
 type CronTabKey = 'overview' | 'jobs' | 'editor';
+type CronOverviewViewKey = 'launch' | 'status' | 'links';
+type CronJobViewKey = 'summary' | 'closure' | 'prompt' | 'history';
+type CronJobsWorkspaceViewKey = 'pick' | 'focus';
+type CronEditorViewKey = 'form' | 'danger' | 'output';
 
 interface CronEditorDraft {
   name: string;
@@ -47,6 +51,42 @@ const CRON_TABS: Array<{ key: CronTabKey; label: string; hint: string }> = [
   { key: 'overview', label: '常用总览', hint: '先判断自动化链路是否完整，再决定下一步。' },
   { key: 'jobs', label: '作业与闭环', hint: '筛选作业、看详情，并直接触发常用动作。' },
   { key: 'editor', label: '编辑与回执', hint: '低频编辑、删除确认和原始回执统一收在这里。' },
+];
+
+const DEFAULT_VISIBLE_CRON_JOBS = 8;
+
+const CRON_OVERVIEW_VIEWS: Array<{
+  key: CronOverviewViewKey;
+  label: string;
+  icon: string;
+  hint: string;
+}> = [
+  { key: 'launch', label: '常用入口', icon: '🧭', hint: '只保留最常用的入口，先决定要去作业、技能还是日志。' },
+  { key: 'status', label: '当前判断', icon: '🩺', hint: '把自动化规模、远端投递、技能缺口和记忆状态压成一个工作面。' },
+  { key: 'links', label: '辅助入口', icon: '🧰', hint: '文件定位和跨页联动继续后置，需要时再展开。' },
+];
+
+const CRON_JOB_VIEWS: Array<{
+  key: CronJobViewKey;
+  label: string;
+  icon: string;
+  hint: string;
+}> = [
+  { key: 'summary', label: '基础摘要', icon: '🧭', hint: '先看调度、投递和最近运行时间，确认是不是这条任务本身有问题。' },
+  { key: 'closure', label: '闭环关系', icon: '🔗', hint: '需要判断 skills、memory、gateway 是否同一条链路时，再展开这里。' },
+  { key: 'prompt', label: 'Prompt', icon: '📝', hint: '只有在你真要读任务正文时，再看完整 prompt。' },
+  { key: 'history', label: '运行痕迹', icon: '🧾', hint: '把 last status、错误和重复次数收在这一层，不再默认铺满。' },
+];
+
+const CRON_EDITOR_VIEWS: Array<{
+  key: CronEditorViewKey;
+  label: string;
+  icon: string;
+  hint: string;
+}> = [
+  { key: 'form', label: '编辑表单', icon: '✏️', hint: '新建和修改都只在这一层完成，避免平时被低频表单打断。' },
+  { key: 'danger', label: '删除确认', icon: '🧯', hint: '危险操作后置到单独层级，只有明确要删作业时再进入。' },
+  { key: 'output', label: '命令回执', icon: '🧾', hint: '创建、修改、删除和立即触发的 Hermes 原始输出统一收在这里。' },
 ];
 
 function parseSkills(value: string) {
@@ -89,6 +129,12 @@ export function CronPage({ notify, profile, navigate }: PageProps) {
   const [draft, setDraft] = useState<CronEditorDraft>(EMPTY_DRAFT);
   const [deleteConfirm, setDeleteConfirm] = useState('');
   const [activeTab, setActiveTab] = useState<CronTabKey>('overview');
+  const [overviewView, setOverviewView] = useState<CronOverviewViewKey>('launch');
+  const [jobsWorkspaceView, setJobsWorkspaceView] = useState<CronJobsWorkspaceViewKey>('pick');
+  const [jobView, setJobView] = useState<CronJobViewKey>('summary');
+  const [editorView, setEditorView] = useState<CronEditorViewKey>('form');
+  const [showFilters, setShowFilters] = useState(false);
+  const [showAllJobs, setShowAllJobs] = useState(false);
 
   async function load(preferredJobId?: string) {
     setLoading(true);
@@ -121,6 +167,12 @@ export function CronPage({ notify, profile, navigate }: PageProps) {
     setDraft(EMPTY_DRAFT);
     setDeleteConfirm('');
     setActiveTab('overview');
+    setOverviewView('launch');
+    setJobsWorkspaceView('pick');
+    setJobView('summary');
+    setEditorView('form');
+    setShowFilters(false);
+    setShowAllJobs(false);
   }, [profile]);
 
   const jobs = snapshot?.jobs ?? [];
@@ -164,6 +216,7 @@ export function CronPage({ notify, profile, navigate }: PageProps) {
 
   useEffect(() => {
     setDeleteConfirm('');
+    setJobView('summary');
   }, [selectedJob?.id]);
 
   const enabledCount = jobs.filter((job) => job.enabled && job.state !== 'paused').length;
@@ -195,11 +248,39 @@ export function CronPage({ notify, profile, navigate }: PageProps) {
   }
   const overviewWarnings = runtimeWarnings.slice(0, 4);
   const remainingOverviewWarningCount = Math.max(0, runtimeWarnings.length - overviewWarnings.length);
+  const cronStartReadiness = !jobs.length
+    ? '先创建第一条自动化'
+    : runtime?.gateway?.gatewayState !== 'running' && remoteJobs.length > 0
+      ? '先修远端投递链路'
+      : missingReferencedSkills.length > 0
+        ? '先补齐技能引用'
+        : failingJobs.length > 0
+          ? '先处理异常作业'
+          : runtime?.config.memoryEnabled === false && jobsWithSkills.length > 0
+            ? '建议补上记忆能力'
+            : '自动化主链路稳定';
+  const cronStartHint = !jobs.length
+    ? '先新建一条最小可运行任务，再回来检查技能、投递和记忆是否连通。'
+    : runtime?.gateway?.gatewayState !== 'running' && remoteJobs.length > 0
+      ? '当前已有远端投递任务，先把 gateway 恢复起来，再看日志与平台通道。'
+      : missingReferencedSkills.length > 0
+        ? '作业已引用技能但本地不完整，先补齐能力面，避免任务名义上能跑、实际无法闭环。'
+        : failingJobs.length > 0
+          ? '当前已经有异常作业，先锁定一条任务核对日志和最近回执。'
+          : runtime?.config.memoryEnabled === false && jobsWithSkills.length > 0
+            ? '调度和技能基本在位，但记忆关闭后长期偏好和上下文难以沉淀。'
+            : '可以直接在“作业与闭环”里挑一条任务做验证或继续优化。';
+  const visibleJobs = showAllJobs ? filteredJobs : filteredJobs.slice(0, DEFAULT_VISIBLE_CRON_JOBS);
+  const hiddenJobCount = Math.max(0, filteredJobs.length - visibleJobs.length);
+  const activeOverviewView = CRON_OVERVIEW_VIEWS.find((item) => item.key === overviewView) ?? CRON_OVERVIEW_VIEWS[0];
+  const activeJobView = CRON_JOB_VIEWS.find((item) => item.key === jobView) ?? CRON_JOB_VIEWS[0];
+  const activeEditorView = CRON_EDITOR_VIEWS.find((item) => item.key === editorView) ?? CRON_EDITOR_VIEWS[0];
 
   function openCreateEditor() {
     setEditorMode('create');
     setDraft(EMPTY_DRAFT);
     setActiveTab('editor');
+    setEditorView('form');
   }
 
   function openEditEditor() {
@@ -207,11 +288,13 @@ export function CronPage({ notify, profile, navigate }: PageProps) {
     setEditorMode('edit');
     setDraft(buildDraftFromJob(selectedJob));
     setActiveTab('editor');
+    setEditorView('form');
   }
 
-  function closeEditor() {
+  function closeEditor(nextView: CronEditorViewKey = 'form') {
     setEditorMode(null);
     setDraft(EMPTY_DRAFT);
+    setEditorView(nextView);
   }
 
   async function runAction(action: 'pause' | 'resume' | 'run') {
@@ -284,7 +367,8 @@ export function CronPage({ notify, profile, navigate }: PageProps) {
 
       const createdId = editorMode === 'create' ? extractCreatedJobId(result) : selectedJob?.id;
       await load(createdId ?? undefined);
-      closeEditor();
+      closeEditor('output');
+      setActiveTab('editor');
     } catch (reason) {
       notify('error', String(reason));
     } finally {
@@ -310,7 +394,7 @@ export function CronPage({ notify, profile, navigate }: PageProps) {
       const result = await api.deleteCronJob(request, profile);
       setLastCommand(result);
       if (result.success) {
-        closeEditor();
+        closeEditor('output');
         setDeleteConfirm('');
       }
       notify(
@@ -347,234 +431,243 @@ export function CronPage({ notify, profile, navigate }: PageProps) {
 
   const overviewSection = (
     <div className="page-stack">
-      <div className="two-column wide-left">
-        <Panel title="当前判断" subtitle="把健康判断收敛到 Hermes 自动化链路本身，新手先看这里就能知道先修哪一层。">
-          <div className="health-grid">
-            <section className="health-card">
-              <div className="health-card-header">
-                <strong>Gateway</strong>
-                <Pill tone={runtime?.gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
-                  {runtime?.gateway?.gatewayState ?? '未检测到'}
-                </Pill>
-              </div>
-              <p>{remoteJobs.length > 0 ? `当前有 ${remoteJobs.length} 个远端投递作业依赖 gateway。` : '当前作业以内投递或本地执行为主。'}</p>
-            </section>
-            <section className="health-card">
-              <div className="health-card-header">
-                <strong>Skills Coverage</strong>
-                <Pill tone={missingReferencedSkills.length === 0 ? 'good' : 'warn'}>
-                  {jobs.length === 0 ? '暂无作业' : `${jobsWithSkills.length}/${jobs.length} 个作业声明了 skills`}
-                </Pill>
-              </div>
-              <p>{missingReferencedSkills.length === 0 ? '已引用的技能都能在本地目录中找到。' : `缺失技能：${missingReferencedSkills.join('、')}`}</p>
-            </section>
-            <section className="health-card">
-              <div className="health-card-header">
-                <strong>Memory</strong>
-                <Pill tone={runtime?.config.memoryEnabled ? 'good' : 'warn'}>
-                  {runtime?.config.memoryEnabled ? '已开启' : '已关闭'}
-                </Pill>
-              </div>
-              <p>Provider {runtime?.config.memoryProvider || 'builtin-file'} · 用户画像 {String(runtime?.config.userProfileEnabled ?? false)}</p>
-            </section>
-            <section className="health-card">
-              <div className="health-card-header">
-                <strong>Delivery</strong>
-                <Pill tone={failingJobs.length === 0 ? 'good' : 'bad'}>
-                  {uniqueCount(jobs.map((job) => job.deliver))} 类目标
-                </Pill>
-              </div>
-              <p>{failingJobs.length === 0 ? '最近没有明显失败作业。' : `${failingJobs.length} 个作业带有错误或投递异常。`}</p>
-            </section>
+      <Panel title="总览入口" subtitle="总览页只保留一个主工作面，其他信息继续后置。">
+        <div className="workspace-shortcut-grid dashboard-launcher-grid">
+          {CRON_OVERVIEW_VIEWS.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              className={`workspace-shortcut-card dashboard-shortcut-card ${overviewView === item.key ? 'active' : ''}`}
+              onClick={() => setOverviewView(item.key)}
+            >
+              <strong><span className="dashboard-shortcut-icon">{item.icon}</span>{item.label}</strong>
+              <span>{item.hint}</span>
+            </button>
+          ))}
+        </div>
+        <p className="helper-text top-gap">{activeOverviewView.hint}</p>
+      </Panel>
+
+      {overviewView === 'launch' ? (
+        <Panel title="常用去向" subtitle="总览页只显式保留最常见的 4 个入口，避免一上来掉进长列表、长表单和原始回执。">
+          <div className="workspace-shortcut-grid dashboard-launcher-grid">
+            <button
+              type="button"
+              className="workspace-shortcut-card dashboard-shortcut-card"
+              onClick={() => {
+                setJobsWorkspaceView('focus');
+                setActiveTab('jobs');
+              }}
+            >
+              <strong><span className="dashboard-shortcut-icon">⏱️</span>查看焦点作业</strong>
+              <span>{selectedJob ? `${selectedJob.name} · ${selectedJob.state} · ${selectedJob.scheduleDisplay}` : jobs.length > 0 ? '进入作业页后锁定最值得先看的任务' : '当前还没有作业，适合先新建一条'}</span>
+            </button>
+            <button type="button" className="workspace-shortcut-card dashboard-shortcut-card" onClick={openCreateEditor}>
+              <strong><span className="dashboard-shortcut-icon">➕</span>新建作业</strong>
+              <span>{jobs.length === 0 ? '先创建一条最小可运行任务，再回来做闭环检查' : '新增自动化任务时，表单和回执都会收进编辑层'}</span>
+            </button>
+            <button type="button" className="workspace-shortcut-card dashboard-shortcut-card" onClick={() => navigate('skills')}>
+              <strong><span className="dashboard-shortcut-icon">🧩</span>核对能力面</strong>
+              <span>{missingReferencedSkills.length > 0 ? `${missingReferencedSkills.length} 个技能引用缺口待补齐` : `skills 已扫描 ${skills.length} 个，适合继续看记忆或扩展`}</span>
+            </button>
+            <button type="button" className="workspace-shortcut-card dashboard-shortcut-card" onClick={() => navigate('logs')}>
+              <strong><span className="dashboard-shortcut-icon">🪵</span>看日志排障</strong>
+              <span>{failingJobs.length > 0 ? `${failingJobs.length} 条异常作业更适合先去日志页追原因` : remoteJobs.length > 0 ? `${remoteJobs.length} 个远端作业可继续联动网关排查` : '当前以本地链路为主，日志按需查看即可'}</span>
+            </button>
+          </div>
+          <p className="helper-text top-gap">首页不再直接铺推荐长卡和材料命令卡，只保留真正高频的动作入口。</p>
+        </Panel>
+      ) : null}
+
+      {overviewView === 'status' ? (
+        <Panel title="当前判断" subtitle="把自动化链路的起步判断、规模、投递和能力缺口压成一层摘要，小白先看这里就够了。">
+          <div className="workspace-summary-strip">
+            <div className="summary-mini-card">
+              <span className="summary-mini-label">起步判断</span>
+              <strong className="summary-mini-value">{cronStartReadiness}</strong>
+              <span className="summary-mini-meta">{cronStartHint}</span>
+            </div>
+            <div className="summary-mini-card">
+              <span className="summary-mini-label">调度规模</span>
+              <strong className="summary-mini-value">{jobs.length === 0 ? '还没有作业' : `${enabledCount}/${jobs.length} 已启用`}</strong>
+              <span className="summary-mini-meta">{failingJobs.length > 0 ? `${failingJobs.length} 条异常待处理` : '当前没有明显失败作业'}</span>
+            </div>
+            <div className="summary-mini-card">
+              <span className="summary-mini-label">投递链路</span>
+              <strong className="summary-mini-value">{runtime?.gateway?.gatewayState ?? '未检测到'}</strong>
+              <span className="summary-mini-meta">{remoteJobs.length > 0 ? `${remoteJobs.length} 个远端作业依赖 gateway` : '当前以本地执行或本地投递为主'}</span>
+            </div>
+            <div className="summary-mini-card">
+              <span className="summary-mini-label">能力闭环</span>
+              <strong className="summary-mini-value">{missingReferencedSkills.length === 0 ? '技能引用已对齐' : `${missingReferencedSkills.length} 个缺口`}</strong>
+              <span className="summary-mini-meta">Memory {runtime?.config.memoryEnabled ? '已开启' : '已关闭'} · {runtime?.config.memoryProvider || 'builtin-file'}</span>
+            </div>
           </div>
           {overviewWarnings.length > 0 ? (
             <>
-              <div className="warning-stack">
+              <div className="warning-stack top-gap">
                 {overviewWarnings.map((warning) => (
                   <div className="warning-item" key={warning}>
                     {warning}
                   </div>
                 ))}
               </div>
-              {remainingOverviewWarningCount > 0 ? (
-                <p className="helper-text top-gap">其余 {remainingOverviewWarningCount} 条提醒继续收在“作业与闭环”和“编辑与回执”里。</p>
-              ) : null}
+              {remainingOverviewWarningCount > 0 ? <p className="helper-text top-gap">其余 {remainingOverviewWarningCount} 条提醒继续收在“作业与闭环”和“编辑与回执”里。</p> : null}
             </>
           ) : (
-            <EmptyState title="闭环较完整" description="当前自动化链路没有明显结构性问题，可以继续关注单个作业的 prompt 和投递策略。" />
+            <p className="helper-text top-gap">当前自动化链路没有明显结构性问题，可以继续挑一条任务做验证或优化 prompt。</p>
           )}
         </Panel>
+      ) : null}
 
-        <Panel title="推荐下一步" subtitle="把新手最常走的自动化路径前置，减少一上来就掉进长列表或原始回执。">
-          <div className="list-stack">
-            <div className="list-card">
-              <div className="list-card-title">
-                <strong>先确认作业能不能闭环运行</strong>
-                <Pill tone={jobs.length > 0 ? 'good' : 'warn'}>
-                  {jobs.length > 0 ? `${jobs.length} 条作业` : '建议先创建'}
-                </Pill>
-              </div>
-              <p>先去作业与闭环里看当前最重要的一条任务，再决定是立即触发、修调度，还是补技能与通道。</p>
-              <Toolbar>
-                <Button kind="primary" onClick={() => setActiveTab('jobs')}>进入作业工作台</Button>
-                <Button onClick={openCreateEditor}>新建作业</Button>
-              </Toolbar>
-            </div>
-
-            <div className="list-card">
-              <div className="list-card-title">
-                <strong>再补技能、记忆和模型能力面</strong>
-                <Pill tone={missingReferencedSkills.length === 0 && runtime?.config.memoryEnabled ? 'good' : 'warn'}>
-                  {missingReferencedSkills.length === 0 ? '能力面可用' : '建议先补齐'}
-                </Pill>
-              </div>
-              <p>自动化不是只有调度，还要确认 skills 能找到、memory 已打开、模型和 provider 能稳定响应。</p>
-              <Toolbar>
-                <Button onClick={() => navigate('skills')}>技能工作台</Button>
-                <Button onClick={() => navigate('memory')}>记忆工作台</Button>
-                <Button onClick={() => navigate('config')}>配置中心</Button>
-              </Toolbar>
-            </div>
-
-            <div className="list-card">
-              <div className="list-card-title">
-                <strong>最后再看日志和投递链路</strong>
-                <Pill tone={runtime?.gateway?.gatewayState === 'running' || remoteJobs.length === 0 ? 'good' : 'warn'}>
-                  {remoteJobs.length > 0 ? `${remoteJobs.length} 个远端作业` : '本地为主'}
-                </Pill>
-              </div>
-              <p>如果任务没跑通，优先去日志页和诊断页看结果，再决定是否回到这里改调度或删作业。</p>
-              <Toolbar>
-                <Button onClick={() => navigate('logs')}>日志查看</Button>
-                <Button onClick={() => navigate('diagnostics')}>诊断页</Button>
-                <Button onClick={() => navigate('gateway')}>网关工作台</Button>
-              </Toolbar>
-            </div>
+      {overviewView === 'links' ? (
+        <Panel title="辅助入口" subtitle="文件定位和跨工作台联动都收在这里，需要时再点进对应页面，不再占主流程。">
+          <div className="workspace-shortcut-grid dashboard-launcher-grid">
+            <button
+              type="button"
+              className="workspace-shortcut-card dashboard-shortcut-card"
+              onClick={() => snapshot?.jobsPath && void openInFinder(snapshot.jobsPath, 'jobs.json', true)}
+              disabled={!snapshot?.jobsPath || runningAction !== null}
+            >
+              <strong><span className="dashboard-shortcut-icon">📄</span>定位 jobs.json</strong>
+              <span>{snapshot?.jobsPath || '当前还没有定位到 jobs.json'}</span>
+            </button>
+            <button type="button" className="workspace-shortcut-card dashboard-shortcut-card" onClick={() => navigate('extensions')}>
+              <strong><span className="dashboard-shortcut-icon">🛠️</span>看扩展与工具</strong>
+              <span>{runtime?.config.toolsets.length ? runtime.config.toolsets.join(' / ') : 'toolsets 还未配置'} · provider {runtime?.config.memoryProvider || 'builtin-file'}</span>
+            </button>
+            <button type="button" className="workspace-shortcut-card dashboard-shortcut-card" onClick={() => navigate('gateway')}>
+              <strong><span className="dashboard-shortcut-icon">📡</span>看网关与投递</strong>
+              <span>{remoteJobs.length > 0 ? `${remoteJobs.length} 个远端作业可能继续依赖 Gateway` : '当前没有明显的远端投递压力'}</span>
+            </button>
+            <button type="button" className="workspace-shortcut-card dashboard-shortcut-card" onClick={() => navigate('diagnostics')}>
+              <strong><span className="dashboard-shortcut-icon">🩺</span>继续做诊断</strong>
+              <span>{failingJobs.length > 0 ? '先把当前失败作业带去诊断页继续排查' : '需要更深判断时，再去诊断页做完整体检'}</span>
+            </button>
           </div>
+          <p className="helper-text top-gap">这些都是按需入口，不再以大段 action card 的方式堆满总览页。</p>
         </Panel>
-      </div>
-
-      <Panel title="关键材料与去向" subtitle="低频的文件定位和辅助入口收在这里，需要时再下钻，不占主流程。">
-        <div className="control-card-grid">
-          <section className="action-card action-card-compact">
-            <div className="action-card-header">
-              <div>
-                <p className="eyebrow">Artifacts</p>
-                <h3 className="action-card-title">作业文件与目录</h3>
-              </div>
-              <Pill tone={snapshot?.jobsPath ? 'good' : 'warn'}>
-                {snapshot?.jobsPath ? '已发现' : '未检测到'}
-              </Pill>
-            </div>
-            <p className="action-card-copy">
-              需要核对原始文件时，再去定位 `jobs.json` 和 cron 目录，避免新手一开始就被文件路径打断。
-            </p>
-            <Toolbar>
-              <Button
-                onClick={() => snapshot?.jobsPath && void openInFinder(snapshot.jobsPath, 'jobs.json', true)}
-                disabled={!snapshot?.jobsPath || runningAction !== null}
-              >
-                定位 jobs.json
-              </Button>
-              <Button
-                onClick={() => snapshot?.jobsPath && void openInFinder(snapshot.jobsPath.replace(/\/jobs\.json$/, ''), 'cron 目录')}
-                disabled={!snapshot?.jobsPath || runningAction !== null}
-              >
-                打开 cron 目录
-              </Button>
-            </Toolbar>
-          </section>
-
-          <section className="action-card action-card-compact">
-            <div className="action-card-header">
-              <div>
-                <p className="eyebrow">Health</p>
-                <h3 className="action-card-title">能力面与依赖</h3>
-              </div>
-              <Pill tone={missingReferencedSkills.length === 0 ? 'good' : 'warn'}>
-                {missingReferencedSkills.length === 0 ? '基础稳定' : '需要补齐'}
-              </Pill>
-            </div>
-            <p className="action-card-copy">
-              当前 toolsets 为 {runtime?.config.toolsets.length ? runtime.config.toolsets.join(', ') : '—'}，记忆 Provider 为 {runtime?.config.memoryProvider || 'builtin-file'}。
-            </p>
-            <Toolbar>
-              <Button onClick={() => navigate('extensions')}>扩展工作台</Button>
-              <Button onClick={() => navigate('skills')}>查看 Skills</Button>
-              <Button onClick={() => navigate('memory')}>查看 Memory</Button>
-            </Toolbar>
-          </section>
-
-          <section className="action-card action-card-compact">
-            <div className="action-card-header">
-              <div>
-                <p className="eyebrow">Delivery</p>
-                <h3 className="action-card-title">日志与排障</h3>
-              </div>
-              <Pill tone={failingJobs.length === 0 ? 'good' : 'bad'}>
-                {failingJobs.length === 0 ? '暂无明显失败' : `${failingJobs.length} 条异常`}
-              </Pill>
-            </div>
-            <p className="action-card-copy">
-              远端投递通常要和 Gateway、平台连接、日志回执一起看，排障时优先走客户端联动页面。
-            </p>
-            <Toolbar>
-              <Button onClick={() => navigate('logs')}>查看 Logs</Button>
-              <Button onClick={() => navigate('diagnostics')}>查看 Diagnostics</Button>
-              <Button onClick={() => navigate('gateway')}>查看 Gateway</Button>
-            </Toolbar>
-          </section>
-        </div>
-      </Panel>
+      ) : null}
     </div>
   );
 
   const jobsSection = (
     <div className="page-stack">
       <Panel
-        title="作业筛选与入口"
-        subtitle="先缩小范围，再决定是立即触发、补技能、修调度，还是去日志和诊断页继续追。"
+        title="作业工作面"
+        subtitle="列表选择和焦点详情不再同屏摊开，先选一种工作模式再继续。"
         aside={(
           <Toolbar>
-            <input
-              className="search-input"
-              placeholder="搜索名称、prompt、skill、delivery"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-            <select
-              className="select-input"
-              value={stateFilter}
-              onChange={(event) => setStateFilter(event.target.value)}
+            <Button kind="primary" onClick={openCreateEditor}>新建作业</Button>
+            <Button
+              onClick={() => {
+                setEditorView('output');
+                setActiveTab('editor');
+              }}
             >
-              <option value="all">全部状态</option>
-              <option value="scheduled">scheduled</option>
-              <option value="paused">paused</option>
-              <option value="completed">completed</option>
-              <option value="error">error</option>
-            </select>
+              最近回执
+            </Button>
           </Toolbar>
         )}
       >
-        <div className="detail-list compact">
-          <KeyValueRow label="当前命中" value={`${filteredJobs.length}/${jobs.length}`} />
-          <KeyValueRow label="已启用" value={enabledCount} />
-          <KeyValueRow label="远端投递" value={remoteJobs.length} />
-          <KeyValueRow label="异常作业" value={failingJobs.length} />
+        <div className="workspace-shortcut-grid dashboard-launcher-grid">
+          <button
+            type="button"
+            className={`workspace-shortcut-card dashboard-shortcut-card ${jobsWorkspaceView === 'pick' ? 'active' : ''}`}
+            onClick={() => setJobsWorkspaceView('pick')}
+          >
+            <strong><span className="dashboard-shortcut-icon">🗂️</span>选择作业</strong>
+            <span>{filteredJobs.length > 0 ? `${filteredJobs.length} 条候选作业，先锁定一条再看详情` : '当前没有匹配作业'}</span>
+          </button>
+          <button
+            type="button"
+            className={`workspace-shortcut-card dashboard-shortcut-card ${jobsWorkspaceView === 'focus' ? 'active' : ''}`}
+            onClick={() => setJobsWorkspaceView('focus')}
+          >
+            <strong><span className="dashboard-shortcut-icon">🎯</span>查看焦点</strong>
+            <span>{selectedJob ? `${selectedJob.name} · ${selectedJob.state}` : filteredJobs.length > 0 ? '先从列表选择一条作业' : '当前没有可查看的焦点任务'}</span>
+          </button>
+          <button type="button" className="workspace-shortcut-card dashboard-shortcut-card" onClick={openCreateEditor}>
+            <strong><span className="dashboard-shortcut-icon">➕</span>新建作业</strong>
+            <span>新增自动化任务时，表单和风险操作都继续收在“编辑与回执”里</span>
+          </button>
+          <button
+            type="button"
+            className="workspace-shortcut-card dashboard-shortcut-card"
+            onClick={() => {
+              setShowFilters((current) => !current);
+              setJobsWorkspaceView('pick');
+            }}
+          >
+            <strong><span className="dashboard-shortcut-icon">🔎</span>高频筛选</strong>
+            <span>{showFilters ? '当前已展开名称 / skill / delivery / 状态筛选' : '只在需要缩小范围时再展开筛选器'}</span>
+          </button>
         </div>
-        <Toolbar>
-          <Button onClick={() => navigate('logs')}>查看 Logs</Button>
-          <Button onClick={() => navigate('diagnostics')}>查看 Diagnostics</Button>
-          <Button onClick={() => navigate('config')}>检查 Config</Button>
-          {lastCommand ? <Button onClick={() => setActiveTab('editor')}>查看最近回执</Button> : null}
-        </Toolbar>
-        <p className="helper-text">
-          推荐顺序：先在这里锁定一条作业，再看它和 skills、memory、gateway 的关系；只有在需要改写或删除时，才切到“新建与命令输出”。
+        <p className="helper-text top-gap">
+          默认顺序：先在“选择作业”里锁定目标，再切到“查看焦点”；只有在需要改写或删除时，才切到“编辑与回执”。
         </p>
       </Panel>
 
-      <div className="two-column wide-left">
-        <Panel title="作业列表" subtitle="优先定位当前 profile 里最值得先验证，或最可能出问题的一条作业。">
+      {jobsWorkspaceView === 'pick' ? (
+        <Panel
+          title="作业列表"
+          subtitle="默认只显示最值得先看的前几条任务，筛选器也只在需要时展开。"
+          aside={(
+            <Toolbar>
+              {filteredJobs.length > DEFAULT_VISIBLE_CRON_JOBS ? (
+                <Button onClick={() => setShowAllJobs((current) => !current)}>
+                  {showAllJobs ? '收起列表' : `展开更多${hiddenJobCount > 0 ? `（${hiddenJobCount}）` : ''}`}
+                </Button>
+              ) : null}
+              <Button onClick={() => void load(selectedJob?.id ?? undefined)}>刷新列表</Button>
+            </Toolbar>
+          )}
+        >
+          {showFilters ? (
+            <Toolbar>
+              <input
+                className="search-input"
+                placeholder="搜索名称、prompt、skill、delivery"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+              <select
+                className="select-input"
+                value={stateFilter}
+                onChange={(event) => setStateFilter(event.target.value)}
+              >
+                <option value="all">全部状态</option>
+                <option value="scheduled">scheduled</option>
+                <option value="paused">paused</option>
+                <option value="completed">completed</option>
+                <option value="error">error</option>
+              </select>
+            </Toolbar>
+          ) : null}
+
+          <div className="workspace-summary-strip">
+            <div className="summary-mini-card">
+              <span className="summary-mini-label">当前命中</span>
+              <strong className="summary-mini-value">{`${filteredJobs.length}/${jobs.length}`}</strong>
+              <span className="summary-mini-meta">先收窄范围，再锁定最值得先验证的一条任务</span>
+            </div>
+            <div className="summary-mini-card">
+              <span className="summary-mini-label">已启用</span>
+              <strong className="summary-mini-value">{enabledCount}</strong>
+              <span className="summary-mini-meta">暂停态不会参与当前自动化主流程</span>
+            </div>
+            <div className="summary-mini-card">
+              <span className="summary-mini-label">远端投递</span>
+              <strong className="summary-mini-value">{remoteJobs.length}</strong>
+              <span className="summary-mini-meta">涉及消息平台时，优先联动网关和日志</span>
+            </div>
+            <div className="summary-mini-card">
+              <span className="summary-mini-label">异常作业</span>
+              <strong className="summary-mini-value">{failingJobs.length}</strong>
+              <span className="summary-mini-meta">已有异常时，建议优先看最近一条失败任务</span>
+            </div>
+          </div>
+
           {filteredJobs.length === 0 ? (
             <EmptyState
               title="暂无 cron 作业"
@@ -582,7 +675,7 @@ export function CronPage({ notify, profile, navigate }: PageProps) {
             />
           ) : (
             <div className="list-stack">
-              {filteredJobs.map((job) => {
+              {visibleJobs.map((job) => {
                 const missingSkills = job.skills.filter((name) => !skillNameSet.has(name));
                 return (
                   <button
@@ -590,7 +683,7 @@ export function CronPage({ notify, profile, navigate }: PageProps) {
                     key={job.id}
                     onClick={() => {
                       setSelectedId(job.id);
-                      setActiveTab('jobs');
+                      setJobsWorkspaceView('focus');
                     }}
                     type="button"
                   >
@@ -612,11 +705,16 @@ export function CronPage({ notify, profile, navigate }: PageProps) {
               })}
             </div>
           )}
+          {hiddenJobCount > 0 && !showAllJobs ? (
+            <p className="helper-text top-gap">其余 {hiddenJobCount} 条任务已收起，需要时再展开查看。</p>
+          ) : null}
         </Panel>
+      ) : null}
 
+      {jobsWorkspaceView === 'focus' ? (
         <Panel
-          title="作业详情与闭环"
-          subtitle="除了调度信息，这里还会展示这条作业和 skills、memory、gateway 之间的关系。"
+          title="当前焦点作业"
+          subtitle={selectedJob ? '这里只保留当前作业的简明摘要和一个按需展开的子模块。' : '先从左侧列表选一条作业，再继续看详情。'}
           aside={selectedJob ? (
             <Toolbar>
               <Button onClick={openEditEditor} disabled={runningAction !== null}>编辑</Button>
@@ -644,249 +742,341 @@ export function CronPage({ notify, profile, navigate }: PageProps) {
         >
           {selectedJob ? (
             <div className="page-stack">
-              <div className="detail-list">
-                <KeyValueRow label="ID" value={selectedJob.id} />
-                <KeyValueRow label="状态" value={selectedJob.state} />
-                <KeyValueRow label="启用" value={String(selectedJob.enabled)} />
-                <KeyValueRow label="调度" value={selectedJob.scheduleDisplay} />
-                <KeyValueRow label="调度输入" value={selectedJob.scheduleInput || '—'} />
-                <KeyValueRow label="下次运行" value={formatTimestamp(selectedJob.nextRunAt)} />
-                <KeyValueRow label="上次运行" value={formatTimestamp(selectedJob.lastRunAt)} />
-                <KeyValueRow label="交付目标" value={selectedJob.deliver} />
-                <KeyValueRow label="技能" value={selectedJob.skills.length ? selectedJob.skills.join(', ') : '—'} />
-                <KeyValueRow
-                  label="重复次数"
-                  value={selectedJob.repeatTimes == null ? '∞' : `${selectedJob.repeatCompleted}/${selectedJob.repeatTimes}`}
-                />
-                <KeyValueRow label="脚本" value={selectedJob.script || '—'} />
-                <KeyValueRow label="最后状态" value={selectedJob.lastStatus || '—'} />
-                <KeyValueRow label="最后错误" value={selectedJob.lastError || '—'} />
-                <KeyValueRow label="投递错误" value={selectedJob.lastDeliveryError || '—'} />
+              <div className="workspace-summary-strip">
+                <div className="summary-mini-card">
+                  <span className="summary-mini-label">状态</span>
+                  <strong className="summary-mini-value">{selectedJob.state}</strong>
+                  <span className="summary-mini-meta">{selectedJob.enabled ? '当前处于启用态' : '当前未启用'}</span>
+                </div>
+                <div className="summary-mini-card">
+                  <span className="summary-mini-label">调度</span>
+                  <strong className="summary-mini-value">{selectedJob.scheduleDisplay}</strong>
+                  <span className="summary-mini-meta">下次 {formatTimestamp(selectedJob.nextRunAt)}</span>
+                </div>
+                <div className="summary-mini-card">
+                  <span className="summary-mini-label">投递</span>
+                  <strong className="summary-mini-value">{selectedJob.deliver}</strong>
+                  <span className="summary-mini-meta">{isRemoteDelivery(selectedJob.deliver) ? '远端投递更依赖 Gateway 和平台连通性' : '当前更偏本地执行或原地输出'}</span>
+                </div>
+                <div className="summary-mini-card">
+                  <span className="summary-mini-label">技能</span>
+                  <strong className="summary-mini-value">{selectedJob.skills.length === 0 ? '未绑定' : `${selectedMatchedSkills.length}/${selectedJob.skills.length}`}</strong>
+                  <span className="summary-mini-meta">{selectedMissingSkills.length > 0 ? `${selectedMissingSkills.length} 个技能未匹配` : '当前技能引用已对齐'}</span>
+                </div>
               </div>
 
-              <Panel className="panel-nested" title="自动化闭环">
-                <div className="health-grid">
-                  <section className="health-card">
-                    <div className="health-card-header">
-                      <strong>Prompt / Script</strong>
-                      <Pill tone={selectedJob.prompt || selectedJob.script ? 'good' : 'warn'}>
-                        {selectedJob.script ? '带脚本' : selectedJob.prompt ? 'Prompt 驱动' : '空'}
-                      </Pill>
-                    </div>
-                    <p>{selectedJob.script ? `脚本: ${selectedJob.script}` : '当前以 Hermes prompt 作为任务主体。'}</p>
-                  </section>
-                  <section className="health-card">
-                    <div className="health-card-header">
-                      <strong>Skills</strong>
-                      <Pill tone={selectedJob.skills.length === 0 ? 'neutral' : selectedMissingSkills.length === 0 ? 'good' : 'bad'}>
-                        {selectedJob.skills.length === 0 ? '未绑定' : `${selectedMatchedSkills.length}/${selectedJob.skills.length} 已匹配`}
-                      </Pill>
-                    </div>
-                    <p>{selectedJob.skills.length === 0 ? '当前没有显式 skill 绑定。' : selectedJob.skills.join('、')}</p>
-                  </section>
-                  <section className="health-card">
-                    <div className="health-card-header">
-                      <strong>Memory</strong>
-                      <Pill tone={runtime?.config.memoryEnabled ? 'good' : 'warn'}>
-                        {runtime?.config.memoryEnabled ? '已开启' : '已关闭'}
-                      </Pill>
-                    </div>
-                    <p>Provider {runtime?.config.memoryProvider || 'builtin-file'} · 用户画像 {String(runtime?.config.userProfileEnabled ?? false)}</p>
-                  </section>
-                  <section className="health-card">
-                    <div className="health-card-header">
-                      <strong>Delivery / Gateway</strong>
-                      <Pill tone={!isRemoteDelivery(selectedJob.deliver) || runtime?.gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
-                        {isRemoteDelivery(selectedJob.deliver) ? '远端投递' : '本地投递'}
-                      </Pill>
-                    </div>
-                    <p>{isRemoteDelivery(selectedJob.deliver) ? '远端投递通常依赖 gateway 和平台连接。' : '当前作业更偏本地执行或原地输出。'}</p>
-                  </section>
-                </div>
+              <div className="workspace-shortcut-grid dashboard-launcher-grid">
+                {CRON_JOB_VIEWS.map((item) => {
+                  const meta = item.key === 'summary'
+                    ? `${selectedJob.id} · ${selectedJob.scheduleInput || selectedJob.scheduleDisplay}`
+                    : item.key === 'closure'
+                      ? (selectedMissingSkills.length > 0 ? `${selectedMissingSkills.length} 个技能缺口待补齐` : 'skills / memory / gateway 关系可继续核对')
+                      : item.key === 'prompt'
+                        ? truncate(selectedJob.prompt || '当前没有 prompt 内容', 72)
+                        : (selectedJob.lastError || selectedJob.lastDeliveryError || selectedJob.lastStatus || '当前没有新的错误或运行痕迹');
 
-                {selectedMissingSkills.length > 0 ? (
-                  <div className="warning-stack">
-                    <div className="warning-item">
-                      这条作业引用了缺失技能：{selectedMissingSkills.join('、')}。建议先去技能页或 Finder 确认 skill 文件是否存在。
-                    </div>
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      className={`workspace-shortcut-card dashboard-shortcut-card ${jobView === item.key ? 'active' : ''}`}
+                      onClick={() => setJobView(item.key)}
+                    >
+                      <strong><span className="dashboard-shortcut-icon">{item.icon}</span>{item.label}</strong>
+                      <span>{meta}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="helper-text top-gap">{activeJobView.hint}</p>
+
+              {jobView === 'summary' ? (
+                <Panel className="panel-nested" title="基础摘要" subtitle="这里只保留最常用的调度字段和最近运行信息。">
+                  <div className="detail-list compact">
+                    <KeyValueRow label="ID" value={selectedJob.id} />
+                    <KeyValueRow label="调度输入" value={selectedJob.scheduleInput || '—'} />
+                    <KeyValueRow label="上次运行" value={formatTimestamp(selectedJob.lastRunAt)} />
+                    <KeyValueRow label="重复次数" value={selectedJob.repeatTimes == null ? '∞' : `${selectedJob.repeatCompleted}/${selectedJob.repeatTimes}`} />
+                    <KeyValueRow label="脚本" value={selectedJob.script || '—'} />
+                    <KeyValueRow label="最后状态" value={selectedJob.lastStatus || '—'} />
                   </div>
-                ) : null}
+                </Panel>
+              ) : null}
 
-                <Toolbar>
-                  <Button onClick={() => navigate('skills')}>查看 Skills</Button>
-                  <Button onClick={() => navigate('memory')}>查看 Memory</Button>
-                  <Button onClick={() => navigate('logs')}>查看 Logs</Button>
-                  <Button onClick={() => navigate('diagnostics')}>查看 Diagnostics</Button>
-                </Toolbar>
-              </Panel>
+              {jobView === 'closure' ? (
+                <Panel className="panel-nested" title="自动化闭环" subtitle="需要判断 Prompt、Skills、Memory 和 Delivery 是不是同一条链路时，再展开这里。">
+                  <div className="health-grid">
+                    <section className="health-card">
+                      <div className="health-card-header">
+                        <strong>Prompt / Script</strong>
+                        <Pill tone={selectedJob.prompt || selectedJob.script ? 'good' : 'warn'}>
+                          {selectedJob.script ? '带脚本' : selectedJob.prompt ? 'Prompt 驱动' : '空'}
+                        </Pill>
+                      </div>
+                      <p>{selectedJob.script ? `脚本: ${selectedJob.script}` : '当前以 Hermes prompt 作为任务主体。'}</p>
+                    </section>
+                    <section className="health-card">
+                      <div className="health-card-header">
+                        <strong>Skills</strong>
+                        <Pill tone={selectedJob.skills.length === 0 ? 'neutral' : selectedMissingSkills.length === 0 ? 'good' : 'bad'}>
+                          {selectedJob.skills.length === 0 ? '未绑定' : `${selectedMatchedSkills.length}/${selectedJob.skills.length} 已匹配`}
+                        </Pill>
+                      </div>
+                      <p>{selectedJob.skills.length === 0 ? '当前没有显式 skill 绑定。' : selectedJob.skills.join('、')}</p>
+                    </section>
+                    <section className="health-card">
+                      <div className="health-card-header">
+                        <strong>Memory</strong>
+                        <Pill tone={runtime?.config.memoryEnabled ? 'good' : 'warn'}>
+                          {runtime?.config.memoryEnabled ? '已开启' : '已关闭'}
+                        </Pill>
+                      </div>
+                      <p>Provider {runtime?.config.memoryProvider || 'builtin-file'} · 用户画像 {String(runtime?.config.userProfileEnabled ?? false)}</p>
+                    </section>
+                    <section className="health-card">
+                      <div className="health-card-header">
+                        <strong>Delivery / Gateway</strong>
+                        <Pill tone={!isRemoteDelivery(selectedJob.deliver) || runtime?.gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
+                          {isRemoteDelivery(selectedJob.deliver) ? '远端投递' : '本地投递'}
+                        </Pill>
+                      </div>
+                      <p>{isRemoteDelivery(selectedJob.deliver) ? '远端投递通常依赖 gateway 和平台连接。' : '当前作业更偏本地执行或原地输出。'}</p>
+                    </section>
+                  </div>
 
-              <Panel className="panel-nested" title="Prompt">
-                <pre className="code-block">{selectedJob.prompt || '无 prompt 内容'}</pre>
-              </Panel>
+                  {selectedMissingSkills.length > 0 ? (
+                    <div className="warning-stack top-gap">
+                      <div className="warning-item">
+                        这条作业引用了缺失技能：{selectedMissingSkills.join('、')}。建议先去技能页或 Finder 确认 skill 文件是否存在。
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <Toolbar>
+                    <Button onClick={() => navigate('skills')}>查看 Skills</Button>
+                    <Button onClick={() => navigate('memory')}>查看 Memory</Button>
+                    <Button onClick={() => navigate('logs')}>查看 Logs</Button>
+                    <Button onClick={() => navigate('diagnostics')}>查看 Diagnostics</Button>
+                  </Toolbar>
+                </Panel>
+              ) : null}
+
+              {jobView === 'prompt' ? (
+                <Panel className="panel-nested" title="Prompt" subtitle="这里只保留任务正文，不和其他运行信息混排。">
+                  <pre className="code-block">{selectedJob.prompt || '无 prompt 内容'}</pre>
+                </Panel>
+              ) : null}
+
+              {jobView === 'history' ? (
+                <Panel className="panel-nested" title="运行痕迹" subtitle="最近状态、错误和投递异常都集中在这里。">
+                  <div className="detail-list compact">
+                    <KeyValueRow label="最后状态" value={selectedJob.lastStatus || '—'} />
+                    <KeyValueRow label="最后错误" value={selectedJob.lastError || '—'} />
+                    <KeyValueRow label="投递错误" value={selectedJob.lastDeliveryError || '—'} />
+                    <KeyValueRow label="上次运行" value={formatTimestamp(selectedJob.lastRunAt)} />
+                    <KeyValueRow label="下次运行" value={formatTimestamp(selectedJob.nextRunAt)} />
+                    <KeyValueRow label="重复进度" value={selectedJob.repeatTimes == null ? '∞' : `${selectedJob.repeatCompleted}/${selectedJob.repeatTimes}`} />
+                  </div>
+                </Panel>
+              ) : null}
             </div>
           ) : (
-            <EmptyState title="未选择作业" description="从左侧列表选择一条 cron 作业查看详情与闭环关系。" />
+            <div className="page-stack">
+              <EmptyState title="未选择作业" description="先切回“选择作业”锁定一条 cron 任务，再回来查看详情与闭环关系。" />
+              <Toolbar>
+                <Button kind="primary" onClick={() => setJobsWorkspaceView('pick')}>回到选择作业</Button>
+              </Toolbar>
+            </div>
           )}
         </Panel>
-      </div>
+      ) : null}
     </div>
   );
 
   const editorSection = (
     <div className="page-stack">
       <Panel
-        title={editorMode === 'create' ? '新建作业' : editorMode === 'edit' ? '编辑作业' : '作业编辑器'}
-        subtitle={editorMode
-          ? '把新增、修改和删除确认统一收在这里，避免把高风险操作混在主工作流里。'
-          : '只有在需要调整 jobs.json 内容、删除作业或核对原始回执时，再进入这里。'}
-        className="panel-nested"
-        aside={editorMode ? (
-          <Toolbar>
-            <Button onClick={closeEditor} disabled={runningAction !== null}>取消</Button>
-            <Button kind="primary" onClick={() => void submitEditor()} disabled={runningAction !== null}>
-              {runningAction === 'create' || runningAction === 'edit'
-                ? '提交中…'
-                : editorMode === 'create' ? '创建' : '保存修改'}
-            </Button>
-          </Toolbar>
-        ) : (
+        title="编辑与回执入口"
+        subtitle="表单、删除确认和原始回执默认一次只展开一个子模块，避免高风险操作和长输出同时挤在眼前。"
+        aside={(
           <Toolbar>
             <Button kind="primary" onClick={openCreateEditor}>新建作业</Button>
             <Button onClick={openEditEditor} disabled={!selectedJob}>编辑当前</Button>
-            <Button onClick={() => setActiveTab('jobs')} disabled={!selectedJob}>回到作业列表</Button>
+            <Button onClick={() => setActiveTab('jobs')} disabled={!selectedJob}>回到作业页</Button>
           </Toolbar>
         )}
       >
-        {editorMode ? (
-          <>
-            <div className="form-grid">
-              <label className="field-stack">
-                <span>名称</span>
-                <input
-                  className="search-input"
-                  value={draft.name}
-                  onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
-                  placeholder="日报汇总"
-                />
-              </label>
+        <div className="workspace-shortcut-grid dashboard-launcher-grid">
+          {CRON_EDITOR_VIEWS.map((item) => {
+            const meta = item.key === 'form'
+              ? (editorMode ? `${editorMode === 'create' ? '正在新建' : '正在编辑'} ${selectedJob?.name ?? '作业'}` : selectedJob ? `当前焦点：${selectedJob.name}` : '先新建或选中一条作业')
+              : item.key === 'danger'
+                ? (selectedJob ? `删除确认会要求输入 ${selectedJob.id}` : '先选择一条作业')
+                : (lastCommand ? `${lastCommand.command} · exit ${lastCommand.exitCode}` : '最近还没有 Hermes CLI 回执');
 
-              <label className="field-stack">
-                <span>调度</span>
-                <input
-                  className="search-input"
-                  value={draft.schedule}
-                  onChange={(event) => setDraft((current) => ({ ...current, schedule: event.target.value }))}
-                  placeholder="every 2h / 0 9 * * * / 2026-04-12T09:00:00"
-                />
-              </label>
-
-              <label className="field-stack">
-                <span>交付</span>
-                <input
-                  className="search-input"
-                  value={draft.deliver}
-                  onChange={(event) => setDraft((current) => ({ ...current, deliver: event.target.value }))}
-                  placeholder="local / origin / telegram:chat_id"
-                />
-              </label>
-
-              <label className="field-stack">
-                <span>重复次数</span>
-                <input
-                  className="search-input"
-                  value={draft.repeat}
-                  onChange={(event) => setDraft((current) => ({ ...current, repeat: event.target.value }))}
-                  placeholder="留空表示无限或保持现状"
-                />
-              </label>
-
-              <label className="field-stack">
-                <span>技能</span>
-                <input
-                  className="search-input"
-                  value={draft.skills}
-                  onChange={(event) => setDraft((current) => ({ ...current, skills: event.target.value }))}
-                  placeholder="skill-a, skill-b"
-                  disabled={draft.clearSkills}
-                />
-              </label>
-
-              <label className="field-stack">
-                <span>脚本</span>
-                <input
-                  className="search-input"
-                  value={draft.script}
-                  onChange={(event) => setDraft((current) => ({ ...current, script: event.target.value }))}
-                  placeholder="/absolute/path/to/script.py"
-                  disabled={draft.clearScript}
-                />
-              </label>
-            </div>
-
-            <div className="checkbox-row">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={draft.clearSkills}
-                  onChange={(event) => setDraft((current) => ({
-                    ...current,
-                    clearSkills: event.target.checked,
-                  }))}
-                />
-                <span>清空技能列表</span>
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={draft.clearScript}
-                  onChange={(event) => setDraft((current) => ({
-                    ...current,
-                    clearScript: event.target.checked,
-                  }))}
-                />
-                <span>清空脚本</span>
-              </label>
-            </div>
-
-            <label className="field-stack">
-              <span>Prompt</span>
-              <textarea
-                className="editor"
-                value={draft.prompt}
-                onChange={(event) => setDraft((current) => ({ ...current, prompt: event.target.value }))}
-                spellCheck={false}
-                placeholder="输入自包含 prompt，或搭配 skill 作为任务说明。"
-              />
-            </label>
-
-            <p className="helper-text">
-              `schedule` 直接对齐 Hermes CLI，支持 `30m`、`every 2h`、`0 9 * * *` 和 ISO 时间。
-            </p>
-          </>
-        ) : (
-          <div className="page-stack">
-            <EmptyState
-              title="编辑器待命"
-              description="先从作业列表选中一条任务再编辑，或者直接新建一条新的自动化任务。"
-            />
-            {selectedJob ? (
-              <div className="detail-list compact">
-                <KeyValueRow label="当前作业" value={selectedJob.name} />
-                <KeyValueRow label="调度" value={selectedJob.scheduleDisplay} />
-                <KeyValueRow label="交付" value={selectedJob.deliver} />
-                <KeyValueRow label="技能" value={selectedJob.skills.length ? selectedJob.skills.join(', ') : '—'} />
-              </div>
-            ) : null}
-            <Toolbar>
-              <Button onClick={() => navigate('config')}>核对配置页</Button>
-              <Button onClick={() => navigate('skills')}>核对 Skills</Button>
-              <Button onClick={() => navigate('logs')}>查看 Logs</Button>
-            </Toolbar>
-          </div>
-        )}
+            return (
+              <button
+                key={item.key}
+                type="button"
+                className={`workspace-shortcut-card dashboard-shortcut-card ${editorView === item.key ? 'active' : ''}`}
+                onClick={() => setEditorView(item.key)}
+              >
+                <strong><span className="dashboard-shortcut-icon">{item.icon}</span>{item.label}</strong>
+                <span>{meta}</span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="helper-text top-gap">{activeEditorView.hint}</p>
       </Panel>
 
-      <div className="two-column wide-left">
+      {editorView === 'form' ? (
+        <Panel
+          title={editorMode === 'create' ? '新建作业' : editorMode === 'edit' ? '编辑作业' : '作业编辑器'}
+          subtitle={editorMode
+            ? '新增和修改都只在这里完成，避免把表单、删除确认和回执输出混在一起。'
+            : '只有在需要调整 jobs.json 内容时，再进入这一层做编辑。'}
+          className="panel-nested"
+          aside={(
+            <Toolbar>
+              {editorMode ? <Button onClick={() => closeEditor()} disabled={runningAction !== null}>取消</Button> : null}
+              <Button kind="primary" onClick={() => void submitEditor()} disabled={runningAction !== null || editorMode === null}>
+                {runningAction === 'create' || runningAction === 'edit' ? '提交中…' : editorMode === 'create' ? '创建' : '保存修改'}
+              </Button>
+            </Toolbar>
+          )}
+        >
+          {editorMode ? (
+            <>
+              <div className="form-grid">
+                <label className="field-stack">
+                  <span>名称</span>
+                  <input
+                    className="search-input"
+                    value={draft.name}
+                    onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+                    placeholder="日报汇总"
+                  />
+                </label>
+
+                <label className="field-stack">
+                  <span>调度</span>
+                  <input
+                    className="search-input"
+                    value={draft.schedule}
+                    onChange={(event) => setDraft((current) => ({ ...current, schedule: event.target.value }))}
+                    placeholder="every 2h / 0 9 * * * / 2026-04-12T09:00:00"
+                  />
+                </label>
+
+                <label className="field-stack">
+                  <span>交付</span>
+                  <input
+                    className="search-input"
+                    value={draft.deliver}
+                    onChange={(event) => setDraft((current) => ({ ...current, deliver: event.target.value }))}
+                    placeholder="local / origin / telegram:chat_id"
+                  />
+                </label>
+
+                <label className="field-stack">
+                  <span>重复次数</span>
+                  <input
+                    className="search-input"
+                    value={draft.repeat}
+                    onChange={(event) => setDraft((current) => ({ ...current, repeat: event.target.value }))}
+                    placeholder="留空表示无限或保持现状"
+                  />
+                </label>
+
+                <label className="field-stack">
+                  <span>技能</span>
+                  <input
+                    className="search-input"
+                    value={draft.skills}
+                    onChange={(event) => setDraft((current) => ({ ...current, skills: event.target.value }))}
+                    placeholder="skill-a, skill-b"
+                    disabled={draft.clearSkills}
+                  />
+                </label>
+
+                <label className="field-stack">
+                  <span>脚本</span>
+                  <input
+                    className="search-input"
+                    value={draft.script}
+                    onChange={(event) => setDraft((current) => ({ ...current, script: event.target.value }))}
+                    placeholder="/absolute/path/to/script.py"
+                    disabled={draft.clearScript}
+                  />
+                </label>
+              </div>
+
+              <div className="checkbox-row">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={draft.clearSkills}
+                    onChange={(event) => setDraft((current) => ({
+                      ...current,
+                      clearSkills: event.target.checked,
+                    }))}
+                  />
+                  <span>清空技能列表</span>
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={draft.clearScript}
+                    onChange={(event) => setDraft((current) => ({
+                      ...current,
+                      clearScript: event.target.checked,
+                    }))}
+                  />
+                  <span>清空脚本</span>
+                </label>
+              </div>
+
+              <label className="field-stack">
+                <span>Prompt</span>
+                <textarea
+                  className="editor"
+                  value={draft.prompt}
+                  onChange={(event) => setDraft((current) => ({ ...current, prompt: event.target.value }))}
+                  spellCheck={false}
+                  placeholder="输入自包含 prompt，或搭配 skill 作为任务说明。"
+                />
+              </label>
+
+              <p className="helper-text">
+                `schedule` 直接对齐 Hermes CLI，支持 `30m`、`every 2h`、`0 9 * * *` 和 ISO 时间。
+              </p>
+            </>
+          ) : (
+            <div className="page-stack">
+              <EmptyState
+                title="编辑器待命"
+                description="先从作业页选中一条任务再编辑，或者直接新建一条新的自动化任务。"
+              />
+              {selectedJob ? (
+                <div className="detail-list compact">
+                  <KeyValueRow label="当前作业" value={selectedJob.name} />
+                  <KeyValueRow label="调度" value={selectedJob.scheduleDisplay} />
+                  <KeyValueRow label="交付" value={selectedJob.deliver} />
+                  <KeyValueRow label="技能" value={selectedJob.skills.length ? selectedJob.skills.join(', ') : '—'} />
+                </div>
+              ) : null}
+              <Toolbar>
+                <Button onClick={() => navigate('config')}>核对配置页</Button>
+                <Button onClick={() => navigate('skills')}>核对 Skills</Button>
+                <Button onClick={() => navigate('logs')}>查看 Logs</Button>
+              </Toolbar>
+            </div>
+          )}
+        </Panel>
+      ) : null}
+
+      {editorView === 'danger' ? (
         <Panel
           title="危险区"
           className="panel-nested panel-danger"
@@ -927,7 +1117,9 @@ export function CronPage({ notify, profile, navigate }: PageProps) {
             <EmptyState title="未选择作业" description="选择一条 cron 作业后才能进入删除确认。" />
           )}
         </Panel>
+      ) : null}
 
+      {editorView === 'output' ? (
         <Panel title="命令输出" className="panel-nested">
           {lastCommand ? (
             <>
@@ -942,7 +1134,7 @@ export function CronPage({ notify, profile, navigate }: PageProps) {
             <EmptyState title="尚未执行操作" description="这里会显示 create / edit / pause / resume / run / delete 的 Hermes CLI 输出。" />
           )}
         </Panel>
-      </div>
+      ) : null}
     </div>
   );
 
@@ -961,13 +1153,29 @@ export function CronPage({ notify, profile, navigate }: PageProps) {
         <p className="helper-text">
           一个 cron 作业真正跑通，不只是调度时间正确，还要看技能引用是否存在、memory 是否开启、gateway 是否能把结果投递出去。
         </p>
-        <div className="detail-list compact top-gap">
-          <KeyValueRow label="当前 Profile" value={profile} />
-          <KeyValueRow label="jobs.json" value={snapshot?.jobsPath ?? '—'} />
-          <KeyValueRow label="作业总数" value={jobs.length} />
-          <KeyValueRow label="已启用" value={enabledCount} />
-          <KeyValueRow label="远端投递" value={remoteJobs.length} />
-          <KeyValueRow label="缺失 Skill 引用" value={missingReferencedSkills.length} />
+        <div className="workspace-summary-strip top-gap">
+          <div className="summary-mini-card">
+            <span className="summary-mini-label">起步判断</span>
+            <strong className="summary-mini-value">{cronStartReadiness}</strong>
+            <span className="summary-mini-meta">{cronStartHint}</span>
+          </div>
+          <div className="summary-mini-card">
+            <span className="summary-mini-label">当前 Profile</span>
+            <strong className="summary-mini-value">{profile}</strong>
+            <span className="summary-mini-meta">{snapshot?.jobsPath ?? 'jobs.json 尚未定位'}</span>
+          </div>
+          <div className="summary-mini-card">
+            <span className="summary-mini-label">作业规模</span>
+            <strong className="summary-mini-value">{jobs.length === 0 ? '尚无作业' : `${jobs.length} 条作业`}</strong>
+            <span className="summary-mini-meta">{enabledCount} 已启用 · {failingJobs.length} 条异常</span>
+          </div>
+          <div className="summary-mini-card">
+            <span className="summary-mini-label">远端与技能</span>
+            <strong className="summary-mini-value">{remoteJobs.length} 远端 / {missingReferencedSkills.length} 缺口</strong>
+            <span className="summary-mini-meta">
+              {runtime?.config.memoryEnabled ? '记忆已开启' : '记忆关闭'} · {runtime?.config.memoryProvider || 'builtin-file'}
+            </span>
+          </div>
         </div>
       </Panel>
 

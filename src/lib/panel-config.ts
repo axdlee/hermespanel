@@ -5,29 +5,29 @@ export const NAV_GROUPS: Array<{
   items: Array<{ key: AppPageKey; label: string; eyebrow: string; icon: string }>;
 }> = [
   {
-    label: '概览',
+    label: '开始',
     items: [
       { key: 'dashboard', label: '仪表盘', eyebrow: 'Dashboard', icon: 'dashboard' },
-      { key: 'profiles', label: '实例管理', eyebrow: 'Profiles', icon: 'profiles' },
-      { key: 'gateway', label: 'Gateway', eyebrow: 'Gateway', icon: 'gateway' },
-      { key: 'diagnostics', label: '系统诊断', eyebrow: 'Diagnostics', icon: 'diagnostics' },
+      { key: 'profiles', label: '实例', eyebrow: 'Profiles', icon: 'profiles' },
+      { key: 'config', label: '配置', eyebrow: 'Config', icon: 'config' },
     ],
   },
   {
-    label: '配置',
+    label: '运行',
     items: [
-      { key: 'config', label: '配置中心', eyebrow: 'Config', icon: 'config' },
-      { key: 'extensions', label: '扩展工具', eyebrow: 'Extensions', icon: 'extensions' },
-      { key: 'skills', label: '技能工作台', eyebrow: 'Skills', icon: 'skills' },
-      { key: 'sessions', label: '会话浏览', eyebrow: 'Sessions', icon: 'sessions' },
-      { key: 'logs', label: '日志查看', eyebrow: 'Logs', icon: 'logs' },
+      { key: 'sessions', label: '会话', eyebrow: 'Sessions', icon: 'sessions' },
+      { key: 'logs', label: '日志', eyebrow: 'Logs', icon: 'logs' },
+      { key: 'diagnostics', label: '诊断', eyebrow: 'Diagnostics', icon: 'diagnostics' },
+      { key: 'gateway', label: '网关', eyebrow: 'Gateway', icon: 'gateway' },
+      { key: 'cron', label: '自动化', eyebrow: 'Scheduler', icon: 'cron' },
     ],
   },
   {
-    label: '数据',
+    label: '能力',
     items: [
-      { key: 'memory', label: '记忆文件', eyebrow: 'Memory', icon: 'memory' },
-      { key: 'cron', label: '定时任务', eyebrow: 'Scheduler', icon: 'cron' },
+      { key: 'skills', label: '技能', eyebrow: 'Skills', icon: 'skills' },
+      { key: 'extensions', label: '扩展', eyebrow: 'Extensions', icon: 'extensions' },
+      { key: 'memory', label: '记忆', eyebrow: 'Memory', icon: 'memory' },
     ],
   },
 ];

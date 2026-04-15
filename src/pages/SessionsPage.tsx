@@ -29,6 +29,9 @@ type RecentFilter = 'all' | '24h' | '7d' | '30d';
 type MessageFilter = 'all' | 'user' | 'assistant' | 'tool';
 type SignalTone = 'good' | 'warn' | 'bad' | 'neutral';
 type SessionsTabKey = 'overview' | 'analysis' | 'messages';
+type SessionsOverviewViewKey = 'launch' | 'status' | 'browser';
+type SessionsBrowserViewKey = 'pick' | 'focus';
+type SessionAnalysisViewKey = 'signals' | 'recommendations' | 'tools' | 'timeline';
 
 interface SessionSignal {
   key: string;
@@ -82,11 +85,45 @@ const UNTITLED_COMPLEX_MESSAGE_THRESHOLD = 10;
 const UNTITLED_COMPLEX_TOOL_THRESHOLD = 4;
 const GATEWAY_SOURCE_PATTERN = /(gateway|telegram|discord|slack|feishu|dingtalk|wechat|wecom|line|whatsapp|remote|bot)/i;
 const MEMORY_PATTERN = /(memory|memories|user|profile|soul)/i;
+const DEFAULT_SESSION_LIST_LIMIT = 8;
 
 const SESSIONS_TABS: Array<{ key: SessionsTabKey; label: string; hint: string }> = [
   { key: 'overview', label: '常用总览', hint: '先筛选会话、锁定目标，再看建议去向。' },
   { key: 'analysis', label: '风险与联动', hint: '查看工具聚合、风险信号和联动建议。' },
   { key: 'messages', label: '消息与回放', hint: '只看最终消息正文和内容筛选。' },
+];
+
+const SESSIONS_OVERVIEW_VIEWS: Array<{
+  key: SessionsOverviewViewKey;
+  label: string;
+  icon: string;
+  hint: string;
+}> = [
+  { key: 'launch', label: '常用去向', icon: '🚀', hint: '先决定是缩小范围、进风险页，还是直接回放消息。' },
+  { key: 'status', label: '当前判断', icon: '🌤️', hint: '先看命中数量和风险摘要，不把会话列表一起挤在同一层。' },
+  { key: 'browser', label: '会话浏览', icon: '🗂️', hint: '真正的列表浏览和当前焦点后置到这一层，需要时再展开。' },
+];
+
+const SESSIONS_BROWSER_VIEWS: Array<{
+  key: SessionsBrowserViewKey;
+  label: string;
+  icon: string;
+  hint: string;
+}> = [
+  { key: 'pick', label: '选择会话', icon: '🗂️', hint: '先从短列表锁定目标，再进入更深层。' },
+  { key: 'focus', label: '查看焦点', icon: '🎯', hint: '只看当前焦点摘要和下一步动作，不和长列表同屏。' },
+];
+
+const SESSION_ANALYSIS_VIEWS: Array<{
+  key: SessionAnalysisViewKey;
+  label: string;
+  icon: string;
+  hint: string;
+}> = [
+  { key: 'signals', label: '风险信号', icon: '⚠️', hint: '先看这次会话到底命中了哪些结构性风险。' },
+  { key: 'recommendations', label: '联动建议', icon: '🧭', hint: '如果不想自己判断，就直接跟着建议入口继续下钻。' },
+  { key: 'tools', label: '工具聚合', icon: '🧰', hint: '看清这次会话真正依赖了哪些工具和能力。' },
+  { key: 'timeline', label: '最近工具', icon: '🕒', hint: '当怀疑会话中断时，优先看最后几次工具事件。' },
 ];
 
 function withinRecentWindow(startedAt: number, filter: RecentFilter) {
@@ -642,6 +679,11 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
   const [selected, setSelected] = useState<SessionDetail | null>(null);
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
   const [activeTab, setActiveTab] = useState<SessionsTabKey>('overview');
+  const [overviewView, setOverviewView] = useState<SessionsOverviewViewKey>('launch');
+  const [browserView, setBrowserView] = useState<SessionsBrowserViewKey>('pick');
+  const [analysisView, setAnalysisView] = useState<SessionAnalysisViewKey>('signals');
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [showAllSessions, setShowAllSessions] = useState(false);
   const [query, setQuery] = useState('');
   const [sourceFilter, setSourceFilter] = useState('all');
   const [modelFilter, setModelFilter] = useState('all');
@@ -705,6 +747,15 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
 
   useEffect(() => {
     setActiveTab('overview');
+    setOverviewView('launch');
+  }, [profile]);
+
+  useEffect(() => {
+    setOverviewView('launch');
+    setBrowserView('pick');
+    setAnalysisView('signals');
+    setShowAdvancedFilters(false);
+    setShowAllSessions(false);
   }, [profile]);
 
   const sourceOptions = useMemo(
@@ -796,6 +847,7 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
     () => (selected && selectedPortrait ? buildRecommendations(selected, selectedPortrait, selectedTools.aggregates, snapshot) : []),
     [selected, selectedPortrait, selectedTools.aggregates, snapshot],
   );
+  const primaryRecommendation = selectedRecommendations[0] ?? null;
   const overviewWarnings = [
     filtered.length === 0 ? '当前筛选条件下没有任何会话，建议先恢复筛选范围，再重新定位问题。' : null,
     riskySessions.length > 0 ? `当前筛选结果里有 ${riskySessions.length} 条高风险会话，建议优先处理这些记录。` : null,
@@ -809,6 +861,37 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
   ].filter((item): item is string => Boolean(item));
   const visibleOverviewWarnings = overviewWarnings.slice(0, 4);
   const remainingOverviewWarningCount = Math.max(0, overviewWarnings.length - visibleOverviewWarnings.length);
+  const sessionStartReadiness = filtered.length === 0
+    ? '先放宽筛选'
+    : !selected
+      ? '先选一条会话'
+      : selectedSignals.length > 0
+        ? '优先看风险联动'
+        : '可以直接回放';
+  const sessionStartHint = filtered.length === 0
+    ? '当前筛选没有命中任何会话，建议先恢复全部筛选，或切换来源、模型与时间窗。'
+    : !selected
+      ? '会话页的第一步不是看消息，而是先选中一条真正值得继续深挖的记录。'
+      : selectedSignals.length > 0
+        ? `当前焦点会话命中了 ${selectedSignals.length} 个风险信号，更适合先去“风险与联动”。`
+        : '当前焦点会话没有明显结构性风险，可以直接进入消息回放查看完整内容。';
+  const visibleSessions = useMemo(() => {
+    if (showAllSessions || filtered.length <= DEFAULT_SESSION_LIST_LIMIT) {
+      return filtered;
+    }
+
+    const compactItems = filtered.slice(0, DEFAULT_SESSION_LIST_LIMIT);
+    if (!selected || compactItems.some((item) => item.id === selected.session.id)) {
+      return compactItems;
+    }
+
+    const selectedRecord = filtered.find((item) => item.id === selected.session.id);
+    return selectedRecord ? [...compactItems, selectedRecord] : compactItems;
+  }, [filtered, selected, showAllSessions]);
+  const hiddenSessionCount = Math.max(0, filtered.length - visibleSessions.length);
+  const activeAnalysisView = SESSION_ANALYSIS_VIEWS.find((item) => item.key === analysisView) ?? SESSION_ANALYSIS_VIEWS[0];
+  const activeOverviewView = SESSIONS_OVERVIEW_VIEWS.find((item) => item.key === overviewView) ?? SESSIONS_OVERVIEW_VIEWS[0];
+  const activeBrowserView = SESSIONS_BROWSER_VIEWS.find((item) => item.key === browserView) ?? SESSIONS_BROWSER_VIEWS[0];
 
   function resetListFilters() {
     setQuery('');
@@ -834,39 +917,44 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
   const currentSessionSection = (
     <Panel
       title="当前焦点"
-      subtitle={selected ? '先确认这次会话的来源、工具调用和最适合继续追查的方向。' : '先从会话列表里选一条记录。'}
+      subtitle={selected ? '先确认这次会话是不是你真正要追的那一条，再决定去日志、诊断还是消息回放。' : '先从会话列表里选一条记录。'}
       aside={selected ? (
         <Toolbar>
+          <Button onClick={() => setBrowserView('pick')}>回到列表</Button>
           <Button onClick={() => navigateFromSelection('logs', '查看当前会话的相关日志输出。')}>查看日志</Button>
           <Button onClick={() => navigateFromSelection('diagnostics', '结合会话风险信号继续做运行态诊断。')}>做诊断</Button>
-          <Button onClick={() => navigateFromSelection('memory', '核对这次会话可能涉及的记忆槽位。')}>看记忆</Button>
+          <Button onClick={() => setActiveTab('messages')}>看消息</Button>
         </Toolbar>
       ) : undefined}
     >
       {selected && selectedPortrait ? (
-        <div className="two-column">
-          <div className="detail-list">
-            <KeyValueRow label="ID" value={selected.session.id} />
-            <KeyValueRow label="来源" value={selected.session.source} />
-            <KeyValueRow label="模型" value={selected.session.model || '—'} />
-            <KeyValueRow label="开始时间" value={formatEpoch(selected.session.startedAt)} />
-            <KeyValueRow label="结束时间" value={formatEpoch(selected.session.endedAt)} />
+        <>
+          <div className="workspace-summary-strip">
+            <section className="summary-mini-card">
+              <span className="summary-mini-label">当前会话</span>
+              <strong className="summary-mini-value">{sessionDisplayTitle(selected.session)}</strong>
+              <span className="summary-mini-meta">{selected.session.source} · {selected.session.model || '模型未记录'}</span>
+            </section>
+            <section className="summary-mini-card">
+              <span className="summary-mini-label">消息与工具</span>
+              <strong className="summary-mini-value">{selected.session.messageCount} / {selected.session.toolCallCount}</strong>
+              <span className="summary-mini-meta">消息数 / 工具调用数 · {selectedPortrait.uniqueTools} 种工具</span>
+            </section>
+            <section className="summary-mini-card">
+              <span className="summary-mini-label">当前状态</span>
+              <strong className="summary-mini-value">{loadingDetail ? '读取中' : selectedAssessment?.primaryLabel ?? '已加载'}</strong>
+              <span className="summary-mini-meta">{selectedSignals.length} 个风险信号 · 非 user 占比 {formatPercent(selectedPortrait.nonUserRatio)}</span>
+            </section>
+            <section className="summary-mini-card">
+              <span className="summary-mini-label">时间范围</span>
+              <strong className="summary-mini-value">{formatEpoch(selected.session.startedAt)}</strong>
+              <span className="summary-mini-meta">结束于 {formatEpoch(selected.session.endedAt)}</span>
+            </section>
           </div>
-          <div className="detail-list">
-            <KeyValueRow label="消息数" value={selected.session.messageCount} />
-            <KeyValueRow label="工具调用" value={selected.session.toolCallCount} />
-            <KeyValueRow label="工具种类" value={selectedPortrait.uniqueTools} />
-            <KeyValueRow label="风险信号" value={selectedSignals.length} />
-            <KeyValueRow
-              label="当前状态"
-              value={(
-                <Pill tone={loadingDetail ? 'warn' : selectedAssessment?.tone ?? 'good'}>
-                  {loadingDetail ? '读取中' : selectedAssessment?.primaryLabel ?? '已加载'}
-                </Pill>
-              )}
-            />
-          </div>
-        </div>
+          <p className="helper-text top-gap">
+            详细风险、工具聚合、消息原文和更多去向都已经后置到子标签，当前层只保留起步判断。
+          </p>
+        </>
       ) : (
         <EmptyState title="未选择会话" description="从下方会话列表选择一条记录后，这里会显示当前摘要和推荐去向。" />
       )}
@@ -876,327 +964,419 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
   const overviewSection = (
     <div className="page-stack">
       <Panel
-        title="推荐下一步"
-        subtitle="先缩小范围并锁定一条会话，再决定是看风险联动，还是直接回放消息。"
+        title="总览入口"
+        subtitle="总览页拆成二级工作面，默认只展开一个主区块，不再把筛选、列表和当前焦点同时铺开。"
       >
-        <div className="list-stack">
-          <div className="list-card">
-            <div className="list-card-title">
-              <strong>先缩小范围并锁定一条会话</strong>
-              <Pill tone={filtered.length > 0 ? 'good' : 'warn'}>
-                {filtered.length > 0 ? `${filtered.length} 条命中` : '暂无命中'}
-              </Pill>
-            </div>
-            <p>先按来源、模型、时间窗和关键词缩小范围，避免还没选中目标就掉进消息和工具细节里。</p>
-            <div className="meta-line">
-              <span>{sourceFilter === 'all' ? '全部来源' : sourceFilter}</span>
-              <span>{modelFilter === 'all' ? '全部模型' : modelFilter}</span>
-              <span>{recentFilter === 'all' ? '全部时间' : recentFilter}</span>
-            </div>
-            <Toolbar>
-              <Button kind="primary" onClick={() => setActiveTab('overview')}>
-                查看会话列表
-              </Button>
-              <Button onClick={resetListFilters}>
-                恢复全部筛选
-              </Button>
-            </Toolbar>
-          </div>
-
-          <div className="list-card">
-            <div className="list-card-title">
-              <strong>优先关注高风险或工具密集的记录</strong>
-              <Pill tone={riskySessions.length > 0 ? 'warn' : 'good'}>
-                {riskySessions.length > 0 ? `${riskySessions.length} 条待优先处理` : '当前较平稳'}
-              </Pill>
-            </div>
-            <p>如果当前筛选结果里已经出现高风险、高工具调用或 Gateway 来源的会话，通常更值得优先排查。</p>
-            <div className="meta-line">
-              <span>高风险 {riskySessions.length}</span>
-              <span>高工具 {toolHeavySessions.length}</span>
-              <span>Gateway 来源 {gatewayLikeSessions.length}</span>
-            </div>
-            <Toolbar>
-              <Button kind="primary" onClick={() => setActiveTab('analysis')}>
-                查看风险与联动
-              </Button>
-              <Button onClick={() => navigate('diagnostics')}>
-                进入诊断页
-              </Button>
-            </Toolbar>
-          </div>
-
-          <div className="list-card">
-            <div className="list-card-title">
-              <strong>选中后再决定去哪个工作台</strong>
-              <Pill tone={selected ? 'good' : 'neutral'}>
-                {selected ? sessionDisplayTitle(selected.session) : '等待选择'}
-              </Pill>
-            </div>
-            <p>{selectedRecommendations[0]?.description ?? '选择一条会话后，这里会给出最适合继续下钻的页面。'}</p>
-            <div className="meta-line">
-              <span>{selected?.session.source ?? '未选来源'}</span>
-              <span>{selected?.session.model || '未选模型'}</span>
-            </div>
-            <Toolbar>
-              {selectedRecommendations[0]?.page ? (
-                <Button
-                  kind={buttonKindForTone(selectedRecommendations[0].tone)}
-                  onClick={() => navigateFromSelection(selectedRecommendations[0].page!, selectedRecommendations[0].description)}
-                >
-                  {selectedRecommendations[0].actionLabel ?? `进入${pageLabel(selectedRecommendations[0].page!)}`}
-                </Button>
-              ) : (
-                <Button onClick={() => setActiveTab('messages')} disabled={!selected}>
-                  查看消息与回放
-                </Button>
-              )}
-              <Button onClick={() => setActiveTab('analysis')} disabled={!selected}>
-                查看风险与联动
-              </Button>
-            </Toolbar>
-          </div>
+        <div className="workspace-shortcut-grid dashboard-launcher-grid">
+          {SESSIONS_OVERVIEW_VIEWS.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              className={`workspace-shortcut-card dashboard-shortcut-card ${overviewView === item.key ? 'active' : ''}`}
+              onClick={() => setOverviewView(item.key)}
+            >
+              <strong><span className="dashboard-shortcut-icon">{item.icon}</span>{item.label}</strong>
+              <span>{item.hint}</span>
+            </button>
+          ))}
         </div>
+        <p className="helper-text top-gap">{activeOverviewView.hint}</p>
       </Panel>
 
-      <Panel
-        title="当前判断"
-        subtitle="先用会话摘要做一轮轻量归类，再决定哪些记录值得进消息级深挖。"
-      >
-        <div className="health-grid">
-          <section className="health-card">
-            <div className="health-card-header">
-              <strong>高风险会话</strong>
-              <Pill tone={riskySessions.length > 0 ? 'bad' : 'good'}>{riskySessions.length}</Pill>
-            </div>
-            <p>命中过至少一个风险信号的会话数量，适合作为优先排查队列。</p>
-          </section>
-          <section className="health-card">
-            <div className="health-card-header">
-              <strong>高工具调用</strong>
-              <Pill tone={toolHeavySessions.length > 0 ? 'warn' : 'good'}>{toolHeavySessions.length}</Pill>
-            </div>
-            <p>工具调用大于等于 {TOOL_HEAVY_THRESHOLD} 次，通常意味着问题更接近工具面或多工具编排。</p>
-          </section>
-          <section className="health-card">
-            <div className="health-card-header">
-              <strong>长对话无工具</strong>
-              <Pill tone={longNoToolSessions.length > 0 ? 'warn' : 'good'}>{longNoToolSessions.length}</Pill>
-            </div>
-            <p>消息很多却没进入工具层，更值得回到 Config 看模型、backend 和 context 编排。</p>
-          </section>
-          <section className="health-card">
-            <div className="health-card-header">
-              <strong>Gateway 来源</strong>
-              <Pill tone={gatewayLikeSessions.length > 0 ? 'warn' : 'neutral'}>{gatewayLikeSessions.length}</Pill>
-            </div>
-            <p>source 看起来来自 gateway 或消息平台入口，排障时要同时看会话与连接链路。</p>
-          </section>
-        </div>
-        {visibleOverviewWarnings.length > 0 ? (
-          <>
-            <div className="warning-stack top-gap">
-              {visibleOverviewWarnings.map((warning) => (
-                <div className="warning-item" key={warning}>
-                  {warning}
-                </div>
+      {overviewView === 'launch' ? (
+        <Panel
+          title="常用去向"
+          subtitle="默认只保留最常走的 4 个入口，筛选细节、长列表和结构分析继续后置。"
+        >
+          <div className="workspace-shortcut-grid dashboard-launcher-grid">
+            <button
+              type="button"
+              className={`workspace-shortcut-card dashboard-shortcut-card ${showAdvancedFilters ? 'active' : ''}`}
+              onClick={() => {
+                setShowAdvancedFilters((value) => !value);
+                setOverviewView('status');
+              }}
+            >
+              <strong><span className="dashboard-shortcut-icon">🔎</span>缩小范围</strong>
+              <span>
+                {showAdvancedFilters
+                  ? '当前已展开来源、模型和时间筛选'
+                  : `${filtered.length} 条命中，默认只露出搜索框和少量摘要`}
+              </span>
+            </button>
+            <button
+              type="button"
+              className="workspace-shortcut-card dashboard-shortcut-card"
+              onClick={() => setActiveTab('analysis')}
+              disabled={!selected}
+            >
+              <strong><span className="dashboard-shortcut-icon">⚠️</span>风险与联动</strong>
+              <span>{selected ? `${selectedSignals.length} 个风险信号待查看` : '先选择一条会话再看结构判断'}</span>
+            </button>
+            <button
+              type="button"
+              className="workspace-shortcut-card dashboard-shortcut-card"
+              onClick={() => setActiveTab('messages')}
+              disabled={!selected}
+            >
+              <strong><span className="dashboard-shortcut-icon">💬</span>消息回放</strong>
+              <span>{selected ? `${filteredMessages.length} 条消息可继续回放` : '先锁定一条会话再看原文'}</span>
+            </button>
+            <button
+              type="button"
+              className="workspace-shortcut-card dashboard-shortcut-card"
+              onClick={() => {
+                if (primaryRecommendation?.page) {
+                  navigateFromSelection(primaryRecommendation.page, primaryRecommendation.description);
+                  return;
+                }
+                setOverviewView('browser');
+              }}
+              disabled={!selected && !primaryRecommendation}
+            >
+              <strong><span className="dashboard-shortcut-icon">🧭</span>继续处理</strong>
+              <span>{primaryRecommendation?.description ?? '选中后会出现最适合继续下钻的入口'}</span>
+            </button>
+          </div>
+          <p className="helper-text top-gap">
+            详细筛选器、长列表、工具聚合和消息原文都已经继续后置，首页只负责帮你锁定目标。
+          </p>
+        </Panel>
+      ) : null}
+
+      {overviewView === 'status' ? (
+        <Panel
+          title="当前判断"
+          subtitle="先用会话摘要做一轮轻量归类，需要时再展开筛选器和完整列表。"
+        >
+          <Toolbar>
+            <input
+              className="search-input"
+              placeholder="搜索标题、预览、来源或模型"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+            <Button onClick={() => setShowAdvancedFilters((value) => !value)}>
+              {showAdvancedFilters ? '收起筛选' : '更多筛选'}
+            </Button>
+            <Button onClick={resetListFilters}>
+              重置
+            </Button>
+          </Toolbar>
+          {showAdvancedFilters ? (
+            <Toolbar>
+              <select className="select-input" value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)}>
+                {sourceOptions.map((item) => (
+                  <option key={item} value={item}>
+                    {item === 'all' ? '全部来源' : item}
+                  </option>
+                ))}
+              </select>
+              <select className="select-input" value={modelFilter} onChange={(event) => setModelFilter(event.target.value)}>
+                {modelOptions.map((item) => (
+                  <option key={item} value={item}>
+                    {item === 'all' ? '全部模型' : item}
+                  </option>
+                ))}
+              </select>
+              <select className="select-input" value={recentFilter} onChange={(event) => setRecentFilter(event.target.value as RecentFilter)}>
+                <option value="all">全部时间</option>
+                <option value="24h">最近 24 小时</option>
+                <option value="7d">最近 7 天</option>
+                <option value="30d">最近 30 天</option>
+              </select>
+            </Toolbar>
+          ) : (
+            <p className="helper-text top-gap">
+              当前筛选：{sourceFilter === 'all' ? '全部来源' : sourceFilter} · {modelFilter === 'all' ? '全部模型' : modelFilter} · {recentFilter === 'all' ? '全部时间' : recentFilter}
+            </p>
+          )}
+          <div className="workspace-summary-strip top-gap">
+            <section className="summary-mini-card">
+              <span className="summary-mini-label">当前命中</span>
+              <strong className="summary-mini-value">{filtered.length}</strong>
+              <span className="summary-mini-meta">筛选后的会话数量</span>
+            </section>
+            <section className="summary-mini-card">
+              <span className="summary-mini-label">高风险会话</span>
+              <strong className="summary-mini-value">{riskySessions.length}</strong>
+              <span className="summary-mini-meta">优先排查队列</span>
+            </section>
+            <section className="summary-mini-card">
+              <span className="summary-mini-label">高工具调用</span>
+              <strong className="summary-mini-value">{toolHeavySessions.length}</strong>
+              <span className="summary-mini-meta">{`工具调用 >= ${TOOL_HEAVY_THRESHOLD}`}</span>
+            </section>
+            <section className="summary-mini-card">
+              <span className="summary-mini-label">Gateway 来源</span>
+              <strong className="summary-mini-value">{gatewayLikeSessions.length}</strong>
+              <span className="summary-mini-meta">与消息平台入口更相关的记录</span>
+            </section>
+          </div>
+          {visibleOverviewWarnings.length > 0 ? (
+            <>
+              <div className="warning-stack top-gap">
+                {visibleOverviewWarnings.map((warning) => (
+                  <div className="warning-item" key={warning}>
+                    {warning}
+                  </div>
+                ))}
+              </div>
+              {remainingOverviewWarningCount > 0 ? (
+                <p className="helper-text top-gap">其余 {remainingOverviewWarningCount} 条提醒继续收在“风险与联动”和“消息与回放”里。</p>
+              ) : null}
+            </>
+          ) : (
+            <p className="helper-text top-gap">
+              当前没有新的结构性提醒，可以直接从列表里选一条会话继续回放或进入下一层。
+            </p>
+          )}
+          <Toolbar>
+            <Button kind="primary" onClick={() => setOverviewView('browser')}>打开会话浏览</Button>
+            <Button onClick={() => setActiveTab(selected ? 'analysis' : 'messages')} disabled={!selected}>
+              {selected ? '继续下一层' : '先选择一条会话'}
+            </Button>
+          </Toolbar>
+        </Panel>
+      ) : null}
+
+      {overviewView === 'browser' ? (
+        <div className="page-stack">
+          <Panel
+            title="会话浏览入口"
+            subtitle="浏览层继续拆成二级工作面，列表和焦点不再同屏出现。"
+          >
+            <div className="workspace-shortcut-grid dashboard-launcher-grid">
+              {SESSIONS_BROWSER_VIEWS.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  className={`workspace-shortcut-card dashboard-shortcut-card ${browserView === item.key ? 'active' : ''}`}
+                  onClick={() => setBrowserView(item.key)}
+                >
+                  <strong><span className="dashboard-shortcut-icon">{item.icon}</span>{item.label}</strong>
+                  <span>{item.key === 'focus' ? (selected ? sessionDisplayTitle(selected.session) : '先从列表中选一条') : item.hint}</span>
+                </button>
               ))}
             </div>
-            {remainingOverviewWarningCount > 0 ? (
-              <p className="helper-text top-gap">其余 {remainingOverviewWarningCount} 条提醒继续收在“风险与联动”和“消息与回放”里。</p>
-            ) : null}
-          </>
-        ) : null}
-      </Panel>
+            <p className="helper-text top-gap">{activeBrowserView.hint}</p>
+          </Panel>
 
-      <div className="two-column wide-left">
-        <Panel title="会话列表" subtitle="先定位哪一次对话值得深挖，再进入右侧子模块做分析或看消息流。">
-          {filtered.length === 0 ? (
-            <EmptyState title="没有匹配会话" description="换个关键词、来源、模型或时间窗再试试。" />
-          ) : (
-            <div className="list-stack">
-              {filtered.map((session) => {
-                const assessment = sessionAssessments.get(session.id) ?? assessSession(session);
-                return (
-                  <button
-                    className={`list-card session-card ${selected?.session.id === session.id ? 'selected' : ''}`}
-                    key={session.id}
-                    onClick={() => void selectSession(session.id)}
-                    type="button"
-                  >
-                    <div className="list-card-title">
-                      <strong>{session.title || truncate(session.preview || session.id, 44)}</strong>
-                      <div className="pill-row">
-                        <Pill>{session.source}</Pill>
-                        <Pill tone={session.toolCallCount > 0 ? 'good' : 'neutral'}>
-                          tool {session.toolCallCount}
-                        </Pill>
-                        <Pill tone={assessment.tone}>
-                          {assessment.score > 0 ? `${assessment.score} 个信号` : '平稳'}
-                        </Pill>
-                      </div>
-                    </div>
-                    <p>{truncate(session.preview || '无预览文本', 96)}</p>
-                    <div className="meta-line">
-                      <span>{session.model || '未知模型'}</span>
-                      <span>{session.messageCount} 条消息</span>
-                      <span>{assessment.primaryLabel}</span>
-                      <span>{formatEpoch(session.startedAt)}</span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </Panel>
+          {browserView === 'pick' ? (
+            <Panel
+              title="会话列表"
+              subtitle="默认先看最值得注意的一小段记录，完整列表按需展开。"
+              aside={filtered.length > DEFAULT_SESSION_LIST_LIMIT ? (
+                <Toolbar>
+                  <Button onClick={() => setShowAllSessions((value) => !value)}>
+                    {showAllSessions ? '收起列表' : `展开更多（${hiddenSessionCount}）`}
+                  </Button>
+                </Toolbar>
+              ) : undefined}
+            >
+              {filtered.length === 0 ? (
+                <EmptyState title="没有匹配会话" description="换个关键词、来源、模型或时间窗再试试。" />
+              ) : (
+                <div className="list-stack">
+                  {visibleSessions.map((session) => {
+                    const assessment = sessionAssessments.get(session.id) ?? assessSession(session);
+                    return (
+                      <button
+                        className={`list-card session-card ${selected?.session.id === session.id ? 'selected' : ''}`}
+                        key={session.id}
+                        onClick={async () => {
+                          await selectSession(session.id);
+                          setBrowserView('focus');
+                        }}
+                        type="button"
+                      >
+                        <div className="list-card-title">
+                          <strong>{session.title || truncate(session.preview || session.id, 44)}</strong>
+                          <div className="pill-row">
+                            <Pill>{session.source}</Pill>
+                            <Pill tone={session.toolCallCount > 0 ? 'good' : 'neutral'}>
+                              tool {session.toolCallCount}
+                            </Pill>
+                            <Pill tone={assessment.tone}>
+                              {assessment.score > 0 ? `${assessment.score} 个信号` : '平稳'}
+                            </Pill>
+                          </div>
+                        </div>
+                        <p>{truncate(session.preview || '无预览文本', 96)}</p>
+                        <div className="meta-line">
+                          <span>{session.model || '未知模型'}</span>
+                          <span>{session.messageCount} 条消息</span>
+                          <span>{assessment.primaryLabel}</span>
+                          <span>{formatEpoch(session.startedAt)}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {hiddenSessionCount > 0 && !showAllSessions ? (
+                <p className="helper-text top-gap">其余 {hiddenSessionCount} 条会话已暂时收起，需要时再展开。</p>
+              ) : null}
+            </Panel>
+          ) : null}
 
-        {currentSessionSection}
-      </div>
+          {browserView === 'focus' ? currentSessionSection : null}
+        </div>
+      ) : null}
     </div>
   );
 
   const analysisSection = (
-    <Panel title="风险与联动" subtitle="查看工具调用、风险信号和会话结构，判断问题更像模型、工具还是环境层。">
+    <Panel title="风险与联动" subtitle="默认一次只展开一个分析子模块，避免把工具、信号、建议和时间线同时铺满。">
       {selected && selectedPortrait ? (
         <div className="page-stack">
-          <div className="health-grid">
-            <section className="health-card">
-              <div className="health-card-header">
-                <strong>角色分布</strong>
-                <Pill tone={selectedPortrait.userCount > 0 ? 'good' : 'warn'}>
-                  {selectedPortrait.userCount}/{selectedPortrait.assistantCount}/{selectedPortrait.toolCount}
-                </Pill>
-              </div>
-              <p>
-                user {selectedPortrait.userCount} · assistant {selectedPortrait.assistantCount} · tool {selectedPortrait.toolCount}
-                {selectedPortrait.otherCount > 0 ? ` · other ${selectedPortrait.otherCount}` : ''}
-              </p>
+          <div className="workspace-summary-strip">
+            <section className="summary-mini-card">
+              <span className="summary-mini-label">角色分布</span>
+              <strong className="summary-mini-value">{selectedPortrait.userCount}/{selectedPortrait.assistantCount}/{selectedPortrait.toolCount}</strong>
+              <span className="summary-mini-meta">
+                user / assistant / tool{selectedPortrait.otherCount > 0 ? ` · other ${selectedPortrait.otherCount}` : ''}
+              </span>
             </section>
-            <section className="health-card">
-              <div className="health-card-header">
-                <strong>工具覆盖</strong>
-                <Pill tone={selectedPortrait.toolCount > 0 ? 'good' : 'warn'}>
-                  {formatPercent(selectedPortrait.toolRatio)}
-                </Pill>
-              </div>
-              <p>
-                首次工具 {formatEpoch(selectedPortrait.firstToolAt)} · 最近工具 {formatEpoch(selectedPortrait.lastToolAt)} · 共 {selectedPortrait.uniqueTools} 种工具
-              </p>
+            <section className="summary-mini-card">
+              <span className="summary-mini-label">工具覆盖</span>
+              <strong className="summary-mini-value">{formatPercent(selectedPortrait.toolRatio)}</strong>
+              <span className="summary-mini-meta">
+                {selectedPortrait.uniqueTools} 种工具 · 最近工具 {formatEpoch(selectedPortrait.lastToolAt)}
+              </span>
             </section>
-            <section className="health-card">
-              <div className="health-card-header">
-                <strong>交互密度</strong>
-                <Pill tone={selectedPortrait.nonUserRatio >= 0.85 ? 'bad' : selectedPortrait.nonUserRatio >= 0.65 ? 'warn' : 'good'}>
-                  {formatPercent(selectedPortrait.nonUserRatio)}
-                </Pill>
-              </div>
-              <p>非 user 消息占比越高，越像 agent 自主运行或工具密集链路。</p>
+            <section className="summary-mini-card">
+              <span className="summary-mini-label">交互密度</span>
+              <strong className="summary-mini-value">{formatPercent(selectedPortrait.nonUserRatio)}</strong>
+              <span className="summary-mini-meta">非 user 越高，越像 agent 自主链路</span>
             </section>
-            <section className="health-card">
-              <div className="health-card-header">
-                <strong>消息洁净度</strong>
-                <Pill tone={selectedPortrait.blankCount > 0 ? 'warn' : 'good'}>
-                  空消息 {selectedPortrait.blankCount}
-                </Pill>
-              </div>
-              <p>当前消息过滤后还能看到 {filteredMessages.length} 条记录，适合继续做消息级检索。</p>
+            <section className="summary-mini-card">
+              <span className="summary-mini-label">消息洁净度</span>
+              <strong className="summary-mini-value">空消息 {selectedPortrait.blankCount}</strong>
+              <span className="summary-mini-meta">{filteredMessages.length} 条消息可继续回放</span>
             </section>
           </div>
+          <div className="workspace-shortcut-grid dashboard-launcher-grid">
+            {SESSION_ANALYSIS_VIEWS.map((item) => {
+              const meta = item.key === 'signals'
+                ? (selectedSignals.length > 0 ? `${selectedSignals.length} 个风险信号` : '当前没有明显风险信号')
+                : item.key === 'recommendations'
+                  ? (primaryRecommendation?.description ?? '会根据当前会话给出继续下钻入口')
+                  : item.key === 'tools'
+                    ? (selectedTools.aggregates.length > 0 ? `${selectedTools.aggregates.length} 个工具被命中` : '当前没有工具轨迹')
+                    : (selectedTools.recentEvents.length > 0 ? `${selectedTools.recentEvents.length} 条最近工具事件` : '当前没有工具时间线');
 
-          <div className="two-column">
-            <div className="page-stack">
-              <Panel className="panel-nested" title="工具调用聚合" subtitle="按工具名聚合调用频次，帮助你看清这次会话真正依赖了哪些能力。">
-                {selectedTools.aggregates.length === 0 ? (
-                  <EmptyState title="没有工具轨迹" description="这次会话没有解析到 tool 消息，可以优先回配置页核对工具面。" />
-                ) : (
-                  <div className="list-stack">
-                    {selectedTools.aggregates.slice(0, 8).map((item) => (
-                      <div className="list-card" key={item.name}>
-                        <div className="list-card-title">
-                          <strong>{item.name}</strong>
-                          <Pill tone={item.count >= 3 ? 'warn' : 'good'}>{item.count} 次</Pill>
-                        </div>
-                        <div className="meta-line">
-                          <span>首次 {formatEpoch(item.firstAt)}</span>
-                          <span>最近 {formatEpoch(item.lastAt)}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </Panel>
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  className={`workspace-shortcut-card dashboard-shortcut-card ${analysisView === item.key ? 'active' : ''}`}
+                  onClick={() => setAnalysisView(item.key)}
+                >
+                  <strong><span className="dashboard-shortcut-icon">{item.icon}</span>{item.label}</strong>
+                  <span>{meta}</span>
+                </button>
+              );
+            })}
+          </div>
+          <p className="helper-text">{activeAnalysisView.hint}</p>
 
-              <Panel className="panel-nested" title="最近工具时间线" subtitle="结合最后几次 tool 事件，快速判断会话停在了哪一层。">
-                {selectedTools.recentEvents.length === 0 ? (
-                  <EmptyState title="暂无工具事件" description="当前会话没有 tool 时间线，重点去看模型和配置层。" />
-                ) : (
-                  <div className="list-stack">
-                    {selectedTools.recentEvents.map((event) => (
-                      <div className="list-card" key={event.key}>
-                        <div className="list-card-title">
-                          <strong>{event.name}</strong>
-                          <Pill tone={event.role === 'tool' ? 'warn' : 'neutral'}>{event.role}</Pill>
-                        </div>
-                        <p>{event.preview}</p>
-                        <div className="meta-line">
-                          <span>{formatEpoch(event.timestamp)}</span>
-                          <span>{selected.session.source}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </Panel>
-            </div>
-
-            <div className="page-stack">
-              <Panel className="panel-nested" title="风险信号" subtitle="这些判断基于摘要字段和消息结构，只负责提示，不替代原始日志。">
-                {selectedSignals.length === 0 ? (
-                  <EmptyState title="没有明显风险信号" description="当前会话更像一次正常运行记录，可以直接看消息流或返回总览。" />
-                ) : (
-                  <div className="list-stack">
-                    {selectedSignals.map((signal) => (
-                      <div className="list-card" key={signal.key}>
-                        <div className="list-card-title">
-                          <strong>{signal.label}</strong>
-                          <Pill tone={signal.tone}>{signalToneLabel(signal.tone)}</Pill>
-                        </div>
-                        <p>{signal.description}</p>
-                        {signal.page ? (
-                          <Toolbar>
-                            <Button kind={buttonKindForTone(signal.tone)} onClick={() => navigateFromSelection(signal.page!, signal.description)}>
-                              {signal.actionLabel ?? `进入${pageLabel(signal.page)}`}
-                            </Button>
-                          </Toolbar>
-                        ) : null}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </Panel>
-
-              <Panel className="panel-nested" title="联动建议" subtitle="根据来源、工具和记忆痕迹，给出最可能继续深挖的工作台入口。">
+          {analysisView === 'signals' ? (
+            <Panel className="panel-nested" title="风险信号" subtitle="这些判断基于摘要字段和消息结构，只负责提示，不替代原始日志。">
+              {selectedSignals.length === 0 ? (
+                <EmptyState title="没有明显风险信号" description="当前会话更像一次正常运行记录，可以直接看消息流或返回总览。" />
+              ) : (
                 <div className="list-stack">
-                  {selectedRecommendations.map((item) => (
-                    <div className="list-card" key={item.key}>
+                  {selectedSignals.map((signal) => (
+                    <div className="list-card" key={signal.key}>
                       <div className="list-card-title">
-                        <strong>{item.label}</strong>
-                        <Pill tone={item.tone}>{pageLabel(item.page ?? 'dashboard')}</Pill>
+                        <strong>{signal.label}</strong>
+                        <Pill tone={signal.tone}>{signalToneLabel(signal.tone)}</Pill>
                       </div>
-                      <p>{item.description}</p>
-                      {item.page ? (
+                      <p>{signal.description}</p>
+                      {signal.page ? (
                         <Toolbar>
-                          <Button kind={buttonKindForTone(item.tone)} onClick={() => navigateFromSelection(item.page!, item.description)}>
-                            {item.actionLabel ?? `进入${pageLabel(item.page)}`}
+                          <Button kind={buttonKindForTone(signal.tone)} onClick={() => navigateFromSelection(signal.page!, signal.description)}>
+                            {signal.actionLabel ?? `进入${pageLabel(signal.page)}`}
                           </Button>
                         </Toolbar>
                       ) : null}
                     </div>
                   ))}
                 </div>
-              </Panel>
-            </div>
-          </div>
+              )}
+            </Panel>
+          ) : null}
+
+          {analysisView === 'recommendations' ? (
+            <Panel className="panel-nested" title="联动建议" subtitle="根据来源、工具和记忆痕迹，给出最可能继续深挖的工作台入口。">
+              <div className="list-stack">
+                {selectedRecommendations.map((item) => (
+                  <div className="list-card" key={item.key}>
+                    <div className="list-card-title">
+                      <strong>{item.label}</strong>
+                      <Pill tone={item.tone}>{pageLabel(item.page ?? 'dashboard')}</Pill>
+                    </div>
+                    <p>{item.description}</p>
+                    {item.page ? (
+                      <Toolbar>
+                        <Button kind={buttonKindForTone(item.tone)} onClick={() => navigateFromSelection(item.page!, item.description)}>
+                          {item.actionLabel ?? `进入${pageLabel(item.page)}`}
+                        </Button>
+                      </Toolbar>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          ) : null}
+
+          {analysisView === 'tools' ? (
+            <Panel className="panel-nested" title="工具调用聚合" subtitle="按工具名聚合调用频次，帮助你看清这次会话真正依赖了哪些能力。">
+              {selectedTools.aggregates.length === 0 ? (
+                <EmptyState title="没有工具轨迹" description="这次会话没有解析到 tool 消息，可以优先回配置页核对工具面。" />
+              ) : (
+                <div className="list-stack">
+                  {selectedTools.aggregates.slice(0, 8).map((item) => (
+                    <div className="list-card" key={item.name}>
+                      <div className="list-card-title">
+                        <strong>{item.name}</strong>
+                        <Pill tone={item.count >= 3 ? 'warn' : 'good'}>{item.count} 次</Pill>
+                      </div>
+                      <div className="meta-line">
+                        <span>首次 {formatEpoch(item.firstAt)}</span>
+                        <span>最近 {formatEpoch(item.lastAt)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Panel>
+          ) : null}
+
+          {analysisView === 'timeline' ? (
+            <Panel className="panel-nested" title="最近工具时间线" subtitle="结合最后几次 tool 事件，快速判断会话停在了哪一层。">
+              {selectedTools.recentEvents.length === 0 ? (
+                <EmptyState title="暂无工具事件" description="当前会话没有 tool 时间线，重点去看模型和配置层。" />
+              ) : (
+                <div className="list-stack">
+                  {selectedTools.recentEvents.map((event) => (
+                    <div className="list-card" key={event.key}>
+                      <div className="list-card-title">
+                        <strong>{event.name}</strong>
+                        <Pill tone={event.role === 'tool' ? 'warn' : 'neutral'}>{event.role}</Pill>
+                      </div>
+                      <p>{event.preview}</p>
+                      <div className="meta-line">
+                        <span>{formatEpoch(event.timestamp)}</span>
+                        <span>{selected.session.source}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Panel>
+          ) : null}
         </div>
       ) : (
         <EmptyState title="未选择会话" description="先在“会话总览”里选择一条记录，再来这里看风险和工具细节。" />
@@ -1279,13 +1459,27 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
         <p className="helper-text">
           这里展示的是 Hermes 已落盘的真实会话，不依赖 Gateway 在线状态，也不改写任何原始记录。默认顺序：先筛选，再锁定焦点，最后按需看风险或消息。
         </p>
-        <div className="detail-list compact top-gap">
-          <KeyValueRow label="当前 Profile" value={profile} />
-          <KeyValueRow label="State DB" value={stateDbPath || '—'} />
-          <KeyValueRow label="当前命中" value={filtered.length} />
-          <KeyValueRow label="高风险会话" value={riskySessions.length} />
-          <KeyValueRow label="Gateway" value={snapshot?.gateway?.gatewayState ?? '未检测到'} />
-          <KeyValueRow label="默认模型" value={snapshot?.config.modelDefault ?? '—'} />
+        <div className="workspace-summary-strip">
+          <section className="summary-mini-card">
+            <span className="summary-mini-label">起步判断</span>
+            <strong className="summary-mini-value">{sessionStartReadiness}</strong>
+            <span className="summary-mini-meta">{sessionStartHint}</span>
+          </section>
+          <section className="summary-mini-card">
+            <span className="summary-mini-label">当前 Profile</span>
+            <strong className="summary-mini-value">{profile}</strong>
+            <span className="summary-mini-meta">{stateDbPath || 'state.db 未定位'}</span>
+          </section>
+          <section className="summary-mini-card">
+            <span className="summary-mini-label">当前命中</span>
+            <strong className="summary-mini-value">{filtered.length}</strong>
+            <span className="summary-mini-meta">{riskySessions.length} 条高风险 · {toolHeavySessions.length} 条高工具</span>
+          </section>
+          <section className="summary-mini-card">
+            <span className="summary-mini-label">当前焦点</span>
+            <strong className="summary-mini-value">{selected ? sessionDisplayTitle(selected.session) : '尚未选择'}</strong>
+            <span className="summary-mini-meta">{snapshot?.gateway?.gatewayState ?? '未检测到'} · {snapshot?.config.modelDefault ?? '模型未记录'}</span>
+          </section>
         </div>
       </Panel>
 

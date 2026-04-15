@@ -4,7 +4,7 @@ import { Button, EmptyState, KeyValueRow, LoadingState, OverviewCard, Panel, Pil
 import { RuntimePostureView } from '../components/runtime-posture';
 import type { DiagnosticKind } from '../lib/diagnostics';
 import { handoffToTerminal, openFinderLocation, type CommandScope } from '../lib/desktop';
-import { formatEpoch, formatTimestamp } from '../lib/format';
+import { formatTimestamp } from '../lib/format';
 import { buildRuntimePosture } from '../lib/posture';
 import { api } from '../lib/api';
 import type {
@@ -19,6 +19,8 @@ import type { PageProps } from './types';
 
 type HealthTone = 'neutral' | 'good' | 'warn' | 'bad';
 type DashboardTabKey = 'overview' | 'workspace' | 'advanced';
+type DashboardOverviewViewKey = 'launch' | 'status' | 'checks';
+type DashboardWorkspaceViewKey = 'output' | 'logs' | 'links';
 
 interface QuickResultState {
   label: string;
@@ -70,8 +72,30 @@ const LOG_OPTIONS = [
 
 const DASHBOARD_TABS: Array<{ key: DashboardTabKey; label: string; hint: string }> = [
   { key: 'overview', label: '常用总览', hint: '先看当前实例能不能用、下一步该去哪里。' },
-  { key: 'workspace', label: '运行材料', hint: '查看最近动作、日志尾部、会话与记忆文件。' },
-  { key: 'advanced', label: '进阶接管', hint: '低频 CLI 接管、依赖检查和工作区材料定位入口。' },
+  { key: 'workspace', label: '常用材料', hint: '查看最近动作、日志尾部、会话与记忆文件。' },
+  { key: 'advanced', label: '深度维护', hint: '低频 CLI 接管、依赖检查和工作区材料定位入口。' },
+];
+
+const DASHBOARD_OVERVIEW_VIEWS: Array<{
+  key: DashboardOverviewViewKey;
+  label: string;
+  icon: string;
+  hint: string;
+}> = [
+  { key: 'launch', label: '常用去向', icon: '🚀', hint: '新手先从这里选下一步，不需要同时理解整页状态。' },
+  { key: 'status', label: '当前判断', icon: '🌤️', hint: '只看最关键的状态摘要和提醒，不把更多细节一次堆满。' },
+  { key: 'checks', label: '快速体检', icon: '🩺', hint: '最常用的安全检查集中在这里，低频动作继续后置。' },
+];
+
+const DASHBOARD_WORKSPACE_VIEWS: Array<{
+  key: DashboardWorkspaceViewKey;
+  label: string;
+  icon: string;
+  hint: string;
+}> = [
+  { key: 'output', label: '最近输出', icon: '🧾', hint: '先确认最近一次动作有没有真正成功。' },
+  { key: 'logs', label: '日志预览', icon: '📄', hint: '只在需要时看日志尾部，不再和输出摘要并排铺开。' },
+  { key: 'links', label: '继续查看', icon: '🗂️', hint: '会话、记忆和完整日志继续收在这一层入口里。' },
 ];
 
 const isMacPlatform = typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent);
@@ -82,6 +106,23 @@ function dependencyTone(dependency: BinaryStatus): HealthTone {
   }
 
   return ['hermes', 'curl', 'git', 'python3'].includes(dependency.name) ? 'bad' : 'warn';
+}
+
+function dashboardDiagnosticIcon(kind: DiagnosticKind) {
+  switch (kind) {
+    case 'doctor':
+      return '🩺';
+    case 'status':
+      return '🧭';
+    case 'gateway-status':
+      return '📡';
+    case 'dump':
+      return '📦';
+    case 'version':
+      return '🏷️';
+    default:
+      return '🛠️';
+  }
 }
 
 function buildHealthItems(
@@ -220,6 +261,8 @@ export function DashboardPage({ notify, profile, profiles, refreshProfiles, navi
   const [logError, setLogError] = useState<string | null>(null);
   const [logLoading, setLogLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<DashboardTabKey>('overview');
+  const [overviewView, setOverviewView] = useState<DashboardOverviewViewKey>('launch');
+  const [workspaceView, setWorkspaceView] = useState<DashboardWorkspaceViewKey>('output');
 
   const currentProfile = useMemo(
     () => profiles?.profiles.find((item) => item.name === profile) ?? null,
@@ -364,6 +407,9 @@ export function DashboardPage({ notify, profile, profiles, refreshProfiles, navi
   }
 
   useEffect(() => {
+    setActiveTab('overview');
+    setOverviewView('launch');
+    setWorkspaceView('output');
     void load({ includeProfiles: false });
   }, [profile]);
 
@@ -405,20 +451,37 @@ export function DashboardPage({ notify, profile, profiles, refreshProfiles, navi
   const primaryAlias = currentProfile?.aliases.find((alias) => alias.isPrimary) ?? currentProfile?.aliases[0] ?? null;
   const posture = buildRuntimePosture({ dashboard: data });
   const healthItems = buildHealthItems(data, installation, currentProfile);
+  const overviewHealthItems = healthItems.filter((item) => ['binary', 'model', 'gateway', 'memory'].includes(item.key));
   const workspaceArtifacts = buildWorkspaceArtifacts(data, installation);
   const runtimeWarnings = [...data.warnings];
   const dependencyReadyCount = installation.dependencies.filter((item) => item.found).length;
   const workingDirectory = installation.hermesHomeExists ? installation.hermesHome : null;
-  const versionHeadline = installation.versionOutput.trim().split(/\r?\n/)[0] || '未读取 Hermes 版本';
   const gatewayRunning = data.gateway?.gatewayState === 'running';
   const modelReady = Boolean(data.config.modelProvider && data.config.modelDefault);
   const missingArtifacts = workspaceArtifacts.filter((item) => !item.exists).length;
+  const startReadiness = installation.binaryFound && modelReady
+    ? (gatewayRunning ? '可以开始' : '待启动通道')
+    : '先补基础';
+  const startReadinessMeta = !installation.binaryFound
+    ? '先安装 CLI 才能让所有客户端动作真正执行。'
+    : !modelReady
+      ? '先补齐 provider、模型和连接参数。'
+      : gatewayRunning
+        ? '基础链路已连上，可以继续聊天、接入技能或做自动化。'
+        : '基础配置已具备，下一步建议先启动或检查网关。';
 
   if (isMacPlatform) {
     runtimeWarnings.push(
       'macOS 提示：Terminal 接管使用系统 Terminal，交互式 setup / model / skills config 会在那里持续运行，执行完再回面板刷新。',
     );
   }
+
+  const overviewWarnings = runtimeWarnings.slice(0, 4);
+  const remainingWarningCount = Math.max(0, runtimeWarnings.length - overviewWarnings.length);
+  const memoryReadyCount = data.memoryFiles.filter((item) => item.exists).length;
+  const activeOverviewView = DASHBOARD_OVERVIEW_VIEWS.find((item) => item.key === overviewView) ?? DASHBOARD_OVERVIEW_VIEWS[0];
+  const activeWorkspaceView = DASHBOARD_WORKSPACE_VIEWS.find((item) => item.key === workspaceView) ?? DASHBOARD_WORKSPACE_VIEWS[0];
+  const overviewCheckActions = DIAGNOSTIC_ACTIONS.filter((item) => item.key !== 'version');
 
   const lifecycleActions: LauncherAction[] = [
     {
@@ -521,136 +584,162 @@ export function DashboardPage({ notify, profile, profiles, refreshProfiles, navi
   const overviewSection = (
     <>
       <Panel
-        title="推荐下一步"
-        subtitle="把最常走的入口放前面，小白先顺着做，熟手再下钻到具体工作台。"
+        title="总览入口"
+        subtitle="总览页拆成二级工作面，默认只展开一个主区块，避免首页同时挤满多个摘要区。"
       >
-        <div className="list-stack">
-          <div className="list-card">
-            <div className="list-card-title">
-              <strong>模型、通道与基础参数</strong>
-              <Pill tone={modelReady ? 'good' : 'warn'}>
-                {modelReady ? '已就绪' : '建议先处理'}
-              </Pill>
-            </div>
-            <p>{modelReady ? `${data.config.modelProvider} / ${data.config.modelDefault}` : '先补齐 provider、默认模型与基础连接参数，后面的能力链路才会稳定。'}</p>
-            <div className="meta-line">
-              <span>{data.config.modelBaseUrl || '未声明 Base URL'}</span>
-              <span>{data.config.contextEngine || 'context.engine 未配置'}</span>
-            </div>
-            <Toolbar>
-              <Button kind="primary" onClick={() => navigate('config')}>进入配置中心</Button>
-              <Button onClick={() => navigate('profiles')}>切换实例</Button>
-            </Toolbar>
-          </div>
-
-          <div className="list-card">
-            <div className="list-card-title">
-              <strong>Gateway 运行与消息链路</strong>
-              <Pill tone={gatewayRunning ? 'good' : 'warn'}>
-                {gatewayRunning ? '运行中' : '待启动'}
-              </Pill>
-            </div>
-            <p>{gatewayRunning ? `PID ${data.gateway?.pid ?? '—'}，当前有 ${data.gateway?.activeAgents ?? 0} 个活跃 Agent。` : '先启动或检查 Gateway，再看平台连接、作业投递和日志材料。'}</p>
-            <div className="meta-line">
-              <span>{data.gateway?.platforms.length ?? 0} 个平台状态</span>
-              <span>{data.gateway?.updatedAt ? formatTimestamp(data.gateway.updatedAt) : '尚无运行更新时间'}</span>
-            </div>
-            <Toolbar>
-              <Button kind="primary" onClick={() => navigate('gateway')}>进入网关控制</Button>
-              <Button onClick={() => navigate('logs')}>查看日志</Button>
-            </Toolbar>
-          </div>
-
-          <div className="list-card">
-            <div className="list-card-title">
-              <strong>技能、扩展与能力面</strong>
-              <Pill tone={data.counts.skills > 0 ? 'good' : 'warn'}>
-                {data.counts.skills > 0 ? `${data.counts.skills} 项已接入` : '待补齐'}
-              </Pill>
-            </div>
-            <p>常用能力建议优先在技能工作台里启用和治理，低频 CLI 接管动作已经后置到“进阶接管”。</p>
-            <div className="meta-line">
-              <span>{data.counts.skills} 个技能</span>
-              <span>{data.counts.cronJobs} 个 Cron 作业</span>
-            </div>
-            <Toolbar>
-              <Button kind="primary" onClick={() => navigate('skills')}>进入技能页</Button>
-              <Button onClick={() => navigate('extensions')}>查看扩展</Button>
-            </Toolbar>
-          </div>
-
-          <div className="list-card">
-            <div className="list-card-title">
-              <strong>最近材料与运行记录</strong>
-              <Pill tone={lastResult || logPreview ? 'good' : 'neutral'}>
-                {lastResult || logPreview ? '已有材料' : '等待新记录'}
-              </Pill>
-            </div>
-            <p>最近动作、日志尾部、会话历史和记忆文件都已经收进“运行材料”，避免首页继续堆满运维细节。</p>
-            <div className="meta-line">
-              <span>{lastLoadedAt ? `最近刷新 ${formatTimestamp(lastLoadedAt)}` : '尚未记录刷新时间'}</span>
-              <span>{autoRefresh ? '自动刷新开启' : '自动刷新关闭'}</span>
-            </div>
-            <Toolbar>
-              <Button kind="primary" onClick={() => setActiveTab('workspace')}>打开运行材料</Button>
-              <Button onClick={() => navigate('sessions')}>查看会话</Button>
-            </Toolbar>
-          </div>
+        <div className="workspace-shortcut-grid dashboard-launcher-grid">
+          {DASHBOARD_OVERVIEW_VIEWS.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              className={`workspace-shortcut-card dashboard-shortcut-card ${overviewView === item.key ? 'active' : ''}`}
+              onClick={() => setOverviewView(item.key)}
+            >
+              <strong><span className="dashboard-shortcut-icon">{item.icon}</span>{item.label}</strong>
+              <span>{item.hint}</span>
+            </button>
+          ))}
         </div>
+        <p className="helper-text top-gap">{activeOverviewView.hint}</p>
       </Panel>
 
-      <div className="two-column wide-left">
+      {overviewView === 'launch' ? (
         <Panel
-          title="运行姿态"
-          subtitle="围绕 model/provider、terminal backend、context engine、memory、toolsets 和 gateway 看真实运行链路。"
+          title="常用去向"
+          subtitle="首页只显式保留最常用入口，其他治理动作继续收在对应页面和深度维护里。"
         >
-          <RuntimePostureView posture={posture} navigate={navigate} />
+          <div className="workspace-shortcut-grid dashboard-launcher-grid">
+            <button type="button" className="workspace-shortcut-card dashboard-shortcut-card" onClick={() => navigate('config')}>
+              <strong><span className="dashboard-shortcut-icon">⚙️</span>配置中心</strong>
+              <span>{modelReady ? `${data.config.modelProvider} / ${data.config.modelDefault}` : '先补 provider、模型与基础参数'}</span>
+            </button>
+            <button type="button" className="workspace-shortcut-card dashboard-shortcut-card" onClick={() => navigate('gateway')}>
+              <strong><span className="dashboard-shortcut-icon">📡</span>通道与网关</strong>
+              <span>{gatewayRunning ? `${data.gateway?.platforms.length ?? 0} 个平台已接入` : '先启动或检查 Gateway'}</span>
+            </button>
+            <button type="button" className="workspace-shortcut-card dashboard-shortcut-card" onClick={() => navigate('skills')}>
+              <strong><span className="dashboard-shortcut-icon">🧩</span>技能与能力</strong>
+              <span>{data.counts.skills > 0 ? `${data.counts.skills} 个技能可继续使用` : '先接入常用技能'}</span>
+            </button>
+            <button
+              type="button"
+              className="workspace-shortcut-card dashboard-shortcut-card"
+              onClick={() => {
+                setWorkspaceView(lastResult ? 'output' : logPreview ? 'logs' : 'links');
+                setActiveTab('workspace');
+              }}
+            >
+              <strong><span className="dashboard-shortcut-icon">🗂️</span>回执与材料</strong>
+              <span>{lastResult || logPreview ? '最近输出和日志已经可看' : '需要时再展开日志、回执和资料'}</span>
+            </button>
+          </div>
+          <p className="helper-text top-gap">自动化、原始文件、依赖检查和官方向导都已经后置，不再占首页主要视觉位。</p>
         </Panel>
+      ) : null}
 
+      {overviewView === 'status' ? (
         <Panel
           title="当前判断"
-          subtitle="先看摘要结论和提醒，不把依赖、文件定位这类低频材料直接压在首页。"
+          subtitle="这里只保留最关键的状态和少量提醒，避免一进来就看到太多块状信息。"
         >
-          <div className="health-grid">
-            {healthItems.map((item) => (
-              <section className="health-card" key={item.key}>
-                <div className="health-card-header">
-                  <strong>{item.title}</strong>
-                  <Pill tone={item.tone}>{item.summary}</Pill>
-                </div>
-                <p>{item.detail}</p>
+          <div className="workspace-summary-strip">
+            {overviewHealthItems.map((item) => (
+              <section className="summary-mini-card" key={item.key}>
+                <span className="summary-mini-label">{item.title}</span>
+                <strong className="summary-mini-value">{item.summary}</strong>
+                <span className="summary-mini-meta">{item.detail}</span>
               </section>
             ))}
           </div>
-
-          <div className="detail-list compact top-gap">
-            <KeyValueRow label="最近刷新" value={lastLoadedAt ? formatTimestamp(lastLoadedAt) : '—'} />
-            <KeyValueRow label="主 Alias" value={primaryAlias?.name ?? '未创建'} />
-            <KeyValueRow label="当前版本信息" value={installation.versionOutput.trim() || '—'} />
+          <p className="helper-text top-gap">{startReadinessMeta}</p>
+          <div className="meta-line">
+            <span>当前起点：{startReadiness}</span>
+            <span>主 Alias：{primaryAlias?.name ?? '未创建'}</span>
+            <span>最近刷新：{lastLoadedAt ? formatTimestamp(lastLoadedAt) : '—'}</span>
           </div>
 
-          {runtimeWarnings.length > 0 ? (
-            <div className="warning-stack">
-              {runtimeWarnings.map((warning) => (
-                <div className="warning-item" key={warning}>
-                  {warning}
-                </div>
-              ))}
-            </div>
+          {overviewWarnings.length > 0 ? (
+            <>
+              <div className="warning-stack">
+                {overviewWarnings.slice(0, 2).map((warning) => (
+                  <div className="warning-item" key={warning}>
+                    {warning}
+                  </div>
+                ))}
+              </div>
+              {remainingWarningCount > 0 ? (
+                <p className="helper-text top-gap">还有 {remainingWarningCount} 条提醒已经继续收进“常用材料”和“深度维护”。</p>
+              ) : null}
+            </>
           ) : (
             <EmptyState
-              title="当前没有额外提醒"
-              description="基础摘要看起来是稳定的，可以继续进入配置、技能或网关工作台做下一步。"
+              title="当前状态比较清晰"
+              description="基础链路看起来可用，可以继续去配置、技能或网关页完成下一步。"
             />
           )}
+
+          <Toolbar>
+            <Button kind="primary" onClick={() => navigate('config')}>去常用配置</Button>
+            <Button onClick={() => setActiveTab('advanced')}>看深度建议</Button>
+          </Toolbar>
         </Panel>
-      </div>
+      ) : null}
+
+      {overviewView === 'checks' ? (
+        <Panel
+          title="快速体检"
+          subtitle="最常用的安全检查单独放成一个工作面，避免和去向判断混在同一屏里。"
+        >
+          <div className="workspace-shortcut-grid dashboard-launcher-grid">
+            {overviewCheckActions.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                className="workspace-shortcut-card dashboard-shortcut-card"
+                onClick={() => void runDiagnostic(item.key, item.label)}
+                disabled={runningAction !== null || !installation.binaryFound}
+              >
+                <strong><span className="dashboard-shortcut-icon">{dashboardDiagnosticIcon(item.key)}</span>{item.label}</strong>
+                <span>{runningAction === `diagnostic:${item.key}` ? `${item.label} 执行中…` : '执行后结果会回写到常用材料里'}</span>
+              </button>
+            ))}
+          </div>
+          <div className="detail-list compact top-gap">
+            <KeyValueRow label="推荐顺序" value="先健康检查，再网关诊断 / 全量状态，最后看安装摘要" />
+            <KeyValueRow label="最近动作" value={lastResult?.label ?? '尚未执行最近一次体检'} />
+          </div>
+          <Toolbar>
+            <Button kind="primary" onClick={() => { setWorkspaceView('output'); setActiveTab('workspace'); }}>查看最近输出</Button>
+            <Button onClick={() => navigate('diagnostics')}>进入诊断页</Button>
+          </Toolbar>
+        </Panel>
+      ) : null}
     </>
   );
 
   const workspaceSection = (
     <>
-      <div className="two-column wide-left">
+      <Panel
+        title="材料入口"
+        subtitle="最近输出、日志预览和继续查看拆成子视图，默认只展开当前最需要的一层。"
+      >
+        <div className="workspace-shortcut-grid dashboard-launcher-grid">
+          {DASHBOARD_WORKSPACE_VIEWS.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              className={`workspace-shortcut-card dashboard-shortcut-card ${workspaceView === item.key ? 'active' : ''}`}
+              onClick={() => setWorkspaceView(item.key)}
+            >
+              <strong><span className="dashboard-shortcut-icon">{item.icon}</span>{item.label}</strong>
+              <span>{item.hint}</span>
+            </button>
+          ))}
+        </div>
+        <p className="helper-text top-gap">{activeWorkspaceView.hint}</p>
+      </Panel>
+
+      {workspaceView === 'output' ? (
         <Panel
           title="最近输出"
           subtitle="无论是直接执行 gateway / doctor，还是把命令交给 Terminal，最后都能在这里看到最近一次动作摘要。"
@@ -686,8 +775,14 @@ export function DashboardPage({ notify, profile, profiles, refreshProfiles, navi
           <div className="detail-list compact top-gap">
             <KeyValueRow label="当前版本信息" value={installation.versionOutput.trim() || '—'} />
           </div>
+          <Toolbar>
+            <Button kind="primary" onClick={() => setWorkspaceView('logs')}>继续看日志</Button>
+            <Button onClick={() => setWorkspaceView('links')}>查看更多材料入口</Button>
+          </Toolbar>
         </Panel>
+      ) : null}
 
+      {workspaceView === 'logs' ? (
         <Panel
           title="日志尾部预览"
           subtitle="先看日志尾部再决定是否切到日志页深挖，自动刷新也收进这个材料区。"
@@ -727,57 +822,52 @@ export function DashboardPage({ notify, profile, profiles, refreshProfiles, navi
               description={logError ?? '还没有读取到日志内容，可切换日志类型后再试。'}
             />
           )}
+          <Toolbar>
+            <Button kind="primary" onClick={() => navigate('logs')}>打开完整日志</Button>
+            <Button onClick={() => setWorkspaceView('links')}>查看更多入口</Button>
+          </Toolbar>
         </Panel>
-      </div>
+      ) : null}
 
-      <div className="two-column">
-        <Panel title="最近会话">
-          {data.recentSessions.length === 0 ? (
-            <EmptyState title="暂无会话" description="先运行一次 Hermes 对话，会话历史就会回到这里。" />
-          ) : (
-            <div className="list-stack">
-              {data.recentSessions.map((session) => (
-                <div className="list-card" key={session.id}>
-                  <div className="list-card-title">
-                    <strong>{session.title || session.preview || session.id}</strong>
-                    <Pill>{session.source}</Pill>
-                  </div>
-                  <p>{session.preview || '无预览文本'}</p>
-                  <div className="meta-line">
-                    <span>{session.model || '未知模型'}</span>
-                    <span>{formatEpoch(session.startedAt)}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Panel>
-
-        <Panel title="记忆文件">
-          <div className="list-stack">
-            {data.memoryFiles.map((item) => (
-              <div className="list-card" key={item.key}>
-                <div className="list-card-title">
-                  <strong>{item.label}</strong>
-                  <Pill tone={item.exists ? 'good' : 'warn'}>
-                    {item.exists ? '已存在' : '缺失'}
-                  </Pill>
-                </div>
-                <p>{item.path}</p>
-                <div className="meta-line">
-                  <span>{item.key}</span>
-                  <span>{formatTimestamp(item.updatedAt)}</span>
-                </div>
-              </div>
-            ))}
+      {workspaceView === 'links' ? (
+        <Panel
+          title="继续查看"
+          subtitle="会话、记忆和更多资料不再直接铺满当前页，需要时再跳转进入对应工作台。"
+        >
+          <div className="workspace-shortcut-grid dashboard-launcher-grid">
+            <button type="button" className="workspace-shortcut-card dashboard-shortcut-card" onClick={() => navigate('logs')}>
+              <strong><span className="dashboard-shortcut-icon">🧾</span>完整日志</strong>
+              <span>{logPreview ? `${logPreview.lines.length} 行预览已加载` : '当前还没有日志预览'}</span>
+            </button>
+            <button type="button" className="workspace-shortcut-card dashboard-shortcut-card" onClick={() => navigate('sessions')}>
+              <strong><span className="dashboard-shortcut-icon">💬</span>会话浏览</strong>
+              <span>{data.counts.sessions > 0 ? `${data.counts.sessions} 条会话轨迹` : '先运行一次对话再回来查看'}</span>
+            </button>
+            <button type="button" className="workspace-shortcut-card dashboard-shortcut-card" onClick={() => navigate('memory')}>
+              <strong><span className="dashboard-shortcut-icon">🧠</span>记忆资料</strong>
+              <span>{memoryReadyCount}/{data.memoryFiles.length} 个记忆文件已就绪</span>
+            </button>
+            <button type="button" className="workspace-shortcut-card dashboard-shortcut-card" onClick={() => setActiveTab('advanced')}>
+              <strong><span className="dashboard-shortcut-icon">🛠️</span>深度维护</strong>
+              <span>{missingArtifacts > 0 ? `${missingArtifacts} 个工作区材料缺失` : '依赖和材料都已经收进进阶层'}</span>
+            </button>
           </div>
         </Panel>
-      </div>
+      ) : null}
     </>
   );
 
   const advancedSection = (
     <>
+      <Panel
+        title="链路建议与分流"
+        subtitle="只有在你需要更深判断时，再到这里展开完整链路建议。"
+      >
+        <RuntimePostureView posture={posture} navigate={navigate} />
+        <p className="helper-text top-gap">当前起点说明：{startReadinessMeta}</p>
+        <p className="helper-text">当前版本：{installation.versionOutput.trim() || '—'}</p>
+      </Panel>
+
       <div className="overview-grid">
         <OverviewCard
           title="CLI 生命周期"
@@ -925,18 +1015,18 @@ export function DashboardPage({ notify, profile, profiles, refreshProfiles, navi
 
   return (
     <div className="page-stack">
-      <div className="stat-cards">
+      <div className="stat-cards stat-cards-4">
+        <StatCard
+          label="开始状态"
+          value={startReadiness}
+          meta={startReadinessMeta}
+          tone={installation.binaryFound && modelReady ? 'running' : 'warning'}
+        />
         <StatCard
           label="Gateway"
           value={gatewayRunning ? '运行中' : '待启动'}
           meta={gatewayRunning ? `PID ${data.gateway?.pid ?? '—'} · ${data.gateway?.activeAgents ?? 0} 个活跃 Agent` : '当前还没有检测到运行中的网关状态。'}
           tone={gatewayRunning ? 'running' : 'warning'}
-        />
-        <StatCard
-          label="CLI / Version"
-          value={installation.binaryFound ? versionHeadline : '未安装 Hermes CLI'}
-          meta={installation.binaryFound ? installation.hermesBinary ?? '已检测到 CLI' : '先安装后才能接管 setup、model、gateway 和 skills。'}
-          tone={installation.binaryFound ? 'running' : 'stopped'}
         />
         <StatCard
           label="Model"
@@ -945,21 +1035,9 @@ export function DashboardPage({ notify, profile, profiles, refreshProfiles, navi
           tone={modelReady ? 'running' : 'warning'}
         />
         <StatCard
-          label="Workspace"
-          value={`${data.counts.sessions} 会话 / ${data.counts.skills} 技能`}
-          meta={`Cron ${data.counts.cronJobs} · 主 Alias ${primaryAlias?.name ?? '未创建'}`}
-        />
-        <StatCard
-          label="Dependencies"
-          value={`${dependencyReadyCount}/${installation.dependencies.length}`}
-          meta={dependencyReadyCount === installation.dependencies.length ? 'CLI 周边依赖齐备。' : '还存在缺失依赖，建议结合 doctor 继续体检。'}
-          tone={dependencyReadyCount === installation.dependencies.length ? 'running' : 'warning'}
-        />
-        <StatCard
-          label="Artifacts"
-          value={missingArtifacts === 0 ? '工作区完整' : `缺失 ${missingArtifacts} 项`}
-          meta={`Home ${installation.hermesHomeExists ? 'Ready' : 'Missing'} · logs ${installation.logsDirExists ? 'Ready' : 'Missing'}`}
-          tone={missingArtifacts === 0 ? 'running' : 'warning'}
+          label="能力工作台"
+          value={`${data.counts.skills} 技能 / ${data.counts.cronJobs} 作业`}
+          meta={`会话 ${data.counts.sessions} · 主 Alias ${primaryAlias?.name ?? '未创建'}`}
         />
       </div>
 
@@ -976,18 +1054,7 @@ export function DashboardPage({ notify, profile, profiles, refreshProfiles, navi
         <Button onClick={() => void runDiagnostic('doctor', '健康检查')} disabled={runningAction !== null || !installation.binaryFound}>
           健康检查
         </Button>
-        <Button onClick={() => navigate('config')}>配置中心</Button>
-        <Button onClick={() => navigate('gateway')}>网关控制</Button>
-        <Button onClick={() => navigate('logs')}>日志查看</Button>
-        <Button
-          onClick={() => {
-            void load({ includeProfiles: true });
-            void loadLogPreview({ silent: true });
-          }}
-          disabled={refreshing}
-        >
-          {refreshing ? '刷新中…' : '刷新'}
-        </Button>
+        <Button onClick={() => setActiveTab('advanced')}>深度维护</Button>
       </div>
 
       <div className="tab-bar">

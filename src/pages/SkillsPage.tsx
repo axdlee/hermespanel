@@ -9,7 +9,7 @@ import {
   type DrilldownSeed,
 } from '../lib/drilldown';
 import { openFinderLocation } from '../lib/desktop';
-import { formatTimestamp, truncate } from '../lib/format';
+import { truncate } from '../lib/format';
 import type {
   CommandRunResult,
   CronJobsSnapshot,
@@ -23,11 +23,40 @@ import type {
 import type { PageProps } from './types';
 
 type WorkspaceTab = 'overview' | 'studio' | 'registry';
+type SkillsOverviewViewKey = 'launch' | 'focus' | 'warnings';
+type SkillsRailViewKey = 'pick' | 'focus';
+type SkillsRegistryViewKey = 'install' | 'governance' | 'wiring' | 'output';
+type SkillsStudioViewKey = 'frontmatter' | 'content' | 'localops' | 'sources';
 
 const WORKSPACE_TABS: Array<{ key: WorkspaceTab; label: string; hint: string }> = [
   { key: 'overview', label: '常用总览', hint: '先看推荐路径、当前技能摘要和关键提醒。' },
   { key: 'registry', label: '安装与启用', hint: '优先做搜索、预检、安装和常用布线核对。' },
   { key: 'studio', label: '本地维护', hint: '需要编辑 SKILL.md、导入或删除目录时再展开。' },
+];
+
+const OVERVIEW_VIEWS: Array<{ key: SkillsOverviewViewKey; label: string; icon: string; hint: string }> = [
+  { key: 'launch', label: '常用去向', icon: '🚀', hint: '先决定去安装启用、扩展运行态、自动化编排还是本地维护。' },
+  { key: 'focus', label: '当前焦点', icon: '🌤️', hint: '只看当前技能的一层摘要和下一步动作，不把提醒区一起铺开。' },
+  { key: 'warnings', label: '关键提醒', icon: '⚠️', hint: '真正影响技能闭环的提醒单独收成一层，需要时再看。' },
+];
+
+const RAIL_VIEWS: Array<{ key: SkillsRailViewKey; label: string; icon: string; hint: string }> = [
+  { key: 'pick', label: '选择技能', icon: '🗂️', hint: '先搜索和筛选，再从短列表锁定一个技能。' },
+  { key: 'focus', label: '当前焦点', icon: '🎯', hint: '只看当前技能摘要和快捷动作，不和长列表同屏。' },
+];
+
+const REGISTRY_VIEWS: Array<{ key: SkillsRegistryViewKey; label: string; icon: string; hint: string }> = [
+  { key: 'install', label: '搜索与安装', icon: '📦', hint: '默认先做搜索、预检和安装，不把低频治理动作堆在首页。' },
+  { key: 'governance', label: '更新与核对', icon: '🧭', hint: '更新、审计和配置链路核对统一收进这一层。' },
+  { key: 'wiring', label: '目标布线', icon: '🔗', hint: '只在需要确认目录、运行态和编排是否闭环时再看。' },
+  { key: 'output', label: '最近回执', icon: '🧾', hint: '原始输出后置到单独一层，避免主视图被日志占满。' },
+];
+
+const STUDIO_VIEWS: Array<{ key: SkillsStudioViewKey; label: string; icon: string; hint: string }> = [
+  { key: 'frontmatter', label: '基本信息', icon: '🏷️', hint: '只接管名称和描述，适合快速整理技能门面。' },
+  { key: 'content', label: 'SKILL.md', icon: '📝', hint: '正文编修和文件定位只在这一层出现。' },
+  { key: 'localops', label: '目录控制', icon: '🧯', hint: '危险操作与目录定位继续后置，避免误触。' },
+  { key: 'sources', label: '导入与新建', icon: '🧰', hint: '导入现成技能或新建私有技能时，再进入这里。' },
 ];
 
 interface SkillDraft {
@@ -138,6 +167,10 @@ export function SkillsPage({ notify, profile, navigate }: PageProps) {
   const [registryQuery, setRegistryQuery] = useState('');
   const [installTarget, setInstallTarget] = useState('');
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>('overview');
+  const [railView, setRailView] = useState<SkillsRailViewKey>('pick');
+  const [overviewView, setOverviewView] = useState<SkillsOverviewViewKey>('launch');
+  const [registryView, setRegistryView] = useState<SkillsRegistryViewKey>('install');
+  const [studioView, setStudioView] = useState<SkillsStudioViewKey>('frontmatter');
   const [skillFile, setSkillFile] = useState<SkillFileDetail | null>(null);
   const [skillFileSavedContent, setSkillFileSavedContent] = useState('');
   const [skillFileLoading, setSkillFileLoading] = useState(false);
@@ -146,11 +179,8 @@ export function SkillsPage({ notify, profile, navigate }: PageProps) {
   const [createDraft, setCreateDraft] = useState<SkillDraft>(cloneSkillDraft());
   const [importDraft, setImportDraft] = useState<SkillImportDraft>(cloneSkillImportDraft());
   const [lastImportedSkill, setLastImportedSkill] = useState<SkillImportResult | null>(null);
-  const [frontmatterExpanded, setFrontmatterExpanded] = useState(true);
-  const [contentExpanded, setContentExpanded] = useState(true);
-  const [localOpsExpanded, setLocalOpsExpanded] = useState(false);
-  const [importExpanded, setImportExpanded] = useState(false);
-  const [createExpanded, setCreateExpanded] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const [showAllFilteredSkills, setShowAllFilteredSkills] = useState(false);
   const [runningAction, setRunningAction] = useState<string | null>(null);
   const [lastCommandLabel, setLastCommandLabel] = useState<string | null>(null);
   const [lastCommand, setLastCommand] = useState<CommandRunResult | null>(null);
@@ -170,6 +200,15 @@ export function SkillsPage({ notify, profile, navigate }: PageProps) {
   function storeResult(label: string, result: CommandRunResult) {
     setLastCommandLabel(label);
     setLastCommand(result);
+  }
+
+  function openRegistryInstall(nextSkill?: SkillItem | null) {
+    if (nextSkill) {
+      setRegistryQuery(nextSkill.name);
+      setInstallTarget(nextSkill.name);
+    }
+    setRegistryView('install');
+    setWorkspaceTab('registry');
   }
 
   async function load() {
@@ -332,6 +371,7 @@ export function SkillsPage({ notify, profile, navigate }: PageProps) {
       notify('success', `${detail.name} 已创建到当前实例的本地 skills 目录。`);
       setCreateDraft(cloneSkillDraft());
       setSelectedPath(detail.filePath);
+      setStudioView('content');
       setWorkspaceTab('studio');
       await load();
     } catch (reason) {
@@ -365,6 +405,7 @@ export function SkillsPage({ notify, profile, navigate }: PageProps) {
       notify('success', `${result.imported.name} 已导入，复制了 ${result.copiedFiles} 个文件。`);
       setImportDraft(cloneSkillImportDraft({ category: result.imported.category }));
       setSelectedPath(result.imported.filePath);
+      setStudioView('sources');
       setWorkspaceTab('studio');
       await load();
     } catch (reason) {
@@ -425,8 +466,19 @@ export function SkillsPage({ notify, profile, navigate }: PageProps) {
     setSelectedPath(null);
     setSkillDeleteConfirm('');
     setWorkspaceTab('overview');
+    setRailView('pick');
+    setOverviewView('launch');
+    setRegistryView('install');
+    setStudioView('frontmatter');
+    setShowFilters(false);
+    setShowAllFilteredSkills(false);
     void load();
   }, [profile]);
+
+  useEffect(() => {
+    setShowFilters(false);
+    setShowAllFilteredSkills(false);
+  }, [query, categoryFilter]);
 
   useEffect(() => {
     if (!selectedPath) {
@@ -485,6 +537,7 @@ export function SkillsPage({ notify, profile, navigate }: PageProps) {
         .includes(term);
     });
   }, [categoryFilter, query, skills]);
+  const visibleFilteredSkills = showAllFilteredSkills ? filtered : filtered.slice(0, 8);
 
   const selectedSkill = useMemo(
     () => filtered.find((skill) => skill.filePath === selectedPath)
@@ -510,6 +563,15 @@ export function SkillsPage({ notify, profile, navigate }: PageProps) {
     : false;
   const quickCategories = categories.filter((item) => item !== 'all').slice(0, 6);
   const workspaceTabLabel = WORKSPACE_TABS.find((tab) => tab.key === workspaceTab)?.label ?? '常用总览';
+  const activeOverviewView = OVERVIEW_VIEWS.find((item) => item.key === overviewView) ?? OVERVIEW_VIEWS[0];
+  const activeRailView = RAIL_VIEWS.find((item) => item.key === railView) ?? RAIL_VIEWS[0];
+  const activeRegistryView = REGISTRY_VIEWS.find((item) => item.key === registryView) ?? REGISTRY_VIEWS[0];
+  const activeStudioView = STUDIO_VIEWS.find((item) => item.key === studioView) ?? STUDIO_VIEWS[0];
+  const hiddenFilteredSkillCount = Math.max(0, filtered.length - visibleFilteredSkills.length);
+  const hasActiveFilters = Boolean(query.trim()) || categoryFilter !== 'all';
+  const selectedSkillSummary = selectedSkill
+    ? truncate(selectedSkill.description || selectedSkill.preview || '当前技能暂无更多摘要。', 92)
+    : '';
   const warnings = useMemo(() => {
     const nextWarnings: string[] = [];
 
@@ -608,39 +670,6 @@ export function SkillsPage({ notify, profile, navigate }: PageProps) {
     );
   }
 
-  function renderCronJobs() {
-    if (!selectedSkill) {
-      return <EmptyState title="未选择技能" description="先从左侧选择一个技能。" />;
-    }
-    if (!skillUsageJobs.length) {
-      return <EmptyState title="尚未接入自动化" description="这个技能当前还没有被任何 cron 作业显式引用。" />;
-    }
-    return (
-      <div className="list-stack">
-        {skillUsageJobs.map((job) => (
-          <div className="list-card" key={job.id}>
-            <div className="list-card-title">
-              <strong>{job.name}</strong>
-              <div className="pill-row">
-                <Pill tone={job.state === 'scheduled' ? 'good' : job.state === 'paused' ? 'warn' : 'bad'}>
-                  {job.state}
-                </Pill>
-                <Pill tone={job.deliver === 'local' || job.deliver === 'origin' ? 'neutral' : 'warn'}>
-                  {job.deliver}
-                </Pill>
-              </div>
-            </div>
-            <p>{truncate(job.prompt || '无 prompt', 120)}</p>
-            <div className="meta-line">
-              <span>{job.scheduleDisplay || '未提供调度表达式'}</span>
-              <span>{formatTimestamp(job.nextRunAt)}</span>
-            </div>
-          </div>
-        ))}
-      </div>
-    );
-  }
-
   if (loading || !snapshot || !installation || !extensions || !cronSnapshot) {
     return <LoadingState label="正在读取技能目录、运行态与安装治理快照。" />;
   }
@@ -716,140 +745,209 @@ export function SkillsPage({ notify, profile, navigate }: PageProps) {
           <section className="workspace-rail">
             <div className="workspace-rail-header">
               <div>
-                <h2 className="config-section-title">选择技能</h2>
-                <p className="config-section-desc">先选一个技能，再在右侧继续安装启用或本地维护。</p>
+                <h2 className="config-section-title">技能侧栏</h2>
+                <p className="config-section-desc">左侧也拆成二级工作面，避免搜索、焦点和长列表同时堆叠。</p>
               </div>
               <Pill tone={selectedSkill ? 'neutral' : 'warn'}>{selectedSkill?.name || '等待选择'}</Pill>
             </div>
 
-            <div className="workspace-rail-toolbar">
-              <input
-                className="search-input"
-                placeholder="搜索名称、分类、描述、路径"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-              />
-              <select
-                className="select-input"
-                value={categoryFilter}
-                onChange={(event) => setCategoryFilter(event.target.value)}
-              >
-                {categories.map((item) => (
-                  <option key={item} value={item}>
-                    {item === 'all' ? '全部分类' : item}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {quickCategories.length > 0 ? (
-              <div className="selection-chip-grid top-gap">
+            <div className="workspace-shortcut-grid dashboard-launcher-grid">
+              {RAIL_VIEWS.map((item) => (
                 <button
+                  key={item.key}
                   type="button"
-                  className={`button button-secondary selection-chip ${categoryFilter === 'all' ? 'selection-chip-active' : ''}`.trim()}
-                  onClick={() => setCategoryFilter('all')}
+                  className={`workspace-shortcut-card dashboard-shortcut-card ${railView === item.key ? 'active' : ''}`}
+                  onClick={() => setRailView(item.key)}
                 >
-                  全部分类
+                  <strong><span className="dashboard-shortcut-icon">{item.icon}</span>{item.label}</strong>
+                  <span>{item.key === 'focus' ? (selectedSkill ? selectedSkill.name : '先从列表里选一个技能') : item.hint}</span>
                 </button>
-                {quickCategories.map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    className={`button button-secondary selection-chip ${categoryFilter === item ? 'selection-chip-active' : ''}`.trim()}
-                    onClick={() => setCategoryFilter(item)}
-                  >
-                    {item}
-                  </button>
-                ))}
-              </div>
-            ) : null}
+              ))}
+            </div>
+            <p className="helper-text top-gap">{activeRailView.hint}</p>
 
-            <section className="workspace-rail-section">
-              <div className="workspace-rail-section-header">
-                <span className="workspace-rail-section-title">当前摘要</span>
-                <Pill tone={selectedSkill ? (selectedExistsInRuntime ? 'good' : 'warn') : 'neutral'}>
-                  {selectedSkill ? (selectedExistsInRuntime ? '运行面已接入' : '运行面待同步') : '等待选择'}
-                </Pill>
-              </div>
-              <div className="detail-list compact">
-                <KeyValueRow label="当前技能" value={selectedSkill?.name || '—'} />
-                <KeyValueRow label="分类" value={selectedSkill ? categoryLabel(selectedSkill.category) : '—'} />
-                <KeyValueRow label="编排" value={selectedSkill ? skillUsageJobs.length : 0} />
-                <KeyValueRow label="运行态" value={selectedSkill ? (selectedExistsInRuntime ? '已进入' : '待同步') : '—'} />
-              </div>
-              <div className="workspace-rail-toolbar workspace-rail-toolbar-grid top-gap">
-                <Button
-                  kind="primary"
-                  disabled={runningAction !== null || !selectedSkill}
-                  onClick={() => {
-                    if (!selectedSkill) return;
-                    setRegistryQuery(selectedSkill.name);
-                    setInstallTarget(selectedSkill.name);
-                    setWorkspaceTab('registry');
-                  }}
-                >
-                  去安装启用
-                </Button>
-                <Button
-                  disabled={runningAction !== null || !selectedSkill}
-                  onClick={() => selectedSkill && void openInFinder(directoryOf(selectedSkill.filePath), `${selectedSkill.name} 技能目录`)}
-                >
-                  打开目录
-                </Button>
-                <Button
-                  disabled={!selectedSkill}
-                  onClick={() => navigate('logs', logsIntent)}
-                >
-                  查看日志
-                </Button>
-                <Button onClick={() => navigate('extensions', extensionsIntent)}>
-                  扩展运行态
-                </Button>
-              </div>
-            </section>
+            {railView === 'pick' ? (
+              <>
+                <div className="workspace-rail-toolbar">
+                  <input
+                    className="search-input"
+                    placeholder="搜索名称、分类、描述、路径"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                  />
+                  <Button onClick={() => setShowFilters((current) => !current)}>
+                    {showFilters ? '收起筛选' : hasActiveFilters ? '筛选已启用' : '更多筛选'}
+                  </Button>
+                </div>
 
-            {warnings.length > 0 && workspaceTab !== 'overview' ? (
-              <div className="warning-stack top-gap">
-                {warnings.slice(0, 3).map((warning) => (
-                  <div className="warning-item" key={warning}>
-                    {warning}
+                {showFilters ? (
+                  <>
+                    <div className="workspace-rail-toolbar top-gap">
+                      <select
+                        className="select-input"
+                        value={categoryFilter}
+                        onChange={(event) => setCategoryFilter(event.target.value)}
+                      >
+                        {categories.map((item) => (
+                          <option key={item} value={item}>
+                            {item === 'all' ? '全部分类' : item}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {quickCategories.length > 0 ? (
+                      <div className="selection-chip-grid top-gap">
+                        <button
+                          type="button"
+                          className={`button button-secondary selection-chip ${categoryFilter === 'all' ? 'selection-chip-active' : ''}`.trim()}
+                          onClick={() => setCategoryFilter('all')}
+                        >
+                          全部分类
+                        </button>
+                        {quickCategories.map((item) => (
+                          <button
+                            key={item}
+                            type="button"
+                            className={`button button-secondary selection-chip ${categoryFilter === item ? 'selection-chip-active' : ''}`.trim()}
+                            onClick={() => setCategoryFilter(item)}
+                          >
+                            {item}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <p className="helper-text top-gap">
+                    {hasActiveFilters
+                      ? `当前筛选：${categoryFilter === 'all' ? '全部分类' : categoryFilter}${query.trim() ? ` · ${query.trim()}` : ''}`
+                      : '默认只露出搜索框，分类筛选收进“更多筛选”。'}
+                  </p>
+                )}
+
+                <section className="workspace-rail-section">
+                  <div className="workspace-rail-section-header">
+                    <span className="workspace-rail-section-title">技能列表</span>
+                    <Pill>{filtered.length}</Pill>
                   </div>
-                ))}
-              </div>
+                  {filtered.length === 0 ? (
+                    <div className="top-gap">
+                      <EmptyState title="未匹配到技能" description="调整关键词或分类后再试。" />
+                    </div>
+                  ) : (
+                    <>
+                      <div className="list-stack workspace-list-scroll top-gap">
+                        {visibleFilteredSkills.map((skill) => {
+                          const referenced = jobs.some((job) => job.skills.includes(skill.name));
+                          const runtimeVisible = extensions.runtimeSkills.some((item) => item.name === skill.name);
+                          return (
+                            <button
+                              type="button"
+                              className={`list-card session-card ${selectedSkill?.filePath === skill.filePath ? 'selected' : ''}`}
+                              key={skill.filePath}
+                              onClick={() => {
+                                setSelectedPath(skill.filePath);
+                                setRailView('focus');
+                              }}
+                            >
+                              <div className="list-card-title">
+                                <strong>{skill.name}</strong>
+                                <div className="pill-row">
+                                  <Pill>{categoryLabel(skill.category)}</Pill>
+                                  <Pill tone={runtimeVisible ? 'good' : 'warn'}>{runtimeVisible ? '运行面可见' : '待进入运行面'}</Pill>
+                                </div>
+                              </div>
+                              <p className="skill-list-copy">{truncate(skill.description || skill.preview || '底层未返回描述。', 72)}</p>
+                              <div className="meta-line">
+                                <span>{skill.relativePath}</span>
+                                <span>{referenced ? '已编排' : '未编排'}</span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {filtered.length > visibleFilteredSkills.length ? (
+                        <div className="workspace-rail-toolbar top-gap">
+                          <Button onClick={() => setShowAllFilteredSkills((current) => !current)}>
+                            {showAllFilteredSkills ? '收起技能列表' : `展开更多技能（剩余 ${hiddenFilteredSkillCount} 项）`}
+                          </Button>
+                        </div>
+                      ) : null}
+                    </>
+                  )}
+                </section>
+              </>
             ) : null}
 
-            {filtered.length === 0 ? (
-              <EmptyState title="未匹配到技能" description="调整关键词或分类后再试。" />
-            ) : (
-              <div className="list-stack workspace-list-scroll">
-                {filtered.map((skill) => {
-                  const referenced = jobs.some((job) => job.skills.includes(skill.name));
-                  const runtimeVisible = extensions.runtimeSkills.some((item) => item.name === skill.name);
-                  return (
-                    <button
-                      type="button"
-                      className={`list-card session-card ${selectedSkill?.filePath === skill.filePath ? 'selected' : ''}`}
-                      key={skill.filePath}
-                      onClick={() => setSelectedPath(skill.filePath)}
-                    >
-                      <div className="list-card-title">
-                        <strong>{skill.name}</strong>
-                        <div className="pill-row">
-                          <Pill>{categoryLabel(skill.category)}</Pill>
-                          {referenced ? <Pill tone="good">Cron 中</Pill> : <Pill tone="neutral">未编排</Pill>}
-                          <Pill tone={runtimeVisible ? 'good' : 'warn'}>{runtimeVisible ? '运行面可见' : '待进入运行面'}</Pill>
+            {railView === 'focus' ? (
+              <>
+                <section className="workspace-rail-section">
+                  <div className="workspace-rail-section-header">
+                    <span className="workspace-rail-section-title">当前焦点</span>
+                    <Pill tone={selectedSkill ? (selectedExistsInRuntime ? 'good' : 'warn') : 'neutral'}>
+                      {selectedSkill ? (selectedExistsInRuntime ? '运行面已接入' : '运行面待同步') : '等待选择'}
+                    </Pill>
+                  </div>
+                  {selectedSkill ? (
+                    <>
+                      <button
+                        type="button"
+                        className="list-card session-card selected top-gap"
+                        onClick={() => setSelectedPath(selectedSkill.filePath)}
+                      >
+                        <div className="list-card-title">
+                          <strong>{selectedSkill.name}</strong>
+                          <div className="pill-row">
+                            <Pill>{categoryLabel(selectedSkill.category)}</Pill>
+                            <Pill tone={skillUsageJobs.length > 0 ? 'warn' : 'neutral'}>
+                              {skillUsageJobs.length > 0 ? `${skillUsageJobs.length} 个作业` : '未编排'}
+                            </Pill>
+                          </div>
                         </div>
+                        <p className="skill-list-copy">{selectedSkillSummary}</p>
+                        <div className="meta-line">
+                          <span>{selectedSkill.relativePath}</span>
+                          <span>{selectedExistsInRuntime ? '运行面可见' : '等待同步'}</span>
+                        </div>
+                      </button>
+                      <div className="workspace-rail-toolbar workspace-rail-toolbar-grid top-gap">
+                        <Button
+                          kind="primary"
+                          disabled={runningAction !== null || !selectedSkill}
+                          onClick={() => openRegistryInstall(selectedSkill)}
+                        >
+                          去安装启用
+                        </Button>
+                        <Button
+                          disabled={runningAction !== null || !selectedSkill}
+                          onClick={() => selectedSkill && void openInFinder(directoryOf(selectedSkill.filePath), `${selectedSkill.name} 技能目录`)}
+                        >
+                          打开目录
+                        </Button>
+                        <Button onClick={() => setRailView('pick')}>
+                          回到列表
+                        </Button>
                       </div>
-                      <p className="skill-list-copy">{truncate(skill.description || skill.preview || '底层未返回描述。', 92)}</p>
-                      <div className="meta-line">
-                        <span>{skill.relativePath}</span>
-                        <span>{runtimeVisible ? '已进入运行面' : '仅目录可见'}</span>
+                      <p className="helper-text top-gap">默认只回答“当前是谁、状态怎样、下一步去哪”，其他细节继续留在右侧主区。</p>
+                    </>
+                  ) : (
+                    <div className="top-gap">
+                      <EmptyState title="还没选中技能" description="先切回“选择技能”，再从短列表点一个目标。" />
+                    </div>
+                  )}
+                </section>
+
+                {warnings.length > 0 && workspaceTab !== 'overview' ? (
+                  <div className="warning-stack top-gap">
+                    {warnings.slice(0, 1).map((warning) => (
+                      <div className="warning-item" key={warning}>
+                        {warning}
                       </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+                    ))}
+                  </div>
+                ) : null}
+              </>
+            ) : null}
           </section>
 
           <div className="workspace-main">
@@ -859,98 +957,88 @@ export function SkillsPage({ notify, profile, navigate }: PageProps) {
                   <div className="workspace-main-header">
                     <div>
                       <div className="panel-title-row">
-                        <h2 className="config-section-title">推荐下一步</h2>
-                        <Pill tone={warnings.length > 0 ? 'warn' : 'good'}>
-                          {warnings.length > 0 ? `${warnings.length} 条提醒` : '当前稳定'}
-                        </Pill>
+                        <h2 className="config-section-title">总览入口</h2>
+                        <Pill>{activeOverviewView.label}</Pill>
                       </div>
                       <p className="workspace-main-copy">
-                        把最常走的技能路径放前面，小白先顺着做，熟手再进入安装启用和本地维护。
+                        总览主区继续拆成二级工作面，默认只展开一个主模块，减少右侧主区的拥挤感。
                       </p>
                     </div>
                   </div>
-                  <div className="list-stack">
-                    <div className="list-card">
-                      <div className="list-card-title">
-                        <strong>先确认当前技能有没有真正接入运行面</strong>
-                        <Pill tone={selectedSkill ? (selectedExistsInRuntime ? 'good' : 'warn') : 'neutral'}>
-                          {selectedSkill ? (selectedExistsInRuntime ? '已接入' : '待启用') : '等待选择'}
-                        </Pill>
-                      </div>
-                      <p>{selectedSkill ? `${selectedSkill.name} ${selectedExistsInRuntime ? '已经' : '还没有'}出现在当前运行态。` : '先从左侧选一个技能，再判断它是否已经接入当前实例。'}</p>
-                      <div className="meta-line">
-                        <span>{selectedSkill ? categoryLabel(selectedSkill.category) : '未选择技能'}</span>
-                        <span>{selectedSkill ? selectedSkill.relativePath : '等待目录目标'}</span>
-                      </div>
-                      <Toolbar>
-                        <Button
-                          kind="primary"
-                          disabled={runningAction !== null || !selectedSkill}
-                          onClick={() => {
-                            if (!selectedSkill) return;
-                            setRegistryQuery(selectedSkill.name);
-                            setInstallTarget(selectedSkill.name);
-                            setWorkspaceTab('registry');
-                          }}
-                        >
-                          去安装启用
-                        </Button>
-                        <Button disabled={!selectedSkill} onClick={() => navigate('extensions', extensionsIntent)}>
-                          查看扩展运行态
-                        </Button>
-                      </Toolbar>
-                    </div>
-
-                    <div className="list-card">
-                      <div className="list-card-title">
-                        <strong>再核对自动化和日志</strong>
-                        <Pill tone={selectedSkill && skillUsageJobs.length > 0 ? 'good' : 'warn'}>
-                          {selectedSkill ? `${skillUsageJobs.length} 个作业` : '等待选择'}
-                        </Pill>
-                      </div>
-                      <p>确认这个技能有没有被 cron 显式引用，再决定是继续布线还是只做本地维护。</p>
-                      <div className="meta-line">
-                        <span>{usedSkillNames.size} 个技能已进入编排</span>
-                        <span>{jobs.length} 个作业</span>
-                      </div>
-                      <Toolbar>
-                        <Button kind="primary" onClick={() => navigate('cron')}>查看编排</Button>
-                        <Button disabled={!selectedSkill} onClick={() => navigate('logs', logsIntent)}>
-                          查看日志
-                        </Button>
-                      </Toolbar>
-                    </div>
-
-                    <div className="list-card">
-                      <div className="list-card-title">
-                        <strong>需要改 SKILL.md 时再进入本地维护</strong>
-                        <Pill tone={selectedSkill ? 'neutral' : 'warn'}>
-                          {selectedSkill ? '可以继续' : '等待目标'}
-                        </Pill>
-                      </div>
-                      <p>frontmatter、正文、导入和删除都已收进本地维护，不在常用总览里默认铺开。</p>
-                      <div className="meta-line">
-                        <span>{selectedSkill ? (skillFile ? '正文已接管' : '正文待读取') : '还没选择技能'}</span>
-                        <span>{lastImportedSkill ? `最近导入 ${lastImportedSkill.imported.name}` : '暂无最近导入'}</span>
-                      </div>
-                      <Toolbar>
-                        <Button kind="primary" disabled={!selectedSkill} onClick={() => setWorkspaceTab('studio')}>
-                          进入本地维护
-                        </Button>
-                        <Button disabled={!selectedSkill} onClick={() => selectedSkill && void openInFinder(directoryOf(selectedSkill.filePath), `${selectedSkill.name} 技能目录`)}>
-                          打开目录
-                        </Button>
-                      </Toolbar>
-                    </div>
+                  <div className="workspace-shortcut-grid dashboard-launcher-grid">
+                    {OVERVIEW_VIEWS.map((item) => (
+                      <button
+                        key={item.key}
+                        type="button"
+                        className={`workspace-shortcut-card dashboard-shortcut-card ${overviewView === item.key ? 'active' : ''}`}
+                        onClick={() => setOverviewView(item.key)}
+                      >
+                        <strong><span className="dashboard-shortcut-icon">{item.icon}</span>{item.label}</strong>
+                        <span>{item.hint}</span>
+                      </button>
+                    ))}
                   </div>
+                  <p className="helper-text top-gap">{activeOverviewView.hint}</p>
                 </section>
 
-                <div className="workspace-bottom-grid workspace-bottom-grid-dense top-gap">
-                  <section className="workspace-main-card">
+                {overviewView === 'launch' ? (
+                  <section className="workspace-main-card top-gap">
                     <div className="workspace-main-header">
                       <div>
-                        <h2 className="config-section-title">当前技能摘要</h2>
-                        <p className="config-section-desc">只保留当前技能最重要的目录态、运行态和布线信息。</p>
+                        <h2 className="config-section-title">常用去向</h2>
+                        <p className="config-section-desc">首页只保留最常用的四条路径，安装、运行态、编排和本地维护分开露出。</p>
+                      </div>
+                    </div>
+                    <div className="workspace-shortcut-grid dashboard-launcher-grid">
+                      <button
+                        type="button"
+                        className="workspace-shortcut-card dashboard-shortcut-card"
+                        disabled={!selectedSkill}
+                        onClick={() => openRegistryInstall(selectedSkill)}
+                      >
+                        <strong><span className="dashboard-shortcut-icon">📦</span>安装与启用</strong>
+                        <span>{selectedSkill ? `${selectedSkill.name} ${selectedExistsInRuntime ? '可继续核对安装态' : '建议先做启用或预检'}` : '先从左侧选择一个技能'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="workspace-shortcut-card dashboard-shortcut-card"
+                        disabled={!selectedSkill}
+                        onClick={() => navigate('extensions', extensionsIntent)}
+                      >
+                        <strong><span className="dashboard-shortcut-icon">🧩</span>运行态核对</strong>
+                        <span>{selectedSkill ? (selectedExistsInRuntime ? '当前技能已进入运行态，可继续核对来源' : '当前技能还没进入运行态') : '先选技能再看扩展运行态'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="workspace-shortcut-card dashboard-shortcut-card"
+                        onClick={() => navigate('cron')}
+                      >
+                        <strong><span className="dashboard-shortcut-icon">⏱️</span>自动化编排</strong>
+                        <span>{selectedSkill ? `${skillUsageJobs.length} 个作业显式引用当前技能` : `${jobs.length} 个作业可继续核对技能布线`}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="workspace-shortcut-card dashboard-shortcut-card"
+                        disabled={!selectedSkill}
+                        onClick={() => {
+                          setStudioView('frontmatter');
+                          setWorkspaceTab('studio');
+                        }}
+                      >
+                        <strong><span className="dashboard-shortcut-icon">📝</span>本地维护</strong>
+                        <span>{selectedSkill ? (skillFile ? 'frontmatter 与正文已经可编辑' : '正文正在准备接管') : '需要时再进入本地维护'}</span>
+                      </button>
+                    </div>
+                    <p className="helper-text top-gap">常用总览只负责决定下一步去哪里，不再直接铺开大量技能细节与编辑块。</p>
+                  </section>
+                ) : null}
+
+                {overviewView === 'focus' ? (
+                  <section className="workspace-main-card top-gap">
+                    <div className="workspace-main-header">
+                      <div>
+                        <h2 className="config-section-title">当前焦点技能</h2>
+                        <p className="config-section-desc">默认只保留一层摘要和少量后续动作，避免总览页继续变成信息墙。</p>
                       </div>
                       <Pill tone={selectedSkill ? (selectedExistsInRuntime ? 'good' : 'warn') : 'neutral'}>
                         {selectedSkill ? (selectedExistsInRuntime ? '运行面已接入' : '运行面待同步') : '等待选择'}
@@ -958,30 +1046,41 @@ export function SkillsPage({ notify, profile, navigate }: PageProps) {
                     </div>
                     {selectedSkill ? (
                       <>
-                        <div className="detail-list compact">
-                          <KeyValueRow label="名称" value={selectedSkill.name} />
-                          <KeyValueRow label="分类" value={categoryLabel(selectedSkill.category)} />
-                          <KeyValueRow label="相对路径" value={selectedSkill.relativePath} />
-                          <KeyValueRow label="运行态可见" value={selectedExistsInRuntime ? '是' : '否'} />
-                          <KeyValueRow label="编排引用" value={skillUsageJobs.length} />
-                          <KeyValueRow label="文件路径" value={selectedSkill.filePath} />
+                        <div className="workspace-summary-strip">
+                          <section className="summary-mini-card">
+                            <span className="summary-mini-label">名称</span>
+                            <strong className="summary-mini-value">{selectedSkill.name}</strong>
+                            <span className="summary-mini-meta">{categoryLabel(selectedSkill.category)}</span>
+                          </section>
+                          <section className="summary-mini-card">
+                            <span className="summary-mini-label">运行态</span>
+                            <strong className="summary-mini-value">{selectedExistsInRuntime ? '已接入' : '待同步'}</strong>
+                            <span className="summary-mini-meta">{selectedExistsInRuntime ? '当前实例已能看到它' : '建议先做启用或运行态核对'}</span>
+                          </section>
+                          <section className="summary-mini-card">
+                            <span className="summary-mini-label">编排引用</span>
+                            <strong className="summary-mini-value">{skillUsageJobs.length}</strong>
+                            <span className="summary-mini-meta">{skillUsageJobs.length > 0 ? '当前技能已进入 cron 编排' : '当前还没有进入自动化编排'}</span>
+                          </section>
+                          <section className="summary-mini-card">
+                            <span className="summary-mini-label">目录路径</span>
+                            <strong className="summary-mini-value">{selectedSkill.relativePath}</strong>
+                            <span className="summary-mini-meta">{skillFile ? '正文已接管' : '正文待读取'}</span>
+                          </section>
                         </div>
-                        <pre className="code-block compact-code skill-detail-preview top-gap">{selectedSkill.preview || '无预览内容'}</pre>
+                        <p className="helper-text top-gap">{selectedSkill.preview || '当前技能没有更多预览内容。'}</p>
                         <Toolbar className="top-gap">
-                          <Button
-                            kind="primary"
-                            disabled={runningAction !== null || !selectedSkill}
-                            onClick={() => {
-                              if (!selectedSkill) return;
-                              setRegistryQuery(selectedSkill.name);
-                              setInstallTarget(selectedSkill.name);
-                              setWorkspaceTab('registry');
-                            }}
-                          >
+                          <Button kind="primary" disabled={runningAction !== null || !selectedSkill} onClick={() => openRegistryInstall(selectedSkill)}>
                             去安装启用
+                          </Button>
+                          <Button disabled={!selectedSkill} onClick={() => navigate('logs', logsIntent)}>
+                            查看日志
                           </Button>
                           <Button disabled={!selectedSkill} onClick={() => navigate('extensions', extensionsIntent)}>
                             扩展运行态
+                          </Button>
+                          <Button disabled={!selectedSkill} onClick={() => selectedSkill && void openInFinder(directoryOf(selectedSkill.filePath), `${selectedSkill.name} 技能目录`)}>
+                            技能目录
                           </Button>
                         </Toolbar>
                       </>
@@ -989,24 +1088,9 @@ export function SkillsPage({ notify, profile, navigate }: PageProps) {
                       <EmptyState title="未选择技能" description="先从左侧选择一个技能。" />
                     )}
                   </section>
+                ) : null}
 
-                  {renderResultCard()}
-                </div>
-
-                <section className="workspace-main-card top-gap">
-                  <div className="workspace-main-header">
-                    <div>
-                      <h2 className="config-section-title">自动化引用</h2>
-                      <p className="config-section-desc">优先核对真正被 cron 显式引用的技能。</p>
-                    </div>
-                    <Pill tone={selectedSkill && skillUsageJobs.length > 0 ? 'good' : 'warn'}>
-                      {selectedSkill ? `${skillUsageJobs.length} 个作业` : '等待选择'}
-                    </Pill>
-                  </div>
-                  {renderCronJobs()}
-                </section>
-
-                {overviewWarnings.length > 0 ? (
+                {overviewView === 'warnings' ? (
                   <section className="workspace-main-card top-gap">
                     <div className="workspace-main-header">
                       <div>
@@ -1015,14 +1099,20 @@ export function SkillsPage({ notify, profile, navigate }: PageProps) {
                       </div>
                       <Pill tone="warn">{warnings.length} 条</Pill>
                     </div>
-                    <div className="warning-stack">
-                      {overviewWarnings.map((warning) => (
-                        <div className="warning-item" key={warning}>
-                          {warning}
+                    {overviewWarnings.length > 0 ? (
+                      <>
+                        <div className="warning-stack">
+                          {overviewWarnings.map((warning) => (
+                            <div className="warning-item" key={warning}>
+                              {warning}
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
-                    {remainingWarningCount > 0 ? <p className="helper-text top-gap">其余 {remainingWarningCount} 条提醒继续收在安装与启用、本地维护等子模块里。</p> : null}
+                        {remainingWarningCount > 0 ? <p className="helper-text top-gap">其余 {remainingWarningCount} 条提醒继续收在安装与启用、本地维护等子模块里。</p> : null}
+                      </>
+                    ) : (
+                      <EmptyState title="当前提醒不多" description="技能层暂时没有新的结构性风险，可以继续去安装启用或消息日志做下一步核对。" />
+                    )}
                   </section>
                 ) : null}
               </>
@@ -1030,15 +1120,39 @@ export function SkillsPage({ notify, profile, navigate }: PageProps) {
 
             {workspaceTab === 'registry' ? (
               <>
-                <div className="compact-overview-grid compact-overview-grid-dense">
-                  <section className="shell-card shell-card-dense">
-                    <div className="shell-card-header">
+                <section className="workspace-main-card">
+                  <div className="workspace-main-header">
+                    <div>
+                      <div className="panel-title-row">
+                        <h2 className="config-section-title">安装与启用入口</h2>
+                        <InfoTip content="搜索、更新、布线和回执分成单独子视图，避免安装页一上来就是一整面表单和日志。" />
+                      </div>
+                      <p className="config-section-desc">这里只先决定当前要做哪类动作，具体内容一次只展开一层。</p>
+                    </div>
+                    <Pill tone={installTarget.trim() ? 'good' : 'neutral'}>{installTarget.trim() || selectedSkill?.name || '等待目标'}</Pill>
+                  </div>
+                  <div className="workspace-shortcut-grid dashboard-launcher-grid">
+                    {REGISTRY_VIEWS.map((item) => (
+                      <button
+                        key={item.key}
+                        type="button"
+                        className={`workspace-shortcut-card dashboard-shortcut-card ${registryView === item.key ? 'active' : ''}`}
+                        onClick={() => setRegistryView(item.key)}
+                      >
+                        <strong><span className="dashboard-shortcut-icon">{item.icon}</span>{item.label}</strong>
+                        <span>{item.hint}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <p className="helper-text top-gap">{activeRegistryView.hint}</p>
+                </section>
+
+                {registryView === 'install' ? (
+                  <section className="workspace-main-card top-gap">
+                    <div className="workspace-main-header">
                       <div>
-                        <div className="panel-title-row">
-                          <strong>常用安装与启用</strong>
-                          <InfoTip content="调用的是桌面端封装的技能动作，不会把你甩回外部终端。" />
-                        </div>
-                        <p className="shell-card-copy">先搜关键词，再对目标技能做预检或安装，这是最常走的技能接入路径。</p>
+                        <h2 className="config-section-title">搜索、预检与安装</h2>
+                        <p className="config-section-desc">先搜关键词，再对目标技能做预检或安装，这是最常走的技能接入路径。</p>
                       </div>
                       <Pill tone={installTarget.trim() ? 'good' : 'warn'}>{installTarget.trim() || '等待目标'}</Pill>
                     </div>
@@ -1064,7 +1178,7 @@ export function SkillsPage({ notify, profile, navigate }: PageProps) {
                         />
                       </label>
                     </div>
-                    <Toolbar>
+                    <Toolbar className="top-gap">
                       <Button
                         kind="primary"
                         disabled={runningAction !== null || !registryQuery.trim()}
@@ -1094,24 +1208,20 @@ export function SkillsPage({ notify, profile, navigate }: PageProps) {
                       >
                         {runningAction === 'skills:install' ? '安装中…' : '安装技能'}
                       </Button>
-                      <Button
-                        disabled={runningAction !== null || !selectedSkill}
-                        onClick={() => {
-                          if (!selectedSkill) return;
-                          setRegistryQuery(selectedSkill.name);
-                          setInstallTarget(selectedSkill.name);
-                        }}
-                      >
+                      <Button disabled={runningAction !== null || !selectedSkill} onClick={() => selectedSkill && openRegistryInstall(selectedSkill)}>
                         使用当前技能
                       </Button>
                     </Toolbar>
+                    <p className="helper-text top-gap">调用的是桌面端封装动作，不会把你甩回外部终端。</p>
                   </section>
+                ) : null}
 
-                  <section className="shell-card shell-card-dense">
-                    <div className="shell-card-header">
+                {registryView === 'governance' ? (
+                  <section className="workspace-main-card top-gap">
+                    <div className="workspace-main-header">
                       <div>
-                        <strong>进阶治理与核对</strong>
-                        <p className="shell-card-copy">更新、审计和配置链路核查继续留在这里，不再和常用安装动作混在一起。</p>
+                        <h2 className="config-section-title">更新与核对</h2>
+                        <p className="config-section-desc">更新、审计和配置链路核查继续留在这里，不再和常用安装动作混在一起。</p>
                       </div>
                       <Pill tone={installation.binaryFound ? 'good' : 'bad'}>
                         {installation.binaryFound ? '底层已就绪' : '底层待安装'}
@@ -1163,11 +1273,20 @@ export function SkillsPage({ notify, profile, navigate }: PageProps) {
                         扩展运行态
                       </Button>
                     </Toolbar>
+                    {warnings.length > 0 ? (
+                      <div className="warning-stack top-gap">
+                        {warnings.slice(0, 3).map((warning) => (
+                          <div className="warning-item" key={warning}>
+                            {warning}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
                   </section>
-                </div>
+                ) : null}
 
-                <div className="workspace-bottom-grid workspace-bottom-grid-dense top-gap">
-                  <section className="workspace-main-card">
+                {registryView === 'wiring' ? (
+                  <section className="workspace-main-card top-gap">
                     <div className="workspace-main-header">
                       <div>
                         <h2 className="config-section-title">当前目标布线</h2>
@@ -1175,344 +1294,279 @@ export function SkillsPage({ notify, profile, navigate }: PageProps) {
                       </div>
                       <Pill tone={selectedSkill ? 'neutral' : 'warn'}>{selectedSkill?.name || '等待选择'}</Pill>
                     </div>
-                    <div className="detail-list compact">
-                      <KeyValueRow label="当前技能" value={selectedSkill?.name || '—'} />
-                      <KeyValueRow label="分类" value={selectedSkill ? categoryLabel(selectedSkill.category) : '—'} />
-                      <KeyValueRow label="运行态" value={selectedSkill ? (selectedExistsInRuntime ? '已进入' : '待同步') : '—'} />
-                      <KeyValueRow label="编排显式引用" value={selectedSkill ? skillUsageJobs.length : 0} />
-                      <KeyValueRow label="目录路径" value={selectedSkill?.relativePath || '—'} />
+                    <div className="workspace-summary-strip">
+                      <section className="summary-mini-card">
+                        <span className="summary-mini-label">当前技能</span>
+                        <strong className="summary-mini-value">{selectedSkill?.name || '—'}</strong>
+                        <span className="summary-mini-meta">{selectedSkill ? categoryLabel(selectedSkill.category) : '先在左侧选技能'}</span>
+                      </section>
+                      <section className="summary-mini-card">
+                        <span className="summary-mini-label">运行态</span>
+                        <strong className="summary-mini-value">{selectedSkill ? (selectedExistsInRuntime ? '已进入' : '待同步') : '—'}</strong>
+                        <span className="summary-mini-meta">{selectedSkill ? (selectedExistsInRuntime ? '当前实例已可见' : '建议先做预检或安装') : '等待目标'}</span>
+                      </section>
+                      <section className="summary-mini-card">
+                        <span className="summary-mini-label">编排显式引用</span>
+                        <strong className="summary-mini-value">{selectedSkill ? skillUsageJobs.length : 0}</strong>
+                        <span className="summary-mini-meta">{skillUsageJobs.length > 0 ? skillUsageJobs.map((job) => job.name).slice(0, 2).join('、') : '当前还没有 cron 引用'}</span>
+                      </section>
+                      <section className="summary-mini-card">
+                        <span className="summary-mini-label">目录路径</span>
+                        <strong className="summary-mini-value">{selectedSkill?.relativePath || '—'}</strong>
+                        <span className="summary-mini-meta">{selectedSkill ? '当前目录来源' : '等待目标'}</span>
+                      </section>
                     </div>
                     <Toolbar className="top-gap">
                       <Button onClick={() => navigate('cron')}>查看编排</Button>
                       <Button disabled={!selectedSkill} onClick={() => navigate('logs', logsIntent)}>
                         查看日志
                       </Button>
+                      <Button disabled={!selectedSkill} onClick={() => navigate('extensions', extensionsIntent)}>
+                        扩展运行态
+                      </Button>
                     </Toolbar>
                   </section>
+                ) : null}
 
-                  {renderResultCard()}
-                </div>
+                {registryView === 'output' ? <div className="top-gap">{renderResultCard()}</div> : null}
               </>
             ) : null}
 
             {workspaceTab === 'studio' ? (
               <>
-                <section className="shell-card shell-card-dense plugin-focus-card">
-                  <div className="shell-card-header plugin-focus-head">
-                    <div className="plugin-focus-title-wrap">
-                      <div>
-                        <div className="panel-title-row">
-                          <strong>本地治理目标</strong>
-                          <InfoTip content="这里优先承接技能的本地闭环：frontmatter、正文、目录控制都收进一个主卡，导入和新建退到下方辅助区。" />
-                        </div>
-                        <p className="shell-card-copy">让当前技能的接管、编辑和删除都在一个主卡里完成。</p>
+                <section className="workspace-main-card">
+                  <div className="workspace-main-header">
+                    <div>
+                      <div className="panel-title-row">
+                        <h2 className="config-section-title">本地维护入口</h2>
+                        <InfoTip content="把基本信息、正文、危险操作、导入与新建拆成单独子视图，避免本地维护页一上来就出现整面 disclosure。" />
                       </div>
-                      {selectedSkill ? (
-                        <div className="plugin-focus-title">
-                          <span className="plugin-card-icon">Skill</span>
-                          <div className="plugin-focus-title-copy">
-                            <strong className="plugin-focus-name">{selectedSkill.name}</strong>
-                            <div className="plugin-tile-badges">
-                              <Pill>{selectedSkill.category || '未分类'}</Pill>
-                              <Pill tone={selectedExistsInRuntime ? 'good' : 'warn'}>
-                                {selectedExistsInRuntime ? '运行面已接入' : '运行面待同步'}
-                              </Pill>
-                              <Pill tone={skillFile ? 'good' : 'warn'}>{skillFile ? '正文已接管' : '等待文件'}</Pill>
-                            </div>
-                          </div>
-                        </div>
-                      ) : null}
+                      <p className="config-section-desc">先选一个维护目标，再进入对应子模块；默认不把所有编辑器和危险区同时摊开。</p>
                     </div>
                     <Pill tone={selectedSkill ? 'good' : 'warn'}>{selectedSkill?.name || '等待目标'}</Pill>
                   </div>
-
-                  {selectedSkill ? (
-                    <>
-                      <div className="plugin-signal-grid top-gap">
-                        <section className="plugin-signal-card">
-                          <span className="plugin-signal-label">目录</span>
-                          <strong className="plugin-signal-value">{selectedSkill.relativePath || '—'}</strong>
-                          <span className="plugin-signal-meta">{selectedSkill.category || '未分类'}</span>
-                        </section>
-                        <section className="plugin-signal-card">
-                          <span className="plugin-signal-label">运行态</span>
-                          <strong className="plugin-signal-value">{selectedExistsInRuntime ? '已接入' : '待同步'}</strong>
-                          <span className={`plugin-signal-meta ${selectedExistsInRuntime ? 'plugin-signal-meta-good' : 'plugin-signal-meta-warn'}`}>
-                            {selectedExistsInRuntime ? '当前已暴露给运行面' : '仍只存在于本地目录'}
-                          </span>
-                        </section>
-                        <section className="plugin-signal-card">
-                          <span className="plugin-signal-label">自动化</span>
-                          <strong className="plugin-signal-value">{skillUsageJobs.length ? `${skillUsageJobs.length} 个作业` : '未绑定'}</strong>
-                          <span className={`plugin-signal-meta ${skillUsageJobs.length ? 'plugin-signal-meta-warn' : 'plugin-signal-meta-good'}`}>
-                            {skillUsageJobs.length ? '删除前建议先解除 cron 引用' : '当前没有显式编排引用'}
-                          </span>
-                        </section>
-                        <section className="plugin-signal-card">
-                          <span className="plugin-signal-label">文件</span>
-                          <strong className="plugin-signal-value">{skillFileLoading ? '读取中' : skillFile ? '已接管' : '待读取'}</strong>
-                          <span className="plugin-signal-meta">{skillFile?.filePath || selectedSkill.filePath}</span>
-                        </section>
-                      </div>
-
-                      {warnings.length ? (
-                        <section className="plugin-focus-section top-gap">
-                          <div className="plugin-focus-section-head">
-                            <strong>当前提醒</strong>
-                            <span>{warnings.length} 条</span>
-                          </div>
-                          <div className="warning-stack">
-                            {warnings.slice(0, 3).map((warning) => (
-                              <div className="warning-item" key={warning}>
-                                {warning}
-                              </div>
-                            ))}
-                          </div>
-                        </section>
-                      ) : null}
-
-                      <div className="compact-disclosure-stack top-gap">
-                        <details
-                          className="compact-disclosure skill-frontmatter-disclosure"
-                          open={frontmatterExpanded}
-                          onToggle={(event) => setFrontmatterExpanded((event.currentTarget as HTMLDetailsElement).open)}
-                        >
-                          <summary className="compact-disclosure-summary">
-                            <div className="compact-disclosure-head">
-                              <div className="compact-disclosure-copy">
-                                <strong className="compact-disclosure-title">Frontmatter 接管</strong>
-                                <span className="preset-card-copy">只接管 <code>name / description</code>，其他 frontmatter 字段保持原样。</span>
-                              </div>
-                              <div className="pill-row">
-                                <Pill tone={frontmatterDirty ? 'warn' : 'good'}>{frontmatterDirty ? '未保存' : '已同步'}</Pill>
-                                <Pill>{selectedSkill.category}</Pill>
-                              </div>
-                            </div>
-                          </summary>
-                          <div className="compact-disclosure-body">
-                            {skillFileLoading ? (
-                              <EmptyState title="正在读取技能 frontmatter" description="稍后会把技能名称和描述直接填进表单。" />
-                            ) : !skillFrontmatterDraft ? (
-                              <EmptyState title="等待技能文件" description="先读取当前技能文件，再继续做结构化接管。" />
-                            ) : (
-                              <div className="plugin-manifest-grid">
-                                <div className="plugin-manifest-meta">
-                                  <span>frontmatter</span>
-                                  <code>{skillFile?.filePath || selectedSkill.filePath}</code>
-                                </div>
-                                <div className="detail-list compact">
-                                  <KeyValueRow label="分类" value={selectedSkill.category || '—'} />
-                                  <KeyValueRow label="相对路径" value={selectedSkill.relativePath || '—'} />
-                                </div>
-                                <div className="form-grid form-grid-compact">
-                                  <label className="field-stack">
-                                    <span>技能名称</span>
-                                    <input
-                                      className="search-input"
-                                      value={skillFrontmatterDraft.name}
-                                      placeholder="例如 Browser QA"
-                                      disabled={runningAction !== null}
-                                      onChange={(event) => setSkillFrontmatterDraft((current) => (
-                                        current ? { ...current, name: event.target.value } : current
-                                      ))}
-                                    />
-                                  </label>
-                                  <label className="field-stack">
-                                    <span>描述</span>
-                                    <input
-                                      className="search-input"
-                                      value={skillFrontmatterDraft.description}
-                                      placeholder="一句话说明 skill 的用途"
-                                      disabled={runningAction !== null}
-                                      onChange={(event) => setSkillFrontmatterDraft((current) => (
-                                        current ? { ...current, description: event.target.value } : current
-                                      ))}
-                                    />
-                                  </label>
-                                </div>
-                                <Toolbar>
-                                  <Button
-                                    kind="primary"
-                                    disabled={runningAction !== null || !skillFrontmatterDraft.name.trim()}
-                                    onClick={() => void saveSkillFrontmatter()}
-                                  >
-                                    {runningAction === 'skills:save-frontmatter' ? '保存中…' : '保存 frontmatter'}
-                                  </Button>
-                                  <Button
-                                    disabled={runningAction !== null}
-                                    onClick={() => skillFile && applySkillFileDetail(skillFile)}
-                                  >
-                                    重置
-                                  </Button>
-                                </Toolbar>
-                              </div>
-                            )}
-                          </div>
-                        </details>
-
-                        <details
-                          className="compact-disclosure skill-content-disclosure"
-                          open={contentExpanded}
-                          onToggle={(event) => setContentExpanded((event.currentTarget as HTMLDetailsElement).open)}
-                        >
-                          <summary className="compact-disclosure-summary">
-                            <div className="compact-disclosure-head">
-                              <div className="compact-disclosure-copy">
-                                <strong className="compact-disclosure-title">SKILL.md 正文编修</strong>
-                                <span className="preset-card-copy">直接维护本地 <code>SKILL.md</code> 正文，不再跳外部终端。</span>
-                              </div>
-                              <div className="pill-row">
-                                <Pill tone={skillFileDirty ? 'warn' : 'good'}>{skillFileDirty ? '未保存' : '已同步'}</Pill>
-                                <Pill tone={skillFileLoading ? 'warn' : 'neutral'}>{skillFileLoading ? '读取中' : '正文'}</Pill>
-                              </div>
-                            </div>
-                          </summary>
-                          <div className="compact-disclosure-body">
-                            <div className="plugin-manifest-grid">
-                              <div className="plugin-manifest-meta">
-                                <span>skill file</span>
-                                <code>{skillFile?.filePath || selectedSkill.filePath}</code>
-                              </div>
-                              <label className="field-stack">
-                                <span>SKILL.md</span>
-                                <textarea
-                                  className="editor compact-skill-editor"
-                                  placeholder="正在读取技能文件…"
-                                  disabled={runningAction !== null}
-                                  value={skillFile?.content || ''}
-                                  onChange={(event) => setSkillFile((current) => (
-                                    current ? { ...current, content: event.target.value } : current
-                                  ))}
-                                />
-                              </label>
-                              <Toolbar>
-                                <Button
-                                  kind="primary"
-                                  disabled={runningAction !== null || !skillFile}
-                                  onClick={() => void saveSkillFile()}
-                                >
-                                  {runningAction === 'skills:save-file' ? '保存中…' : '保存技能文件'}
-                                </Button>
-                                <Button
-                                  disabled={runningAction !== null || !selectedSkill}
-                                  onClick={() => setSelectedPath(selectedSkill?.filePath ?? null)}
-                                >
-                                  重新读取
-                                </Button>
-                                <Button
-                                  disabled={runningAction !== null || !selectedSkill}
-                                  onClick={() => selectedSkill && void openInFinder(selectedSkill.filePath, `${selectedSkill.name} 技能文件`, true)}
-                                >
-                                  定位文件
-                                </Button>
-                                <Button
-                                  disabled={runningAction !== null || !selectedSkill}
-                                  onClick={() => selectedSkill && void openInFinder(directoryOf(selectedSkill.filePath), `${selectedSkill.name} 技能目录`)}
-                                >
-                                  打开目录
-                                </Button>
-                              </Toolbar>
-                            </div>
-                          </div>
-                        </details>
-
-                        <details
-                          className="compact-disclosure skill-localops-disclosure"
-                          open={localOpsExpanded}
-                          onToggle={(event) => setLocalOpsExpanded((event.currentTarget as HTMLDetailsElement).open)}
-                        >
-                          <summary className="compact-disclosure-summary">
-                            <div className="compact-disclosure-head">
-                              <div className="compact-disclosure-copy">
-                                <strong className="compact-disclosure-title">本地目录控制</strong>
-                                <span className="preset-card-copy">把定位、确认和删除收进危险区，避免和主治理动作挤在一起。</span>
-                              </div>
-                              <div className="pill-row">
-                                <Pill tone={selectedExistsInRuntime ? 'warn' : 'good'}>
-                                  {selectedExistsInRuntime ? '运行面已接入' : '仅目录可见'}
-                                </Pill>
-                                <Pill tone={skillUsageJobs.length ? 'warn' : 'neutral'}>
-                                  {skillUsageJobs.length ? `${skillUsageJobs.length} 个编排引用` : '未绑定编排'}
-                                </Pill>
-                              </div>
-                            </div>
-                          </summary>
-                          <div className="compact-disclosure-body">
-                            <div className="detail-list compact">
-                              <KeyValueRow label="技能目录" value={directoryOf(skillFile?.filePath || selectedSkill.filePath) || '—'} />
-                              <KeyValueRow label="相对路径" value={selectedSkill.relativePath || '—'} />
-                              <KeyValueRow label="技能文件" value={skillFile?.filePath || selectedSkill.filePath || '—'} />
-                              <KeyValueRow label="运行态" value={selectedExistsInRuntime ? '已进入运行面' : '仅目录可见'} />
-                            </div>
-                            <div className="danger-copy-compact">
-                              <strong>本地危险操作</strong>
-                              <p>
-                                {skillUsageJobs.length > 0
-                                  ? `当前技能仍被 ${skillUsageJobs.length} 个 cron 作业引用。先解除编排绑定，再删除本地目录。`
-                                  : selectedExistsInRuntime
-                                    ? '当前技能已经进入运行面。删除目录后，下次刷新运行态会失去该技能来源。'
-                                    : '删除只影响当前 profile 的本地 skills 目录，不会触碰其他 profile。'}
-                              </p>
-                            </div>
-                            <label className="field-stack">
-                              <span>删除确认</span>
-                              <input
-                                className="search-input"
-                                value={skillDeleteConfirm}
-                                placeholder={`输入 ${selectedSkill.name} 以确认删除`}
-                                disabled={runningAction !== null}
-                                onChange={(event) => setSkillDeleteConfirm(event.target.value)}
-                              />
-                            </label>
-                            <Toolbar>
-                              <Button
-                                disabled={runningAction !== null || !selectedSkill}
-                                onClick={() => selectedSkill && void openInFinder(selectedSkill.filePath, `${selectedSkill.name} 技能文件`, true)}
-                              >
-                                定位文件
-                              </Button>
-                              <Button
-                                disabled={runningAction !== null || !selectedSkill}
-                                onClick={() => selectedSkill && void openInFinder(directoryOf(selectedSkill.filePath), `${selectedSkill.name} 技能目录`)}
-                              >
-                                打开目录
-                              </Button>
-                              <Button
-                                kind="danger"
-                                disabled={runningAction !== null || skillUsageJobs.length > 0 || skillDeleteConfirm.trim() !== selectedSkill.name}
-                                onClick={() => void deleteLocalSkill(selectedSkill, skillUsageJobs)}
-                              >
-                                {runningAction === 'skills:delete-local' ? '删除中…' : '删除本地目录'}
-                              </Button>
-                            </Toolbar>
-                          </div>
-                        </details>
-                      </div>
-
-                      <Toolbar className="top-gap">
-                        <Button disabled={!selectedSkill} onClick={() => navigate('logs', logsIntent)}>查看日志</Button>
-                        <Button onClick={() => navigate('cron')}>查看编排</Button>
-                        <Button onClick={() => navigate('extensions', extensionsIntent)}>扩展运行态</Button>
-                      </Toolbar>
-                    </>
-                  ) : (
-                    <div className="top-gap">
-                      <EmptyState title="还没选治理目标" description="先从左侧技能目录选择一个 skill，本地治理卡就会接管 frontmatter、正文和目录控制。" />
-                    </div>
-                  )}
+                  <div className="workspace-shortcut-grid dashboard-launcher-grid">
+                    {STUDIO_VIEWS.map((item) => (
+                      <button
+                        key={item.key}
+                        type="button"
+                        className={`workspace-shortcut-card dashboard-shortcut-card ${studioView === item.key ? 'active' : ''}`}
+                        onClick={() => setStudioView(item.key)}
+                      >
+                        <strong><span className="dashboard-shortcut-icon">{item.icon}</span>{item.label}</strong>
+                        <span>{item.hint}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <p className="helper-text top-gap">{activeStudioView.hint}</p>
                 </section>
 
-                <div className="compact-disclosure-stack top-gap">
-                  <details
-                    className="compact-disclosure"
-                    open={importExpanded}
-                    onToggle={(event) => setImportExpanded((event.currentTarget as HTMLDetailsElement).open)}
-                  >
-                    <summary className="compact-disclosure-summary">
-                      <div className="compact-disclosure-head">
-                        <div className="compact-disclosure-copy">
-                          <strong className="compact-disclosure-title">导入现成技能</strong>
-                          <span className="preset-card-copy">需要接入现有技能目录或单个 SKILL.md 时，再展开这一层。</span>
+                {!selectedSkill && studioView !== 'sources' ? (
+                  <section className="workspace-main-card top-gap">
+                    <EmptyState title="还没选治理目标" description="先从左侧技能目录选择一个 skill，本地治理区才会接管基本信息、正文和目录控制。" />
+                  </section>
+                ) : null}
+
+                {studioView === 'frontmatter' && selectedSkill ? (
+                  <section className="workspace-main-card top-gap">
+                    <div className="workspace-main-header">
+                      <div>
+                        <h2 className="config-section-title">Frontmatter 接管</h2>
+                        <p className="config-section-desc">只接管 <code>name / description</code>，其他 frontmatter 字段保持原样。</p>
+                      </div>
+                      <div className="pill-row">
+                        <Pill tone={frontmatterDirty ? 'warn' : 'good'}>{frontmatterDirty ? '未保存' : '已同步'}</Pill>
+                        <Pill>{selectedSkill.category}</Pill>
+                      </div>
+                    </div>
+                    {skillFileLoading ? (
+                      <EmptyState title="正在读取技能 frontmatter" description="稍后会把技能名称和描述直接填进表单。" />
+                    ) : !skillFrontmatterDraft ? (
+                      <EmptyState title="等待技能文件" description="先读取当前技能文件，再继续做结构化接管。" />
+                    ) : (
+                      <>
+                        <div className="detail-list compact">
+                          <KeyValueRow label="分类" value={selectedSkill.category || '—'} />
+                          <KeyValueRow label="相对路径" value={selectedSkill.relativePath || '—'} />
+                          <KeyValueRow label="技能文件" value={skillFile?.filePath || selectedSkill.filePath} />
+                        </div>
+                        <div className="form-grid form-grid-compact top-gap">
+                          <label className="field-stack">
+                            <span>技能名称</span>
+                            <input
+                              className="search-input"
+                              value={skillFrontmatterDraft.name}
+                              placeholder="例如 Browser QA"
+                              disabled={runningAction !== null}
+                              onChange={(event) => setSkillFrontmatterDraft((current) => (
+                                current ? { ...current, name: event.target.value } : current
+                              ))}
+                            />
+                          </label>
+                          <label className="field-stack">
+                            <span>描述</span>
+                            <input
+                              className="search-input"
+                              value={skillFrontmatterDraft.description}
+                              placeholder="一句话说明 skill 的用途"
+                              disabled={runningAction !== null}
+                              onChange={(event) => setSkillFrontmatterDraft((current) => (
+                                current ? { ...current, description: event.target.value } : current
+                              ))}
+                            />
+                          </label>
+                        </div>
+                        <Toolbar className="top-gap">
+                          <Button
+                            kind="primary"
+                            disabled={runningAction !== null || !skillFrontmatterDraft.name.trim()}
+                            onClick={() => void saveSkillFrontmatter()}
+                          >
+                            {runningAction === 'skills:save-frontmatter' ? '保存中…' : '保存 frontmatter'}
+                          </Button>
+                          <Button disabled={runningAction !== null} onClick={() => skillFile && applySkillFileDetail(skillFile)}>
+                            重置
+                          </Button>
+                          <Button disabled={!selectedSkill} onClick={() => navigate('logs', logsIntent)}>
+                            查看日志
+                          </Button>
+                        </Toolbar>
+                      </>
+                    )}
+                  </section>
+                ) : null}
+
+                {studioView === 'content' && selectedSkill ? (
+                  <section className="workspace-main-card top-gap">
+                    <div className="workspace-main-header">
+                      <div>
+                        <h2 className="config-section-title">SKILL.md 正文编修</h2>
+                        <p className="config-section-desc">直接维护本地 <code>SKILL.md</code> 正文，不再跳外部终端。</p>
+                      </div>
+                      <div className="pill-row">
+                        <Pill tone={skillFileDirty ? 'warn' : 'good'}>{skillFileDirty ? '未保存' : '已同步'}</Pill>
+                        <Pill tone={skillFileLoading ? 'warn' : 'neutral'}>{skillFileLoading ? '读取中' : '正文'}</Pill>
+                      </div>
+                    </div>
+                    <div className="detail-list compact">
+                      <KeyValueRow label="技能文件" value={skillFile?.filePath || selectedSkill.filePath} />
+                      <KeyValueRow label="相对路径" value={selectedSkill.relativePath || '—'} />
+                    </div>
+                    <label className="field-stack top-gap">
+                      <span>SKILL.md</span>
+                      <textarea
+                        className="editor compact-skill-editor"
+                        placeholder="正在读取技能文件…"
+                        disabled={runningAction !== null}
+                        value={skillFile?.content || ''}
+                        onChange={(event) => setSkillFile((current) => (
+                          current ? { ...current, content: event.target.value } : current
+                        ))}
+                      />
+                    </label>
+                    <Toolbar className="top-gap">
+                      <Button
+                        kind="primary"
+                        disabled={runningAction !== null || !skillFile}
+                        onClick={() => void saveSkillFile()}
+                      >
+                        {runningAction === 'skills:save-file' ? '保存中…' : '保存技能文件'}
+                      </Button>
+                      <Button disabled={runningAction !== null || !selectedSkill} onClick={() => setSelectedPath(selectedSkill.filePath)}>
+                        重新读取
+                      </Button>
+                      <Button
+                        disabled={runningAction !== null || !selectedSkill}
+                        onClick={() => selectedSkill && void openInFinder(selectedSkill.filePath, `${selectedSkill.name} 技能文件`, true)}
+                      >
+                        定位文件
+                      </Button>
+                      <Button
+                        disabled={runningAction !== null || !selectedSkill}
+                        onClick={() => selectedSkill && void openInFinder(directoryOf(selectedSkill.filePath), `${selectedSkill.name} 技能目录`)}
+                      >
+                        打开目录
+                      </Button>
+                    </Toolbar>
+                  </section>
+                ) : null}
+
+                {studioView === 'localops' && selectedSkill ? (
+                  <section className="workspace-main-card top-gap">
+                    <div className="workspace-main-header">
+                      <div>
+                        <h2 className="config-section-title">本地目录控制</h2>
+                        <p className="config-section-desc">把定位、确认和删除都收进这一层，避免和主治理动作挤在一起。</p>
+                      </div>
+                      <div className="pill-row">
+                        <Pill tone={selectedExistsInRuntime ? 'warn' : 'good'}>
+                          {selectedExistsInRuntime ? '运行面已接入' : '仅目录可见'}
+                        </Pill>
+                        <Pill tone={skillUsageJobs.length ? 'warn' : 'neutral'}>
+                          {skillUsageJobs.length ? `${skillUsageJobs.length} 个编排引用` : '未绑定编排'}
+                        </Pill>
+                      </div>
+                    </div>
+                    <div className="detail-list compact">
+                      <KeyValueRow label="技能目录" value={directoryOf(skillFile?.filePath || selectedSkill.filePath) || '—'} />
+                      <KeyValueRow label="相对路径" value={selectedSkill.relativePath || '—'} />
+                      <KeyValueRow label="技能文件" value={skillFile?.filePath || selectedSkill.filePath || '—'} />
+                      <KeyValueRow label="运行态" value={selectedExistsInRuntime ? '已进入运行面' : '仅目录可见'} />
+                    </div>
+                    <div className="danger-copy-compact top-gap">
+                      <strong>本地危险操作</strong>
+                      <p>
+                        {skillUsageJobs.length > 0
+                          ? `当前技能仍被 ${skillUsageJobs.length} 个 cron 作业引用。先解除编排绑定，再删除本地目录。`
+                          : selectedExistsInRuntime
+                            ? '当前技能已经进入运行面。删除目录后，下次刷新运行态会失去该技能来源。'
+                            : '删除只影响当前 profile 的本地 skills 目录，不会触碰其他 profile。'}
+                      </p>
+                    </div>
+                    <label className="field-stack top-gap">
+                      <span>删除确认</span>
+                      <input
+                        className="search-input"
+                        value={skillDeleteConfirm}
+                        placeholder={`输入 ${selectedSkill.name} 以确认删除`}
+                        disabled={runningAction !== null}
+                        onChange={(event) => setSkillDeleteConfirm(event.target.value)}
+                      />
+                    </label>
+                    <Toolbar className="top-gap">
+                      <Button
+                        disabled={runningAction !== null || !selectedSkill}
+                        onClick={() => selectedSkill && void openInFinder(selectedSkill.filePath, `${selectedSkill.name} 技能文件`, true)}
+                      >
+                        定位文件
+                      </Button>
+                      <Button
+                        disabled={runningAction !== null || !selectedSkill}
+                        onClick={() => selectedSkill && void openInFinder(directoryOf(selectedSkill.filePath), `${selectedSkill.name} 技能目录`)}
+                      >
+                        打开目录
+                      </Button>
+                      <Button disabled={!selectedSkill} onClick={() => navigate('cron')}>
+                        查看编排
+                      </Button>
+                      <Button
+                        kind="danger"
+                        disabled={runningAction !== null || skillUsageJobs.length > 0 || skillDeleteConfirm.trim() !== selectedSkill.name}
+                        onClick={() => void deleteLocalSkill(selectedSkill, skillUsageJobs)}
+                      >
+                        {runningAction === 'skills:delete-local' ? '删除中…' : '删除本地目录'}
+                      </Button>
+                    </Toolbar>
+                  </section>
+                ) : null}
+
+                {studioView === 'sources' ? (
+                  <div className="page-stack top-gap">
+                    <section className="workspace-main-card">
+                      <div className="workspace-main-header">
+                        <div>
+                          <h2 className="config-section-title">导入现成技能</h2>
+                          <p className="config-section-desc">需要接入现有技能目录或单个 <code>SKILL.md</code> 时，再进入这一层。</p>
                         </div>
                         <div className="pill-row">
                           <Pill tone={lastImportedSkill ? 'good' : 'neutral'}>
@@ -1521,8 +1575,6 @@ export function SkillsPage({ notify, profile, navigate }: PageProps) {
                           <Pill>{importDraft.category || '自动归类'}</Pill>
                         </div>
                       </div>
-                    </summary>
-                    <div className="compact-disclosure-body">
                       <div className="form-grid">
                         <label className="field-stack">
                           <span>源路径</span>
@@ -1569,10 +1621,7 @@ export function SkillsPage({ notify, profile, navigate }: PageProps) {
                         >
                           {runningAction === 'skills:import-local' ? '导入中…' : '导入到当前实例'}
                         </Button>
-                        <Button
-                          disabled={runningAction !== null}
-                          onClick={() => setImportDraft(cloneSkillImportDraft())}
-                        >
+                        <Button disabled={runningAction !== null} onClick={() => setImportDraft(cloneSkillImportDraft())}>
                           清空路径
                         </Button>
                         <Button
@@ -1581,34 +1630,23 @@ export function SkillsPage({ notify, profile, navigate }: PageProps) {
                         >
                           带入当前分类
                         </Button>
-                        <Button
-                          disabled={runningAction !== null}
-                          onClick={() => snapshot && void openInFinder(snapshot.hermesHome, 'Hermes Home')}
-                        >
+                        <Button disabled={runningAction !== null} onClick={() => snapshot && void openInFinder(snapshot.hermesHome, 'Hermes Home')}>
                           打开 Home
                         </Button>
                       </Toolbar>
-                    </div>
-                  </details>
+                    </section>
 
-                  <details
-                    className="compact-disclosure"
-                    open={createExpanded}
-                    onToggle={(event) => setCreateExpanded((event.currentTarget as HTMLDetailsElement).open)}
-                  >
-                    <summary className="compact-disclosure-summary">
-                      <div className="compact-disclosure-head">
-                        <div className="compact-disclosure-copy">
-                          <strong className="compact-disclosure-title">新建本地技能</strong>
-                          <span className="preset-card-copy">只有在需要定制私有能力时，再展开创建脚手架。</span>
+                    <section className="workspace-main-card">
+                      <div className="workspace-main-header">
+                        <div>
+                          <h2 className="config-section-title">新建本地技能</h2>
+                          <p className="config-section-desc">只有在需要定制私有能力时，再展开创建脚手架。</p>
                         </div>
                         <div className="pill-row">
                           <Pill>{createDraft.category || 'custom'}</Pill>
                           <Pill tone={createDraft.name.trim() ? 'good' : 'neutral'}>{createDraft.name.trim() ? '草稿已填写' : '空白草稿'}</Pill>
                         </div>
                       </div>
-                    </summary>
-                    <div className="compact-disclosure-body">
                       <div className="form-grid">
                         <label className="field-stack">
                           <span>名称</span>
@@ -1629,7 +1667,7 @@ export function SkillsPage({ notify, profile, navigate }: PageProps) {
                           />
                         </label>
                       </div>
-                      <label className="field-stack">
+                      <label className="field-stack top-gap">
                         <span>描述</span>
                         <input
                           className="search-input"
@@ -1655,16 +1693,13 @@ export function SkillsPage({ notify, profile, navigate }: PageProps) {
                         >
                           {runningAction === 'skills:create-local' ? '创建中…' : '创建本地技能'}
                         </Button>
-                        <Button
-                          disabled={runningAction !== null}
-                          onClick={() => setCreateDraft(cloneSkillDraft())}
-                        >
+                        <Button disabled={runningAction !== null} onClick={() => setCreateDraft(cloneSkillDraft())}>
                           清空草稿
                         </Button>
                       </Toolbar>
-                    </div>
-                  </details>
-                </div>
+                    </section>
+                  </div>
+                ) : null}
               </>
             ) : null}
           </div>
