@@ -33,6 +33,18 @@ const LOG_OPTIONS = [
   { key: 'agent', label: 'agent.log' },
 ] as const;
 
+type DiagnosticsTabKey = 'quick' | 'repair' | 'artifacts';
+
+const DIAGNOSTICS_TABS: Array<{ key: DiagnosticsTabKey; label: string; hint: string }> = [
+  { key: 'quick', label: '快速处理', hint: '先看主链路风险，再执行安全体检。' },
+  { key: 'repair', label: '深度修复', hint: '需要官方向导或复杂修复时再展开。' },
+  { key: 'artifacts', label: '日志与材料', hint: '回看命令结果、日志和相关文件。' },
+];
+
+const QUICK_DIAGNOSTIC_COMMANDS = ['doctor', 'gateway-status', 'config-check', 'memory-status']
+  .map((key) => getDiagnosticCommand(key))
+  .filter((item): item is DiagnosticCommandDefinition => Boolean(item));
+
 function directoryOf(path: string) {
   const normalized = path.trim();
   const index = normalized.lastIndexOf('/');
@@ -44,6 +56,8 @@ function DiagnosticCommandGrid(props: {
   running: string | null;
   navigate: PageProps['navigate'];
   onRun: (kind: DiagnosticKind) => Promise<void>;
+  showCli?: boolean;
+  showRelatedPageButton?: boolean;
 }) {
   return (
     <div className="workbench-grid">
@@ -59,7 +73,7 @@ function DiagnosticCommandGrid(props: {
             </Pill>
           </div>
           <p className="action-card-copy">{item.description}</p>
-          <p className="helper-text">{item.cli}</p>
+          {props.showCli === false ? null : <p className="helper-text">{item.cli}</p>}
           <Toolbar>
             <Button
               kind={item.kind}
@@ -68,7 +82,9 @@ function DiagnosticCommandGrid(props: {
             >
               {props.running === item.key ? `${item.label}…` : `执行 ${item.label}`}
             </Button>
-            <Button onClick={() => props.navigate(item.relatedPage)}>进入相关页</Button>
+            {props.showRelatedPageButton === false ? null : (
+              <Button onClick={() => props.navigate(item.relatedPage)}>进入相关页</Button>
+            )}
           </Toolbar>
         </section>
       ))}
@@ -77,6 +93,7 @@ function DiagnosticCommandGrid(props: {
 }
 
 export function DiagnosticsPage({ notify, profile, navigate, pageIntent, consumePageIntent }: PageProps) {
+  const [activeTab, setActiveTab] = useState<DiagnosticsTabKey>('quick');
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
   const [config, setConfig] = useState<ConfigDocuments | null>(null);
   const [installation, setInstallation] = useState<InstallationSnapshot | null>(null);
@@ -202,6 +219,7 @@ export function DiagnosticsPage({ notify, profile, navigate, pageIntent, consume
 
     setInvestigation(pageIntent);
     const nextLogName = pageIntent.logName ?? 'gateway.error';
+    setActiveTab(pageIntent.logName ? 'artifacts' : 'quick');
     setLogName(nextLogName);
     void loadLogPreview(nextLogName, true);
     notify('info', `${pageIntent.headline} 已带入诊断工作台。`);
@@ -252,6 +270,9 @@ export function DiagnosticsPage({ notify, profile, navigate, pageIntent, consume
     }
     return Array.from(new Set(warnings));
   }, [failingJobs.length, installation, jobs, missingReferencedSkills, posture, skills.length, snapshot]);
+  const quickWarnings = combinedWarnings.slice(0, 4);
+  const remainingWarningCount = Math.max(0, combinedWarnings.length - quickWarnings.length);
+  const selectedLogLabel = LOG_OPTIONS.find((item) => item.key === logName)?.label ?? logName;
 
   if (loading && !snapshot && !config && !installation) {
     return <LoadingState label="正在构建 Hermes 诊断工作台上下文。" />;
@@ -264,6 +285,226 @@ export function DiagnosticsPage({ notify, profile, navigate, pageIntent, consume
       ? `${snapshot.hermesHome}/logs`
       : '';
   const actionBusy = running !== null || runningDesktopAction !== null;
+
+  const repairActionsSection = (
+    <Panel
+      title="修复动作台"
+      subtitle="先诊断，再把你送到真正能修问题的 Hermes 官方入口，而不是只给一堆只读摘要。"
+    >
+      <div className="control-card-grid">
+        <section className="action-card action-card-compact">
+          <div className="action-card-header">
+            <div>
+              <p className="eyebrow">Bootstrap</p>
+              <h3 className="action-card-title">安装 / 升级 / 重装</h3>
+            </div>
+            <Pill tone={installation?.binaryFound ? 'good' : 'bad'}>
+              {installation?.binaryFound ? 'CLI 可用' : 'CLI 缺失'}
+            </Pill>
+          </div>
+          <p className="action-card-copy">
+            如果连 CLI 本体都不稳，后续所有 gateway、skills、plugins、memory 的问题都会是假问题。
+          </p>
+          <p className="command-line">
+            {installation?.quickInstallCommand || '未读取安装命令'} · {installation?.updateCommand || '未读取升级命令'}
+          </p>
+          <Toolbar>
+            <Button
+              kind="primary"
+              onClick={() => installation && void openInTerminal('diagnostics:install', installation.binaryFound ? '重新安装 CLI' : '一键安装 CLI', installation.quickInstallCommand)}
+              disabled={actionBusy || !installation}
+            >
+              {runningDesktopAction === 'diagnostics:install' ? (installation?.binaryFound ? '重新安装 CLI…' : '一键安装 CLI…') : (installation?.binaryFound ? '重新安装 CLI' : '一键安装 CLI')}
+            </Button>
+            <Button
+              onClick={() => installation && void openInTerminal('diagnostics:update', '升级 CLI', installation.updateCommand)}
+              disabled={actionBusy || !installation?.binaryFound}
+            >
+              {runningDesktopAction === 'diagnostics:update' ? '升级 CLI…' : '升级 CLI'}
+            </Button>
+            <Button onClick={() => navigate('dashboard')} disabled={actionBusy}>进入控制中心</Button>
+          </Toolbar>
+        </section>
+
+        <section className="action-card action-card-compact">
+          <div className="action-card-header">
+            <div>
+              <p className="eyebrow">Repair</p>
+              <h3 className="action-card-title">Setup / Model / Gateway</h3>
+            </div>
+            <Pill tone={snapshot?.gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
+              {snapshot?.gateway?.gatewayState ?? 'gateway 待修复'}
+            </Pill>
+          </div>
+          <p className="action-card-copy">
+            当 provider、消息平台或上下文主链路出问题时，优先回到 Hermes 官方 setup 向导处理。
+          </p>
+          <p className="command-line">
+            {installation?.setupCommand || '未读取 setup'} · {installation?.modelCommand || '未读取 model'} · {installation?.gatewaySetupCommand || '未读取 gateway setup'}
+          </p>
+          <Toolbar>
+            <Button
+              kind="primary"
+              onClick={() => installation && void openInTerminal('diagnostics:setup', '全量 Setup', installation.setupCommand)}
+              disabled={actionBusy || !installation?.binaryFound}
+            >
+              {runningDesktopAction === 'diagnostics:setup' ? '全量 Setup…' : '全量 Setup'}
+            </Button>
+            <Button
+              onClick={() => installation && void openInTerminal('diagnostics:model', '模型 / Provider', installation.modelCommand)}
+              disabled={actionBusy || !installation?.binaryFound}
+            >
+              {runningDesktopAction === 'diagnostics:model' ? '模型 / Provider…' : '模型 / Provider'}
+            </Button>
+            <Button
+              onClick={() => installation && void openInTerminal('diagnostics:gateway-setup', 'Gateway Setup', installation.gatewaySetupCommand)}
+              disabled={actionBusy || !installation?.binaryFound}
+            >
+              {runningDesktopAction === 'diagnostics:gateway-setup' ? 'Gateway Setup…' : 'Gateway Setup'}
+            </Button>
+          </Toolbar>
+        </section>
+
+        <section className="action-card action-card-compact">
+          <div className="action-card-header">
+            <div>
+              <p className="eyebrow">Capability</p>
+              <h3 className="action-card-title">Tools / Skills / Memory / Plugins</h3>
+            </div>
+            <Pill tone={enabledToolCount(extensions) > 0 ? 'good' : 'warn'}>
+              {enabledToolCount(extensions) > 0 ? `${enabledToolCount(extensions)} 个 tools` : '能力面待修'}
+            </Pill>
+          </div>
+          <p className="action-card-copy">
+            “明明装了却没生效”的问题大多在这里，尤其是 toolsets、技能安装态、memory provider 和插件层。
+          </p>
+          <p className="command-line">
+            {installation?.toolsSetupCommand || '未读取 tools setup'} · {installation?.skillsConfigCommand || '未读取 skills config'} · hermes memory setup · hermes plugins
+          </p>
+          <Toolbar>
+            <Button
+              onClick={() => installation && void openInTerminal('diagnostics:tools-setup', '工具选择', installation.toolsSetupCommand)}
+              disabled={actionBusy || !installation?.binaryFound}
+            >
+              {runningDesktopAction === 'diagnostics:tools-setup' ? '工具选择…' : '工具选择'}
+            </Button>
+            <Button
+              onClick={() => installation && void openInTerminal('diagnostics:skills-config', '技能开关', installation.skillsConfigCommand)}
+              disabled={actionBusy || !installation?.binaryFound}
+            >
+              {runningDesktopAction === 'diagnostics:skills-config' ? '技能开关…' : '技能开关'}
+            </Button>
+            <Button
+              onClick={() => void openInTerminal('diagnostics:memory-setup', '记忆 Provider', 'hermes memory setup')}
+              disabled={actionBusy || !installation?.binaryFound}
+            >
+              {runningDesktopAction === 'diagnostics:memory-setup' ? '记忆 Provider…' : '记忆 Provider'}
+            </Button>
+            <Button
+              onClick={() => void openInTerminal('diagnostics:plugins', '插件与 Context Engine', 'hermes plugins')}
+              disabled={actionBusy || !installation?.binaryFound}
+            >
+              {runningDesktopAction === 'diagnostics:plugins' ? '插件与 Context Engine…' : '插件与 Context Engine'}
+            </Button>
+          </Toolbar>
+        </section>
+
+        <section className="action-card action-card-compact">
+          <div className="action-card-header">
+            <div>
+              <p className="eyebrow">Artifacts</p>
+              <h3 className="action-card-title">日志 / 配置 / 状态文件</h3>
+            </div>
+            <Pill tone={combinedWarnings.length === 0 ? 'good' : 'warn'}>
+              {combinedWarnings.length === 0 ? '上下文稳定' : `${combinedWarnings.length} 条风险`}
+            </Pill>
+          </div>
+          <p className="action-card-copy">
+            命令结果看不清时，直接回到实际文件和日志最有效，特别适合定位 platform、delivery 和 provider 侧问题。
+          </p>
+          <p className="command-line">
+            {config?.configPath || '未读取 config'} · {config?.envPath || '未读取 env'} · {logsDir || '未读取 logs'}
+          </p>
+          <Toolbar>
+            <Button onClick={() => snapshot && void openInFinder(snapshot.hermesHome, 'Hermes Home')} disabled={actionBusy || !snapshot}>打开 Home</Button>
+            <Button onClick={() => config && void openInFinder(config.configPath, 'config.yaml', true)} disabled={actionBusy || !config}>定位 config.yaml</Button>
+            <Button onClick={() => config && void openInFinder(config.envPath, '.env', true)} disabled={actionBusy || !config}>定位 .env</Button>
+            <Button onClick={() => logsDir && void openInFinder(logsDir, 'logs 目录')} disabled={actionBusy || !logsDir}>打开 logs</Button>
+          </Toolbar>
+        </section>
+      </div>
+    </Panel>
+  );
+
+  const artifactSection = (
+    <div className="two-column wide-left">
+      <Panel
+        title="CLI 输出"
+        subtitle="保留 Hermes 原生命令的 stdout / stderr，不替你重新发明另一套解释器。"
+        aside={undefined}
+      >
+        {result ? (
+          <div className="result-stack">
+            <div className="detail-list compact">
+              <KeyValueRow label="命令类型" value={lastActionLabel ?? lastCommand?.label ?? '—'} />
+              <KeyValueRow label="命令" value={result.command} />
+              <KeyValueRow label="退出码" value={result.exitCode} />
+              <KeyValueRow
+                label="结果"
+                value={(
+                  <Pill tone={result.success ? 'good' : 'bad'}>
+                    {result.success ? '成功' : '失败'}
+                  </Pill>
+                )}
+              />
+            </div>
+            <pre className="code-block tall">{result.stdout || 'stdout 为空'}</pre>
+            {result.stderr ? <pre className="code-block">{result.stderr}</pre> : null}
+          </div>
+        ) : (
+          <EmptyState title="尚未执行命令" description="先从“常用体检”执行一项，或去“深度修复”里运行完整命令，这里就会保留 Hermes 原始输出。" />
+        )}
+      </Panel>
+
+      <Panel
+        title="相关日志预览"
+        subtitle="命令执行后会自动切到更相关的日志类型，帮助你把 CLI 结果和运行期日志串起来看。"
+        aside={(
+          <Toolbar>
+            <select
+              className="select-input"
+              value={logName}
+              onChange={(event) => setLogName(event.target.value)}
+            >
+              {LOG_OPTIONS.map((item) => (
+                <option key={item.key} value={item.key}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+            <Button onClick={() => void loadLogPreview()} disabled={logLoading}>
+              {logLoading ? '读取中…' : '刷新日志'}
+            </Button>
+            <Button onClick={() => navigate('logs')}>查看日志</Button>
+          </Toolbar>
+        )}
+      >
+        {logPreview ? (
+          <>
+            <div className="detail-list compact">
+              <KeyValueRow label="文件" value={logPreview.filePath} />
+              <KeyValueRow label="返回行数" value={logPreview.lines.length} />
+              <KeyValueRow label="当前命令" value={lastCommand?.label ?? '未执行命令'} />
+              <KeyValueRow label="Gateway 更新时间" value={formatTimestamp(snapshot?.gateway?.updatedAt)} />
+            </div>
+            <pre className="code-block tall">{logPreview.lines.join('\n') || '没有匹配到日志行。'}</pre>
+          </>
+        ) : (
+          <EmptyState title="暂无日志预览" description="切换日志类型或刷新后，这里会展示相关日志尾部内容。" />
+        )}
+      </Panel>
+    </div>
+  );
 
   return (
     <div className="page-stack">
@@ -335,371 +576,250 @@ export function DiagnosticsPage({ notify, profile, navigate, pageIntent, consume
         />
       ) : null}
 
-      <Panel
-        title="运行姿态"
-        subtitle="把模型链、执行后端、能力面、记忆回路和网关交付收成同一套诊断语言，排障时先抓主链路。"
-      >
-        <RuntimePostureView posture={posture} navigate={navigate} />
-      </Panel>
-
-      <Panel
-        title="修复动作台"
-        subtitle="先诊断，再把你送到真正能修问题的 Hermes 官方入口，而不是只给一堆只读摘要。"
-      >
-        <div className="control-card-grid">
-          <section className="action-card action-card-compact">
-            <div className="action-card-header">
-              <div>
-                <p className="eyebrow">Bootstrap</p>
-                <h3 className="action-card-title">安装 / 升级 / 重装</h3>
-              </div>
-              <Pill tone={installation?.binaryFound ? 'good' : 'bad'}>
-                {installation?.binaryFound ? 'CLI 可用' : 'CLI 缺失'}
-              </Pill>
-            </div>
-            <p className="action-card-copy">
-              如果连 CLI 本体都不稳，后续所有 gateway、skills、plugins、memory 的问题都会是假问题。
-            </p>
-            <p className="command-line">
-              {installation?.quickInstallCommand || '未读取安装命令'} · {installation?.updateCommand || '未读取升级命令'}
-            </p>
-            <Toolbar>
-              <Button
-                kind="primary"
-                onClick={() => installation && void openInTerminal('diagnostics:install', installation.binaryFound ? '重新安装 CLI' : '一键安装 CLI', installation.quickInstallCommand)}
-                disabled={actionBusy || !installation}
-              >
-                {runningDesktopAction === 'diagnostics:install' ? (installation?.binaryFound ? '重新安装 CLI…' : '一键安装 CLI…') : (installation?.binaryFound ? '重新安装 CLI' : '一键安装 CLI')}
-              </Button>
-              <Button
-                onClick={() => installation && void openInTerminal('diagnostics:update', '升级 CLI', installation.updateCommand)}
-                disabled={actionBusy || !installation?.binaryFound}
-              >
-                {runningDesktopAction === 'diagnostics:update' ? '升级 CLI…' : '升级 CLI'}
-              </Button>
-              <Button onClick={() => navigate('dashboard')} disabled={actionBusy}>进入控制中心</Button>
-            </Toolbar>
-          </section>
-
-          <section className="action-card action-card-compact">
-            <div className="action-card-header">
-              <div>
-                <p className="eyebrow">Repair</p>
-                <h3 className="action-card-title">Setup / Model / Gateway</h3>
-              </div>
-              <Pill tone={snapshot?.gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
-                {snapshot?.gateway?.gatewayState ?? 'gateway 待修复'}
-              </Pill>
-            </div>
-            <p className="action-card-copy">
-              当 provider、消息平台或上下文主链路出问题时，优先回到 Hermes 官方 setup 向导处理。
-            </p>
-            <p className="command-line">
-              {installation?.setupCommand || '未读取 setup'} · {installation?.modelCommand || '未读取 model'} · {installation?.gatewaySetupCommand || '未读取 gateway setup'}
-            </p>
-            <Toolbar>
-              <Button
-                kind="primary"
-                onClick={() => installation && void openInTerminal('diagnostics:setup', '全量 Setup', installation.setupCommand)}
-                disabled={actionBusy || !installation?.binaryFound}
-              >
-                {runningDesktopAction === 'diagnostics:setup' ? '全量 Setup…' : '全量 Setup'}
-              </Button>
-              <Button
-                onClick={() => installation && void openInTerminal('diagnostics:model', '模型 / Provider', installation.modelCommand)}
-                disabled={actionBusy || !installation?.binaryFound}
-              >
-                {runningDesktopAction === 'diagnostics:model' ? '模型 / Provider…' : '模型 / Provider'}
-              </Button>
-              <Button
-                onClick={() => installation && void openInTerminal('diagnostics:gateway-setup', 'Gateway Setup', installation.gatewaySetupCommand)}
-                disabled={actionBusy || !installation?.binaryFound}
-              >
-                {runningDesktopAction === 'diagnostics:gateway-setup' ? 'Gateway Setup…' : 'Gateway Setup'}
-              </Button>
-            </Toolbar>
-          </section>
-
-          <section className="action-card action-card-compact">
-            <div className="action-card-header">
-              <div>
-                <p className="eyebrow">Capability</p>
-                <h3 className="action-card-title">Tools / Skills / Memory / Plugins</h3>
-              </div>
-              <Pill tone={enabledToolCount(extensions) > 0 ? 'good' : 'warn'}>
-                {enabledToolCount(extensions) > 0 ? `${enabledToolCount(extensions)} 个 tools` : '能力面待修'}
-              </Pill>
-            </div>
-            <p className="action-card-copy">
-              “明明装了却没生效”的问题大多在这里，尤其是 toolsets、技能安装态、memory provider 和插件层。
-            </p>
-            <p className="command-line">
-              {installation?.toolsSetupCommand || '未读取 tools setup'} · {installation?.skillsConfigCommand || '未读取 skills config'} · hermes memory setup · hermes plugins
-            </p>
-            <Toolbar>
-              <Button
-                onClick={() => installation && void openInTerminal('diagnostics:tools-setup', '工具选择', installation.toolsSetupCommand)}
-                disabled={actionBusy || !installation?.binaryFound}
-              >
-                {runningDesktopAction === 'diagnostics:tools-setup' ? '工具选择…' : '工具选择'}
-              </Button>
-              <Button
-                onClick={() => installation && void openInTerminal('diagnostics:skills-config', '技能开关', installation.skillsConfigCommand)}
-                disabled={actionBusy || !installation?.binaryFound}
-              >
-                {runningDesktopAction === 'diagnostics:skills-config' ? '技能开关…' : '技能开关'}
-              </Button>
-              <Button
-                onClick={() => void openInTerminal('diagnostics:memory-setup', '记忆 Provider', 'hermes memory setup')}
-                disabled={actionBusy || !installation?.binaryFound}
-              >
-                {runningDesktopAction === 'diagnostics:memory-setup' ? '记忆 Provider…' : '记忆 Provider'}
-              </Button>
-              <Button
-                onClick={() => void openInTerminal('diagnostics:plugins', '插件与 Context Engine', 'hermes plugins')}
-                disabled={actionBusy || !installation?.binaryFound}
-              >
-                {runningDesktopAction === 'diagnostics:plugins' ? '插件与 Context Engine…' : '插件与 Context Engine'}
-              </Button>
-            </Toolbar>
-          </section>
-
-          <section className="action-card action-card-compact">
-            <div className="action-card-header">
-              <div>
-                <p className="eyebrow">Artifacts</p>
-                <h3 className="action-card-title">日志 / 配置 / 状态文件</h3>
-              </div>
-              <Pill tone={combinedWarnings.length === 0 ? 'good' : 'warn'}>
-                {combinedWarnings.length === 0 ? '上下文稳定' : `${combinedWarnings.length} 条风险`}
-              </Pill>
-            </div>
-            <p className="action-card-copy">
-              命令结果看不清时，直接回到实际文件和日志最有效，特别适合定位 platform、delivery 和 provider 侧问题。
-            </p>
-            <p className="command-line">
-              {config?.configPath || '未读取 config'} · {config?.envPath || '未读取 env'} · {logsDir || '未读取 logs'}
-            </p>
-            <Toolbar>
-              <Button onClick={() => snapshot && void openInFinder(snapshot.hermesHome, 'Hermes Home')} disabled={actionBusy || !snapshot}>打开 Home</Button>
-              <Button onClick={() => config && void openInFinder(config.configPath, 'config.yaml', true)} disabled={actionBusy || !config}>定位 config.yaml</Button>
-              <Button onClick={() => config && void openInFinder(config.envPath, '.env', true)} disabled={actionBusy || !config}>定位 .env</Button>
-              <Button onClick={() => logsDir && void openInFinder(logsDir, 'logs 目录')} disabled={actionBusy || !logsDir}>打开 logs</Button>
-            </Toolbar>
-          </section>
-        </div>
-      </Panel>
-
-      <div className="two-column wide-left">
-        <Panel
-          title="运行诊断"
-          subtitle="聚焦运行态、服务和安装布局，优先解决 Hermes 当前到底有没有正常活着这件事。"
-        >
-          <DiagnosticCommandGrid
-            commands={RUNTIME_DIAGNOSTIC_COMMANDS}
-            running={running}
-            navigate={navigate}
-            onRun={run}
-          />
-        </Panel>
-
-        <Panel
-          title="能力诊断"
-          subtitle="聚焦 Hermes 独有的配置、技能、插件、工具和记忆能力面，帮助你排查“为什么明明装了却没生效”。"
-        >
-          <DiagnosticCommandGrid
-            commands={CAPABILITY_DIAGNOSTIC_COMMANDS}
-            running={running}
-            navigate={navigate}
-            onRun={run}
-          />
-        </Panel>
+      <div className="tab-bar">
+        {DIAGNOSTICS_TABS.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            className={`tab ${activeTab === tab.key ? 'active' : ''}`}
+            onClick={() => setActiveTab(tab.key)}
+            title={tab.hint}
+          >
+            {tab.label}
+            {tab.key === 'repair' && combinedWarnings.length > 0 ? <span className="tab-dirty-dot" /> : null}
+            {tab.key === 'artifacts' && result ? <span className="tab-dirty-dot" /> : null}
+          </button>
+        ))}
       </div>
 
-      <div className="two-column wide-left">
-        <Panel
-          title="排障上下文"
-          subtitle="这里展示的都是当前 profile 的真实本地状态，适合在执行命令前先扫一眼。"
-        >
-          {snapshot && config ? (
-            <div className="detail-list">
-              <KeyValueRow label="当前 Profile" value={snapshot.profileName} />
-              <KeyValueRow label="默认模型" value={config.summary.modelDefault ?? '—'} />
-              <KeyValueRow label="提供商" value={config.summary.modelProvider ?? '—'} />
-              <KeyValueRow label="Base URL" value={config.summary.modelBaseUrl ?? '—'} />
-              <KeyValueRow label="终端后端" value={config.summary.terminalBackend ?? '—'} />
-              <KeyValueRow label="工作目录" value={config.summary.terminalCwd ?? '—'} />
-              <KeyValueRow label="Context Engine" value={config.summary.contextEngine ?? '—'} />
-              <KeyValueRow
-                label="Toolsets"
-                value={config.summary.toolsets.length ? config.summary.toolsets.join(', ') : '—'}
-              />
-              <KeyValueRow label="记忆功能" value={String(config.summary.memoryEnabled ?? false)} />
-              <KeyValueRow label="用户画像" value={String(config.summary.userProfileEnabled ?? false)} />
-              <KeyValueRow label="MEMORY / USER 上限" value={`${config.summary.memoryCharLimit ?? '—'} / ${config.summary.userCharLimit ?? '—'}`} />
-              <KeyValueRow label="本地技能数" value={skills.length} />
-              <KeyValueRow label="运行工具" value={`${enabledToolCount(extensions)} / ${totalToolCount(extensions)}`} />
-              <KeyValueRow label="插件数" value={pluginsCount(extensions)} />
-              <KeyValueRow label="Memory Runtime" value={extensions?.memoryRuntime.provider ?? '—'} />
-              <KeyValueRow label="Cron 作业数" value={jobs.length} />
-              <KeyValueRow label="远端投递作业" value={remoteJobs.length} />
-            </div>
-          ) : (
-            <EmptyState title="上下文未就绪" description="暂时还没有读取到 dashboard、config 与 cron 摘要。" />
-          )}
-        </Panel>
-
-        <Panel
-          title="风险与入口"
-          subtitle="先看当前最可能出问题的环节，再跳到更合适的页面或文件。"
-        >
-          <div className="health-grid">
-            <section className="health-card">
-              <div className="health-card-header">
-                <strong>Gateway Delivery</strong>
-                <Pill tone={snapshot?.gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
-                  {snapshot?.gateway?.gatewayState ?? '未检测到'}
-                </Pill>
-              </div>
-              <p>
-                {remoteJobs.length > 0
-                  ? `当前有 ${remoteJobs.length} 个远端投递作业依赖 gateway。`
-                  : '当前自动化以本地执行或本地投递为主。'}
-              </p>
-            </section>
-            <section className="health-card">
-              <div className="health-card-header">
-                <strong>Context Engine</strong>
-                <Pill tone={config?.summary.contextEngine ? 'good' : 'warn'}>
-                  {config?.summary.contextEngine || '未配置'}
-                </Pill>
-              </div>
-              <p>Hermes 的上下文编排引擎最好显式可见，这样才能把模型、工具和记忆链路看清楚。</p>
-            </section>
-            <section className="health-card">
-              <div className="health-card-header">
-                <strong>Skills Surface</strong>
-                <Pill tone={missingReferencedSkills.length === 0 ? 'good' : 'bad'}>
-                  {missingReferencedSkills.length === 0 ? '已对齐' : '存在缺口'}
-                </Pill>
-              </div>
-              <p>{missingReferencedSkills.length === 0 ? 'cron 引用到的 skills 都能在本地扫描到。' : `缺失技能：${missingReferencedSkills.join('、')}`}</p>
-            </section>
-            <section className="health-card">
-              <div className="health-card-header">
-                <strong>Memory Closure</strong>
-                <Pill tone={config?.summary.memoryEnabled && memoryRuntimeReady ? 'good' : 'warn'}>
-                  {config?.summary.memoryEnabled ? '已开启' : '已关闭'}
-                </Pill>
-              </div>
-              <p>
-                配置 Provider {config?.summary.memoryProvider || 'builtin-file'} · 运行态 {extensions?.memoryRuntime.provider || '未读取'} ·
-                用户画像 {String(config?.summary.userProfileEnabled ?? false)}
-              </p>
-            </section>
-          </div>
-          <Toolbar>
-            <Button onClick={() => snapshot && void openInFinder(snapshot.hermesHome, 'Hermes Home')}>打开 Home</Button>
-            <Button
-              onClick={() => config && void openInFinder(config.configPath, 'config.yaml', true)}
-              disabled={!config}
-            >
-              定位 config.yaml
-            </Button>
-            <Button
-              onClick={() => config && void openInFinder(config.envPath, '.env', true)}
-              disabled={!config}
-            >
-              定位 .env
-            </Button>
-            <Button
-              onClick={() => logsDir && void openInFinder(logsDir, 'logs 目录')}
-              disabled={!logsDir}
-            >
-              打开 logs
-            </Button>
-          </Toolbar>
-          {combinedWarnings.length > 0 ? (
-            <div className="warning-stack">
-              {combinedWarnings.map((warning) => (
-                <div className="warning-item" key={warning}>
-                  {warning}
+      {activeTab === 'quick' ? (
+        <>
+          <Panel
+            title="推荐下一步"
+            subtitle="先按推荐路径走，默认只保留最常用的判断和体检，复杂命令与原始输出都已经后置。"
+          >
+            <div className="list-stack">
+              <div className="list-card">
+                <div className="list-card-title">
+                  <strong>先确认 Hermes 是否正常活着</strong>
+                  <Pill tone={installation?.binaryFound && snapshot?.gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
+                    {installation?.binaryFound ? '主链路已接通' : '先补齐基础运行'}
+                  </Pill>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <EmptyState title="当前风险不高" description="没有检测到明显的结构性问题，可以先执行能力诊断或直接去日志页看细节。" />
-          )}
-        </Panel>
-      </div>
+                <p>先确认 CLI、本地安装和 gateway 状态，再决定是不是要继续深挖配置或能力面。</p>
+                <div className="meta-line">
+                  <span>{installation?.binaryFound ? 'CLI 已检测到' : 'CLI 尚未检测到'}</span>
+                  <span>{snapshot?.gateway?.gatewayState === 'running' ? 'Gateway 正在运行' : 'Gateway 待确认'}</span>
+                </div>
+                <Toolbar>
+                  <Button kind="primary" onClick={() => void run('doctor')} disabled={actionBusy}>
+                    {running === 'doctor' ? '健康检查…' : '运行健康检查'}
+                  </Button>
+                  <Button onClick={() => void run('gateway-status')} disabled={actionBusy}>
+                    {running === 'gateway-status' ? '网关状态…' : '查看网关状态'}
+                  </Button>
+                </Toolbar>
+              </div>
 
-      <div className="two-column wide-left">
-        <Panel
-          title="CLI 输出"
-          subtitle="保留 Hermes 原生命令的 stdout / stderr，不替你重新发明另一套解释器。"
-          aside={undefined}
-        >
-          {result ? (
-            <div className="result-stack">
-              <div className="detail-list compact">
-                <KeyValueRow label="命令类型" value={lastActionLabel ?? lastCommand?.label ?? '—'} />
-                <KeyValueRow label="命令" value={result.command} />
-                <KeyValueRow label="退出码" value={result.exitCode} />
+              <div className="list-card">
+                <div className="list-card-title">
+                  <strong>再核对配置和能力面</strong>
+                  <Pill tone={config?.summary.contextEngine && missingReferencedSkills.length === 0 ? 'good' : 'warn'}>
+                    {config?.summary.contextEngine || '配置待补齐'}
+                  </Pill>
+                </div>
+                <p>模型、Context Engine、Skills、Memory 和 Tools 没对齐时，最容易出现“明明装了却没生效”。</p>
+                <div className="meta-line">
+                  <span>{missingReferencedSkills.length === 0 ? 'Skill 引用已对齐' : `缺 ${missingReferencedSkills.length} 个 Skill`}</span>
+                  <span>{enabledToolCount(extensions)} / {totalToolCount(extensions)} 个 Tools 已启用</span>
+                </div>
+                <Toolbar>
+                  <Button kind="primary" onClick={() => void run('config-check')} disabled={actionBusy}>
+                    {running === 'config-check' ? '配置体检…' : '执行配置体检'}
+                  </Button>
+                  <Button onClick={() => navigate('config')}>进入配置页</Button>
+                  <Button onClick={() => navigate('skills')}>进入技能页</Button>
+                </Toolbar>
+              </div>
+
+              <div className="list-card">
+                <div className="list-card-title">
+                  <strong>最后看日志和原始材料</strong>
+                  <Pill tone={result || logPreview ? 'good' : 'neutral'}>
+                    {result || logPreview ? '材料已就位' : '等待新记录'}
+                  </Pill>
+                </div>
+                <p>最近命令结果、相关日志和原始输出已经集中到材料层，不再默认铺满排障首页。</p>
+                <div className="meta-line">
+                  <span>{lastActionLabel ?? '尚无最近动作'}</span>
+                  <span>{selectedLogLabel}</span>
+                </div>
+                <Toolbar>
+                  <Button kind="primary" onClick={() => setActiveTab('artifacts')}>打开日志与材料</Button>
+                  <Button onClick={() => navigate('logs')}>进入日志页</Button>
+                </Toolbar>
+              </div>
+            </div>
+          </Panel>
+
+          <div className="two-column wide-left">
+            <Panel
+              title="当前判断"
+              subtitle="先看最关键的 4 个摘要和当前风险，其余命令与接管动作都后置到深层页面。"
+            >
+              <div className="workspace-summary-strip">
+                <div className="summary-mini-card">
+                  <span className="summary-mini-label">运行基础</span>
+                  <strong className="summary-mini-value">{installation?.binaryFound ? 'CLI 已就绪' : 'CLI 缺失'}</strong>
+                  <span className="summary-mini-meta">{installation?.versionOutput.trim() || installation?.hermesHome || '尚未读取版本信息'}</span>
+                </div>
+                <div className="summary-mini-card">
+                  <span className="summary-mini-label">网关与交付</span>
+                  <strong className="summary-mini-value">{snapshot?.gateway?.gatewayState ?? '未检测到'}</strong>
+                  <span className="summary-mini-meta">
+                    {remoteJobs.length > 0 ? `${remoteJobs.length} 个远端作业` : '当前以本地执行为主'}
+                  </span>
+                </div>
+                <div className="summary-mini-card">
+                  <span className="summary-mini-label">配置链路</span>
+                  <strong className="summary-mini-value">{config?.summary.contextEngine || '未配置'}</strong>
+                  <span className="summary-mini-meta">
+                    {config?.summary.modelProvider || 'provider 未配置'} · {config?.summary.modelDefault || 'model 未配置'}
+                  </span>
+                </div>
+                <div className="summary-mini-card">
+                  <span className="summary-mini-label">能力闭环</span>
+                  <strong className="summary-mini-value">
+                    {config?.summary.memoryEnabled && memoryRuntimeReady ? '记忆链路可用' : '能力面待核对'}
+                  </strong>
+                  <span className="summary-mini-meta">
+                    Skill 缺口 {missingReferencedSkills.length} · 插件 {pluginsCount(extensions)}
+                  </span>
+                </div>
+              </div>
+
+              {quickWarnings.length > 0 ? (
+                <>
+                  <div className="warning-stack">
+                    {quickWarnings.map((warning) => (
+                      <div className="warning-item" key={warning}>
+                        {warning}
+                      </div>
+                    ))}
+                  </div>
+                  {remainingWarningCount > 0 ? (
+                    <p className="helper-text top-gap">其余 {remainingWarningCount} 条提醒已收进“深度修复”。</p>
+                  ) : null}
+                </>
+              ) : (
+                <EmptyState title="当前风险不高" description="没有检测到明显的结构性问题，可以先执行常用体检或进入日志页看细节。" />
+              )}
+
+              <Toolbar>
+                <Button kind="primary" onClick={() => setActiveTab('repair')}>打开深度修复</Button>
+                <Button onClick={() => navigate('gateway')}>进入网关页</Button>
+                <Button onClick={() => navigate('memory')}>进入记忆页</Button>
+              </Toolbar>
+            </Panel>
+
+            <Panel
+              title="常用体检"
+              subtitle="只保留最常用的四项体检，完整命令集合已经收进“深度修复”。"
+            >
+              <DiagnosticCommandGrid
+                commands={QUICK_DIAGNOSTIC_COMMANDS}
+                running={running}
+                navigate={navigate}
+                onRun={run}
+                showCli={false}
+                showRelatedPageButton={false}
+              />
+              <div className="detail-list compact top-gap">
+                <KeyValueRow label="最近动作" value={lastActionLabel ?? '尚无最近动作'} />
+                <KeyValueRow label="默认日志" value={selectedLogLabel} />
+                <KeyValueRow label="深度命令区" value="已收进深度修复" />
+              </div>
+              <Toolbar>
+                <Button kind="primary" onClick={() => setActiveTab('artifacts')}>查看日志与材料</Button>
+                <Button onClick={() => setActiveTab('repair')}>查看完整体检</Button>
+              </Toolbar>
+            </Panel>
+          </div>
+
+          <Panel
+            title="运行姿态"
+            subtitle="需要判断模型、执行后端、记忆和网关是不是同一条链路时，再往下展开这一层。"
+          >
+            <RuntimePostureView posture={posture} navigate={navigate} />
+          </Panel>
+        </>
+      ) : null}
+
+      {activeTab === 'repair' ? (
+        <>
+          {repairActionsSection}
+
+          <div className="two-column wide-left">
+            <Panel
+              title="完整运行体检"
+              subtitle="这里保留所有运行态相关体检命令，适合已经确认需要进一步深挖时使用。"
+            >
+              <DiagnosticCommandGrid
+                commands={RUNTIME_DIAGNOSTIC_COMMANDS}
+                running={running}
+                navigate={navigate}
+                onRun={run}
+              />
+            </Panel>
+
+            <Panel
+              title="完整能力体检"
+              subtitle="技能、插件、工具和记忆链路的完整核验动作都收在这里，不再默认占用首页。"
+            >
+              <DiagnosticCommandGrid
+                commands={CAPABILITY_DIAGNOSTIC_COMMANDS}
+                running={running}
+                navigate={navigate}
+                onRun={run}
+              />
+            </Panel>
+          </div>
+
+          <Panel
+            title="排障上下文"
+            subtitle="这里展示的都是当前 profile 的真实本地状态，适合在执行命令前先扫一眼。"
+          >
+            {snapshot && config ? (
+              <div className="detail-list">
+                <KeyValueRow label="当前 Profile" value={snapshot.profileName} />
+                <KeyValueRow label="默认模型" value={config.summary.modelDefault ?? '—'} />
+                <KeyValueRow label="提供商" value={config.summary.modelProvider ?? '—'} />
+                <KeyValueRow label="Base URL" value={config.summary.modelBaseUrl ?? '—'} />
+                <KeyValueRow label="终端后端" value={config.summary.terminalBackend ?? '—'} />
+                <KeyValueRow label="工作目录" value={config.summary.terminalCwd ?? '—'} />
+                <KeyValueRow label="Context Engine" value={config.summary.contextEngine ?? '—'} />
                 <KeyValueRow
-                  label="结果"
-                  value={(
-                    <Pill tone={result.success ? 'good' : 'bad'}>
-                      {result.success ? '成功' : '失败'}
-                    </Pill>
-                  )}
+                  label="Toolsets"
+                  value={config.summary.toolsets.length ? config.summary.toolsets.join(', ') : '—'}
                 />
+                <KeyValueRow label="记忆功能" value={String(config.summary.memoryEnabled ?? false)} />
+                <KeyValueRow label="用户画像" value={String(config.summary.userProfileEnabled ?? false)} />
+                <KeyValueRow label="MEMORY / USER 上限" value={`${config.summary.memoryCharLimit ?? '—'} / ${config.summary.userCharLimit ?? '—'}`} />
+                <KeyValueRow label="本地技能数" value={skills.length} />
+                <KeyValueRow label="运行工具" value={`${enabledToolCount(extensions)} / ${totalToolCount(extensions)}`} />
+                <KeyValueRow label="插件数" value={pluginsCount(extensions)} />
+                <KeyValueRow label="Memory Runtime" value={extensions?.memoryRuntime.provider ?? '—'} />
+                <KeyValueRow label="Cron 作业数" value={jobs.length} />
+                <KeyValueRow label="远端投递作业" value={remoteJobs.length} />
               </div>
-              <pre className="code-block tall">{result.stdout || 'stdout 为空'}</pre>
-              {result.stderr ? <pre className="code-block">{result.stderr}</pre> : null}
-            </div>
-          ) : (
-            <EmptyState title="尚未执行命令" description="先从上面的运行诊断或能力诊断里选一项，这里就会保留 Hermes 原始输出。" />
-          )}
-        </Panel>
+            ) : (
+              <EmptyState title="上下文未就绪" description="暂时还没有读取到 dashboard、config 与 cron 摘要。" />
+            )}
+          </Panel>
+        </>
+      ) : null}
 
-        <Panel
-          title="相关日志预览"
-          subtitle="命令执行后会自动切到更相关的日志类型，帮助你把 CLI 结果和运行期日志串起来看。"
-          aside={(
-            <Toolbar>
-              <select
-                className="select-input"
-                value={logName}
-                onChange={(event) => setLogName(event.target.value)}
-              >
-                {LOG_OPTIONS.map((item) => (
-                  <option key={item.key} value={item.key}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-              <Button onClick={() => void loadLogPreview()} disabled={logLoading}>
-                {logLoading ? '读取中…' : '刷新日志'}
-              </Button>
-              <Button onClick={() => navigate('logs')}>查看日志</Button>
-            </Toolbar>
-          )}
-        >
-          {logPreview ? (
-            <>
-              <div className="detail-list compact">
-                <KeyValueRow label="文件" value={logPreview.filePath} />
-                <KeyValueRow label="返回行数" value={logPreview.lines.length} />
-                <KeyValueRow label="当前命令" value={lastCommand?.label ?? '未执行命令'} />
-                <KeyValueRow label="Gateway 更新时间" value={formatTimestamp(snapshot?.gateway?.updatedAt)} />
-              </div>
-              <pre className="code-block tall">{logPreview.lines.join('\n') || '没有匹配到日志行。'}</pre>
-            </>
-          ) : (
-            <EmptyState title="暂无日志预览" description="切换日志类型或刷新后，这里会展示相关日志尾部内容。" />
-          )}
-        </Panel>
-      </div>
+      {activeTab === 'artifacts' ? artifactSection : null}
     </div>
   );
 }

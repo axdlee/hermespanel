@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { Button, EmptyState, KeyValueRow, LoadingState, MetricCard, Panel, Pill, Toolbar } from '../components/ui';
+import { Button, EmptyState, KeyValueRow, LoadingState, Panel, Pill, Toolbar } from '../components/ui';
 import {
   buildConfigDrilldownIntent,
   buildDiagnosticsDrilldownIntent,
@@ -28,6 +28,7 @@ import type {
 type RecentFilter = 'all' | '24h' | '7d' | '30d';
 type MessageFilter = 'all' | 'user' | 'assistant' | 'tool';
 type SignalTone = 'good' | 'warn' | 'bad' | 'neutral';
+type SessionsTabKey = 'overview' | 'analysis' | 'messages';
 
 interface SessionSignal {
   key: string;
@@ -81,6 +82,12 @@ const UNTITLED_COMPLEX_MESSAGE_THRESHOLD = 10;
 const UNTITLED_COMPLEX_TOOL_THRESHOLD = 4;
 const GATEWAY_SOURCE_PATTERN = /(gateway|telegram|discord|slack|feishu|dingtalk|wechat|wecom|line|whatsapp|remote|bot)/i;
 const MEMORY_PATTERN = /(memory|memories|user|profile|soul)/i;
+
+const SESSIONS_TABS: Array<{ key: SessionsTabKey; label: string; hint: string }> = [
+  { key: 'overview', label: '常用总览', hint: '先筛选会话、锁定目标，再看建议去向。' },
+  { key: 'analysis', label: '风险与联动', hint: '查看工具聚合、风险信号和联动建议。' },
+  { key: 'messages', label: '消息与回放', hint: '只看最终消息正文和内容筛选。' },
+];
 
 function withinRecentWindow(startedAt: number, filter: RecentFilter) {
   if (filter === 'all') {
@@ -634,6 +641,7 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [selected, setSelected] = useState<SessionDetail | null>(null);
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
+  const [activeTab, setActiveTab] = useState<SessionsTabKey>('overview');
   const [query, setQuery] = useState('');
   const [sourceFilter, setSourceFilter] = useState('all');
   const [modelFilter, setModelFilter] = useState('all');
@@ -693,6 +701,10 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
 
   useEffect(() => {
     void loadList();
+  }, [profile]);
+
+  useEffect(() => {
+    setActiveTab('overview');
   }, [profile]);
 
   const sourceOptions = useMemo(
@@ -758,9 +770,6 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
     () => new Map(sessions.map((session) => [session.id, assessSession(session)])),
     [sessions],
   );
-  const totalToolCalls = filtered.reduce((sum, item) => sum + item.toolCallCount, 0);
-  const uniqueSources = new Set(filtered.map((item) => item.source)).size;
-  const uniqueModels = new Set(filtered.map((item) => item.model ?? '未知模型')).size;
   const riskySessions = filtered.filter((item) => (sessionAssessments.get(item.id)?.score ?? 0) > 0);
   const toolHeavySessions = filtered.filter((item) => item.toolCallCount >= TOOL_HEAVY_THRESHOLD);
   const longNoToolSessions = filtered.filter((item) => item.messageCount >= LONG_CONVERSATION_THRESHOLD && item.toolCallCount === 0);
@@ -787,6 +796,27 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
     () => (selected && selectedPortrait ? buildRecommendations(selected, selectedPortrait, selectedTools.aggregates, snapshot) : []),
     [selected, selectedPortrait, selectedTools.aggregates, snapshot],
   );
+  const overviewWarnings = [
+    filtered.length === 0 ? '当前筛选条件下没有任何会话，建议先恢复筛选范围，再重新定位问题。' : null,
+    riskySessions.length > 0 ? `当前筛选结果里有 ${riskySessions.length} 条高风险会话，建议优先处理这些记录。` : null,
+    longNoToolSessions.length > 0 ? `有 ${longNoToolSessions.length} 条长对话没有进入工具层，更适合先回配置中心核对模型、backend 和 toolsets。` : null,
+    gatewayLikeSessions.length > 0 && snapshot?.gateway?.gatewayState !== 'running'
+      ? `有 ${gatewayLikeSessions.length} 条会话看起来来自 Gateway 或消息平台入口，但当前 Gateway 还不是 running。`
+      : null,
+    selected && selectedSignals.length > 0
+      ? `当前焦点会话命中了 ${selectedSignals.length} 个风险信号，建议继续查看“风险与联动”或直接去日志与诊断页。`
+      : null,
+  ].filter((item): item is string => Boolean(item));
+  const visibleOverviewWarnings = overviewWarnings.slice(0, 4);
+  const remainingOverviewWarningCount = Math.max(0, overviewWarnings.length - visibleOverviewWarnings.length);
+
+  function resetListFilters() {
+    setQuery('');
+    setSourceFilter('all');
+    setModelFilter('all');
+    setRecentFilter('all');
+    notify('info', '已恢复全部会话筛选条件。');
+  }
 
   function navigateFromSelection(page: AppPageKey, reason: string) {
     if (!selected || !selectedPortrait) {
@@ -801,83 +831,136 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
   if (loading) {
     return <LoadingState label="正在读取 Hermes 会话数据库。" />;
   }
+  const currentSessionSection = (
+    <Panel
+      title="当前焦点"
+      subtitle={selected ? '先确认这次会话的来源、工具调用和最适合继续追查的方向。' : '先从会话列表里选一条记录。'}
+      aside={selected ? (
+        <Toolbar>
+          <Button onClick={() => navigateFromSelection('logs', '查看当前会话的相关日志输出。')}>查看日志</Button>
+          <Button onClick={() => navigateFromSelection('diagnostics', '结合会话风险信号继续做运行态诊断。')}>做诊断</Button>
+          <Button onClick={() => navigateFromSelection('memory', '核对这次会话可能涉及的记忆槽位。')}>看记忆</Button>
+        </Toolbar>
+      ) : undefined}
+    >
+      {selected && selectedPortrait ? (
+        <div className="two-column">
+          <div className="detail-list">
+            <KeyValueRow label="ID" value={selected.session.id} />
+            <KeyValueRow label="来源" value={selected.session.source} />
+            <KeyValueRow label="模型" value={selected.session.model || '—'} />
+            <KeyValueRow label="开始时间" value={formatEpoch(selected.session.startedAt)} />
+            <KeyValueRow label="结束时间" value={formatEpoch(selected.session.endedAt)} />
+          </div>
+          <div className="detail-list">
+            <KeyValueRow label="消息数" value={selected.session.messageCount} />
+            <KeyValueRow label="工具调用" value={selected.session.toolCallCount} />
+            <KeyValueRow label="工具种类" value={selectedPortrait.uniqueTools} />
+            <KeyValueRow label="风险信号" value={selectedSignals.length} />
+            <KeyValueRow
+              label="当前状态"
+              value={(
+                <Pill tone={loadingDetail ? 'warn' : selectedAssessment?.tone ?? 'good'}>
+                  {loadingDetail ? '读取中' : selectedAssessment?.primaryLabel ?? '已加载'}
+                </Pill>
+              )}
+            />
+          </div>
+        </div>
+      ) : (
+        <EmptyState title="未选择会话" description="从下方会话列表选择一条记录后，这里会显示当前摘要和推荐去向。" />
+      )}
+    </Panel>
+  );
 
-  return (
+  const overviewSection = (
     <div className="page-stack">
       <Panel
-        title="会话取证台"
-        subtitle="围绕 Hermes 的 `state.db` 做查询和分析，帮助你从 source、model、tool call 和消息流还原一次真实 agent 运行过程。"
-        aside={(
-          <Toolbar>
-            <Button onClick={() => void loadList()}>刷新</Button>
-            <Button onClick={() => stateDbPath && void openInFinder(stateDbPath, 'state.db', true)} disabled={!stateDbPath}>
-              定位 state.db
-            </Button>
-            <Button onClick={() => navigateFromSelection('logs', '查看当前会话的相关日志输出。')}>进入日志页</Button>
-            <Button onClick={() => navigateFromSelection('diagnostics', '结合会话风险信号继续做运行态诊断。')}>进入诊断页</Button>
-            <Button onClick={() => navigateFromSelection('memory', '核对这次会话可能涉及的记忆槽位。')}>进入记忆页</Button>
-          </Toolbar>
-        )}
+        title="推荐下一步"
+        subtitle="先缩小范围并锁定一条会话，再决定是看风险联动，还是直接回放消息。"
       >
-        <div className="hero-grid">
-          <div className="hero-copy">
-            <p className="hero-title">本地会话数据库</p>
-            <p className="hero-subtitle">
-              这里展示的是 Hermes 已落盘的真实会话，不依赖 gateway 在线状态，也不改写任何原始记录。
-            </p>
-            <div className="detail-list">
-              <KeyValueRow label="当前 Profile" value={profile} />
-              <KeyValueRow label="State DB" value={stateDbPath || '—'} />
-              <KeyValueRow label="Gateway" value={snapshot?.gateway?.gatewayState ?? '未检测到'} />
-              <KeyValueRow label="默认模型" value={snapshot?.config.modelDefault ?? '—'} />
-              <KeyValueRow label="Toolsets" value={snapshot?.config.toolsets.length ? snapshot.config.toolsets.join(', ') : '—'} />
+        <div className="list-stack">
+          <div className="list-card">
+            <div className="list-card-title">
+              <strong>先缩小范围并锁定一条会话</strong>
+              <Pill tone={filtered.length > 0 ? 'good' : 'warn'}>
+                {filtered.length > 0 ? `${filtered.length} 条命中` : '暂无命中'}
+              </Pill>
             </div>
+            <p>先按来源、模型、时间窗和关键词缩小范围，避免还没选中目标就掉进消息和工具细节里。</p>
+            <div className="meta-line">
+              <span>{sourceFilter === 'all' ? '全部来源' : sourceFilter}</span>
+              <span>{modelFilter === 'all' ? '全部模型' : modelFilter}</span>
+              <span>{recentFilter === 'all' ? '全部时间' : recentFilter}</span>
+            </div>
+            <Toolbar>
+              <Button kind="primary" onClick={() => setActiveTab('overview')}>
+                查看会话列表
+              </Button>
+              <Button onClick={resetListFilters}>
+                恢复全部筛选
+              </Button>
+            </Toolbar>
           </div>
-          <div className="metrics-grid">
-            <MetricCard label="匹配会话" value={filtered.length} hint="当前筛选条件下的结果数" />
-            <MetricCard label="高风险会话" value={riskySessions.length} hint="基于会话摘要做的轻量风险识别" />
-            <MetricCard label="模型数" value={uniqueModels} hint={`覆盖 ${uniqueSources} 个来源`} />
-            <MetricCard label="工具调用" value={totalToolCalls} hint="筛选结果中的 tool call 总量" />
+
+          <div className="list-card">
+            <div className="list-card-title">
+              <strong>优先关注高风险或工具密集的记录</strong>
+              <Pill tone={riskySessions.length > 0 ? 'warn' : 'good'}>
+                {riskySessions.length > 0 ? `${riskySessions.length} 条待优先处理` : '当前较平稳'}
+              </Pill>
+            </div>
+            <p>如果当前筛选结果里已经出现高风险、高工具调用或 Gateway 来源的会话，通常更值得优先排查。</p>
+            <div className="meta-line">
+              <span>高风险 {riskySessions.length}</span>
+              <span>高工具 {toolHeavySessions.length}</span>
+              <span>Gateway 来源 {gatewayLikeSessions.length}</span>
+            </div>
+            <Toolbar>
+              <Button kind="primary" onClick={() => setActiveTab('analysis')}>
+                查看风险与联动
+              </Button>
+              <Button onClick={() => navigate('diagnostics')}>
+                进入诊断页
+              </Button>
+            </Toolbar>
+          </div>
+
+          <div className="list-card">
+            <div className="list-card-title">
+              <strong>选中后再决定去哪个工作台</strong>
+              <Pill tone={selected ? 'good' : 'neutral'}>
+                {selected ? sessionDisplayTitle(selected.session) : '等待选择'}
+              </Pill>
+            </div>
+            <p>{selectedRecommendations[0]?.description ?? '选择一条会话后，这里会给出最适合继续下钻的页面。'}</p>
+            <div className="meta-line">
+              <span>{selected?.session.source ?? '未选来源'}</span>
+              <span>{selected?.session.model || '未选模型'}</span>
+            </div>
+            <Toolbar>
+              {selectedRecommendations[0]?.page ? (
+                <Button
+                  kind={buttonKindForTone(selectedRecommendations[0].tone)}
+                  onClick={() => navigateFromSelection(selectedRecommendations[0].page!, selectedRecommendations[0].description)}
+                >
+                  {selectedRecommendations[0].actionLabel ?? `进入${pageLabel(selectedRecommendations[0].page!)}`}
+                </Button>
+              ) : (
+                <Button onClick={() => setActiveTab('messages')} disabled={!selected}>
+                  查看消息与回放
+                </Button>
+              )}
+              <Button onClick={() => setActiveTab('analysis')} disabled={!selected}>
+                查看风险与联动
+              </Button>
+            </Toolbar>
           </div>
         </div>
       </Panel>
 
       <Panel
-        title="筛选器"
-        subtitle="按 source、model、时间窗和关键词缩小范围，更适合查某次异常运行或某类 agent 行为。"
-      >
-        <div className="toolbar">
-          <input
-            className="search-input"
-            placeholder="搜索标题、预览、模型、来源"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-          <select className="select-input" value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)}>
-            {sourceOptions.map((item) => (
-              <option key={item} value={item}>
-                {item === 'all' ? '全部来源' : item}
-              </option>
-            ))}
-          </select>
-          <select className="select-input" value={modelFilter} onChange={(event) => setModelFilter(event.target.value)}>
-            {modelOptions.map((item) => (
-              <option key={item} value={item}>
-                {item === 'all' ? '全部模型' : item}
-              </option>
-            ))}
-          </select>
-          <select className="select-input" value={recentFilter} onChange={(event) => setRecentFilter(event.target.value as RecentFilter)}>
-            <option value="all">全部时间</option>
-            <option value="24h">最近 24 小时</option>
-            <option value="7d">最近 7 天</option>
-            <option value="30d">最近 30 天</option>
-          </select>
-        </div>
-      </Panel>
-
-      <Panel
-        title="筛选结果信号"
+        title="当前判断"
         subtitle="先用会话摘要做一轮轻量归类，再决定哪些记录值得进消息级深挖。"
       >
         <div className="health-grid">
@@ -910,10 +993,24 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
             <p>source 看起来来自 gateway 或消息平台入口，排障时要同时看会话与连接链路。</p>
           </section>
         </div>
+        {visibleOverviewWarnings.length > 0 ? (
+          <>
+            <div className="warning-stack top-gap">
+              {visibleOverviewWarnings.map((warning) => (
+                <div className="warning-item" key={warning}>
+                  {warning}
+                </div>
+              ))}
+            </div>
+            {remainingOverviewWarningCount > 0 ? (
+              <p className="helper-text top-gap">其余 {remainingOverviewWarningCount} 条提醒继续收在“风险与联动”和“消息与回放”里。</p>
+            ) : null}
+          </>
+        ) : null}
       </Panel>
 
       <div className="two-column wide-left">
-        <Panel title="会话列表" subtitle="先定位哪一次对话值得深挖，再进右侧做消息级分析。">
+        <Panel title="会话列表" subtitle="先定位哪一次对话值得深挖，再进入右侧子模块做分析或看消息流。">
           {filtered.length === 0 ? (
             <EmptyState title="没有匹配会话" description="换个关键词、来源、模型或时间窗再试试。" />
           ) : (
@@ -953,222 +1050,264 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
           )}
         </Panel>
 
-        <Panel
-          title="会话详情"
-          subtitle="查看消息流、工具调用和时间线，帮助你判断这是模型问题、工具问题还是环境问题。"
-          aside={(
-            <Toolbar>
-              <input
-                className="search-input"
-                placeholder="搜索消息内容或工具名"
-                value={messageQuery}
-                onChange={(event) => setMessageQuery(event.target.value)}
-                disabled={!selected}
-              />
-              <select
-                className="select-input"
-                value={messageFilter}
-                onChange={(event) => setMessageFilter(event.target.value as MessageFilter)}
-                disabled={!selected}
-              >
-                <option value="all">全部消息</option>
-                <option value="user">仅 user</option>
-                <option value="assistant">仅 assistant</option>
-                <option value="tool">仅 tool</option>
-              </select>
-            </Toolbar>
-          )}
-        >
-          {selected && selectedPortrait ? (
+        {currentSessionSection}
+      </div>
+    </div>
+  );
+
+  const analysisSection = (
+    <Panel title="风险与联动" subtitle="查看工具调用、风险信号和会话结构，判断问题更像模型、工具还是环境层。">
+      {selected && selectedPortrait ? (
+        <div className="page-stack">
+          <div className="health-grid">
+            <section className="health-card">
+              <div className="health-card-header">
+                <strong>角色分布</strong>
+                <Pill tone={selectedPortrait.userCount > 0 ? 'good' : 'warn'}>
+                  {selectedPortrait.userCount}/{selectedPortrait.assistantCount}/{selectedPortrait.toolCount}
+                </Pill>
+              </div>
+              <p>
+                user {selectedPortrait.userCount} · assistant {selectedPortrait.assistantCount} · tool {selectedPortrait.toolCount}
+                {selectedPortrait.otherCount > 0 ? ` · other ${selectedPortrait.otherCount}` : ''}
+              </p>
+            </section>
+            <section className="health-card">
+              <div className="health-card-header">
+                <strong>工具覆盖</strong>
+                <Pill tone={selectedPortrait.toolCount > 0 ? 'good' : 'warn'}>
+                  {formatPercent(selectedPortrait.toolRatio)}
+                </Pill>
+              </div>
+              <p>
+                首次工具 {formatEpoch(selectedPortrait.firstToolAt)} · 最近工具 {formatEpoch(selectedPortrait.lastToolAt)} · 共 {selectedPortrait.uniqueTools} 种工具
+              </p>
+            </section>
+            <section className="health-card">
+              <div className="health-card-header">
+                <strong>交互密度</strong>
+                <Pill tone={selectedPortrait.nonUserRatio >= 0.85 ? 'bad' : selectedPortrait.nonUserRatio >= 0.65 ? 'warn' : 'good'}>
+                  {formatPercent(selectedPortrait.nonUserRatio)}
+                </Pill>
+              </div>
+              <p>非 user 消息占比越高，越像 agent 自主运行或工具密集链路。</p>
+            </section>
+            <section className="health-card">
+              <div className="health-card-header">
+                <strong>消息洁净度</strong>
+                <Pill tone={selectedPortrait.blankCount > 0 ? 'warn' : 'good'}>
+                  空消息 {selectedPortrait.blankCount}
+                </Pill>
+              </div>
+              <p>当前消息过滤后还能看到 {filteredMessages.length} 条记录，适合继续做消息级检索。</p>
+            </section>
+          </div>
+
+          <div className="two-column">
             <div className="page-stack">
-              <div className="two-column">
-                <div className="detail-list">
-                  <KeyValueRow label="ID" value={selected.session.id} />
-                  <KeyValueRow label="标题" value={selected.session.title || '—'} />
-                  <KeyValueRow label="来源" value={selected.session.source} />
-                  <KeyValueRow label="模型" value={selected.session.model || '—'} />
-                  <KeyValueRow label="开始时间" value={formatEpoch(selected.session.startedAt)} />
-                  <KeyValueRow label="结束时间" value={formatEpoch(selected.session.endedAt)} />
-                </div>
-                <div className="detail-list">
-                  <KeyValueRow label="消息数" value={selected.session.messageCount} />
-                  <KeyValueRow label="工具调用" value={selected.session.toolCallCount} />
-                  <KeyValueRow label="工具种类" value={selectedPortrait.uniqueTools} />
-                  <KeyValueRow label="最后角色" value={selectedPortrait.lastRole} />
-                  <KeyValueRow label="风险信号" value={selectedSignals.length} />
-                  <KeyValueRow
-                    label="当前状态"
-                    value={(
-                      <Pill tone={loadingDetail ? 'warn' : selectedAssessment?.tone ?? 'good'}>
-                        {loadingDetail ? '读取中' : '已加载'}
-                      </Pill>
-                    )}
-                  />
-                </div>
-              </div>
-
-              <div className="health-grid">
-                <section className="health-card">
-                  <div className="health-card-header">
-                    <strong>角色分布</strong>
-                    <Pill tone={selectedPortrait.userCount > 0 ? 'good' : 'warn'}>
-                      {selectedPortrait.userCount}/{selectedPortrait.assistantCount}/{selectedPortrait.toolCount}
-                    </Pill>
-                  </div>
-                  <p>
-                    user {selectedPortrait.userCount} · assistant {selectedPortrait.assistantCount} · tool {selectedPortrait.toolCount}
-                    {selectedPortrait.otherCount > 0 ? ` · other ${selectedPortrait.otherCount}` : ''}
-                  </p>
-                </section>
-                <section className="health-card">
-                  <div className="health-card-header">
-                    <strong>工具覆盖</strong>
-                    <Pill tone={selectedPortrait.toolCount > 0 ? 'good' : 'warn'}>
-                      {formatPercent(selectedPortrait.toolRatio)}
-                    </Pill>
-                  </div>
-                  <p>
-                    首次工具 {formatEpoch(selectedPortrait.firstToolAt)} · 最近工具 {formatEpoch(selectedPortrait.lastToolAt)} ·
-                    共 {selectedPortrait.uniqueTools} 种工具
-                  </p>
-                </section>
-                <section className="health-card">
-                  <div className="health-card-header">
-                    <strong>交互密度</strong>
-                    <Pill tone={selectedPortrait.nonUserRatio >= 0.85 ? 'bad' : selectedPortrait.nonUserRatio >= 0.65 ? 'warn' : 'good'}>
-                      {formatPercent(selectedPortrait.nonUserRatio)}
-                    </Pill>
-                  </div>
-                  <p>非 user 消息占比越高，越像 agent 自主运行或工具密集链路。</p>
-                </section>
-                <section className="health-card">
-                  <div className="health-card-header">
-                    <strong>消息洁净度</strong>
-                    <Pill tone={selectedPortrait.blankCount > 0 ? 'warn' : 'good'}>
-                      空消息 {selectedPortrait.blankCount}
-                    </Pill>
-                  </div>
-                  <p>当前消息过滤后还能看到 {filteredMessages.length} 条记录，适合继续做消息级检索。</p>
-                </section>
-              </div>
-
-              <div className="two-column">
-                <div className="page-stack">
-                  <Panel className="panel-nested" title="工具调用聚合" subtitle="按工具名聚合调用频次，帮助你看清这次会话真正依赖了哪些能力。">
-                    {selectedTools.aggregates.length === 0 ? (
-                      <EmptyState title="没有工具轨迹" description="这次会话没有解析到 tool 消息，可以优先回配置页核对工具面。"/>
-                    ) : (
-                      <div className="list-stack">
-                        {selectedTools.aggregates.slice(0, 8).map((item) => (
-                          <div className="list-card" key={item.name}>
-                            <div className="list-card-title">
-                              <strong>{item.name}</strong>
-                              <Pill tone={item.count >= 3 ? 'warn' : 'good'}>{item.count} 次</Pill>
-                            </div>
-                            <div className="meta-line">
-                              <span>首次 {formatEpoch(item.firstAt)}</span>
-                              <span>最近 {formatEpoch(item.lastAt)}</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </Panel>
-
-                  <Panel className="panel-nested" title="最近工具时间线" subtitle="结合最后几次 tool 事件，快速判断会话停在了哪一层。">
-                    {selectedTools.recentEvents.length === 0 ? (
-                      <EmptyState title="暂无工具事件" description="当前会话没有 tool 时间线，重点去看模型和配置层。"/>
-                    ) : (
-                      <div className="list-stack">
-                        {selectedTools.recentEvents.map((event) => (
-                          <div className="list-card" key={event.key}>
-                            <div className="list-card-title">
-                              <strong>{event.name}</strong>
-                              <Pill tone={event.role === 'tool' ? 'warn' : 'neutral'}>{event.role}</Pill>
-                            </div>
-                            <p>{event.preview}</p>
-                            <div className="meta-line">
-                              <span>{formatEpoch(event.timestamp)}</span>
-                              <span>{selected.session.source}</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </Panel>
-                </div>
-
-                <div className="page-stack">
-                  <Panel className="panel-nested" title="风险信号" subtitle="这些判断基于摘要字段和消息结构，只负责提示，不替代原始日志。">
-                    {selectedSignals.length === 0 ? (
-                      <EmptyState title="没有明显风险信号" description="当前会话更像一次正常运行记录，可以直接看消息流或返回总览。"/>
-                    ) : (
-                      <div className="list-stack">
-                        {selectedSignals.map((signal) => (
-                          <div className="list-card" key={signal.key}>
-                            <div className="list-card-title">
-                              <strong>{signal.label}</strong>
-                              <Pill tone={signal.tone}>{signalToneLabel(signal.tone)}</Pill>
-                            </div>
-                            <p>{signal.description}</p>
-                            {signal.page && (
-                              <Toolbar>
-                                <Button kind={buttonKindForTone(signal.tone)} onClick={() => navigateFromSelection(signal.page!, signal.description)}>
-                                  {signal.actionLabel ?? `进入${pageLabel(signal.page)}`}
-                                </Button>
-                              </Toolbar>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </Panel>
-
-                  <Panel className="panel-nested" title="联动建议" subtitle="根据来源、工具和记忆痕迹，给出最可能继续深挖的工作台入口。">
-                    <div className="list-stack">
-                      {selectedRecommendations.map((item) => (
-                        <div className="list-card" key={item.key}>
-                          <div className="list-card-title">
-                            <strong>{item.label}</strong>
-                            <Pill tone={item.tone}>{pageLabel(item.page ?? 'dashboard')}</Pill>
-                          </div>
-                          <p>{item.description}</p>
-                          {item.page && (
-                            <Toolbar>
-                              <Button kind={buttonKindForTone(item.tone)} onClick={() => navigateFromSelection(item.page!, item.description)}>
-                                {item.actionLabel ?? `进入${pageLabel(item.page)}`}
-                              </Button>
-                            </Toolbar>
-                          )}
+              <Panel className="panel-nested" title="工具调用聚合" subtitle="按工具名聚合调用频次，帮助你看清这次会话真正依赖了哪些能力。">
+                {selectedTools.aggregates.length === 0 ? (
+                  <EmptyState title="没有工具轨迹" description="这次会话没有解析到 tool 消息，可以优先回配置页核对工具面。" />
+                ) : (
+                  <div className="list-stack">
+                    {selectedTools.aggregates.slice(0, 8).map((item) => (
+                      <div className="list-card" key={item.name}>
+                        <div className="list-card-title">
+                          <strong>{item.name}</strong>
+                          <Pill tone={item.count >= 3 ? 'warn' : 'good'}>{item.count} 次</Pill>
                         </div>
-                      ))}
-                    </div>
-                  </Panel>
-                </div>
-              </div>
-
-              {filteredMessages.length === 0 ? (
-                <EmptyState title="没有匹配消息" description="试试调整消息筛选器，或直接查看全部消息。" />
-              ) : (
-                <div className="transcript">
-                  {filteredMessages.map((message: SessionMessage) => (
-                    <article className={`message-bubble role-${normalizeRole(message.role)}`} key={message.id}>
-                      <div className="message-meta">
-                        <span>{normalizeRole(message.role) || 'unknown'}</span>
-                        <span>{formatEpoch(message.timestamp)}</span>
+                        <div className="meta-line">
+                          <span>首次 {formatEpoch(item.firstAt)}</span>
+                          <span>最近 {formatEpoch(item.lastAt)}</span>
+                        </div>
                       </div>
-                      {message.toolName && <p className="message-tool">工具: {message.toolName}</p>}
-                      <pre>{message.content || '(空内容)'}</pre>
-                    </article>
+                    ))}
+                  </div>
+                )}
+              </Panel>
+
+              <Panel className="panel-nested" title="最近工具时间线" subtitle="结合最后几次 tool 事件，快速判断会话停在了哪一层。">
+                {selectedTools.recentEvents.length === 0 ? (
+                  <EmptyState title="暂无工具事件" description="当前会话没有 tool 时间线，重点去看模型和配置层。" />
+                ) : (
+                  <div className="list-stack">
+                    {selectedTools.recentEvents.map((event) => (
+                      <div className="list-card" key={event.key}>
+                        <div className="list-card-title">
+                          <strong>{event.name}</strong>
+                          <Pill tone={event.role === 'tool' ? 'warn' : 'neutral'}>{event.role}</Pill>
+                        </div>
+                        <p>{event.preview}</p>
+                        <div className="meta-line">
+                          <span>{formatEpoch(event.timestamp)}</span>
+                          <span>{selected.session.source}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Panel>
+            </div>
+
+            <div className="page-stack">
+              <Panel className="panel-nested" title="风险信号" subtitle="这些判断基于摘要字段和消息结构，只负责提示，不替代原始日志。">
+                {selectedSignals.length === 0 ? (
+                  <EmptyState title="没有明显风险信号" description="当前会话更像一次正常运行记录，可以直接看消息流或返回总览。" />
+                ) : (
+                  <div className="list-stack">
+                    {selectedSignals.map((signal) => (
+                      <div className="list-card" key={signal.key}>
+                        <div className="list-card-title">
+                          <strong>{signal.label}</strong>
+                          <Pill tone={signal.tone}>{signalToneLabel(signal.tone)}</Pill>
+                        </div>
+                        <p>{signal.description}</p>
+                        {signal.page ? (
+                          <Toolbar>
+                            <Button kind={buttonKindForTone(signal.tone)} onClick={() => navigateFromSelection(signal.page!, signal.description)}>
+                              {signal.actionLabel ?? `进入${pageLabel(signal.page)}`}
+                            </Button>
+                          </Toolbar>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Panel>
+
+              <Panel className="panel-nested" title="联动建议" subtitle="根据来源、工具和记忆痕迹，给出最可能继续深挖的工作台入口。">
+                <div className="list-stack">
+                  {selectedRecommendations.map((item) => (
+                    <div className="list-card" key={item.key}>
+                      <div className="list-card-title">
+                        <strong>{item.label}</strong>
+                        <Pill tone={item.tone}>{pageLabel(item.page ?? 'dashboard')}</Pill>
+                      </div>
+                      <p>{item.description}</p>
+                      {item.page ? (
+                        <Toolbar>
+                          <Button kind={buttonKindForTone(item.tone)} onClick={() => navigateFromSelection(item.page!, item.description)}>
+                            {item.actionLabel ?? `进入${pageLabel(item.page)}`}
+                          </Button>
+                        </Toolbar>
+                      ) : null}
+                    </div>
                   ))}
                 </div>
-              )}
+              </Panel>
             </div>
-          ) : (
-            <EmptyState title="未选择会话" description="从左侧列表选择一条会话查看详细消息。" />
-          )}
-        </Panel>
+          </div>
+        </div>
+      ) : (
+        <EmptyState title="未选择会话" description="先在“会话总览”里选择一条记录，再来这里看风险和工具细节。" />
+      )}
+    </Panel>
+  );
+
+  const messagesSection = (
+    <Panel
+      title="消息流"
+      subtitle="只保留消息正文和筛选器，适合专注回放一次会话到底发生了什么。"
+      aside={(
+        <Toolbar>
+          <input
+            className="search-input"
+            placeholder="搜索消息内容或工具名"
+            value={messageQuery}
+            onChange={(event) => setMessageQuery(event.target.value)}
+            disabled={!selected}
+          />
+          <select
+            className="select-input"
+            value={messageFilter}
+            onChange={(event) => setMessageFilter(event.target.value as MessageFilter)}
+            disabled={!selected}
+          >
+            <option value="all">全部消息</option>
+            <option value="user">仅 user</option>
+            <option value="assistant">仅 assistant</option>
+            <option value="tool">仅 tool</option>
+          </select>
+        </Toolbar>
+      )}
+    >
+      {selected ? (
+        filteredMessages.length === 0 ? (
+          <EmptyState title="没有匹配消息" description="试试调整消息筛选器，或直接查看全部消息。" />
+        ) : (
+          <div className="page-stack">
+            <div className="detail-list compact">
+              <KeyValueRow label="当前会话" value={sessionDisplayTitle(selected.session)} />
+              <KeyValueRow label="来源" value={selected.session.source} />
+              <KeyValueRow label="模型" value={selected.session.model || '—'} />
+              <KeyValueRow label="返回消息" value={filteredMessages.length} />
+            </div>
+            <div className="transcript">
+              {filteredMessages.map((message: SessionMessage) => (
+                <article className={`message-bubble role-${normalizeRole(message.role)}`} key={message.id}>
+                  <div className="message-meta">
+                    <span>{normalizeRole(message.role) || 'unknown'}</span>
+                    <span>{formatEpoch(message.timestamp)}</span>
+                  </div>
+                  {message.toolName && <p className="message-tool">工具: {message.toolName}</p>}
+                  <pre>{message.content || '(空内容)'}</pre>
+                </article>
+              ))}
+            </div>
+          </div>
+        )
+      ) : (
+        <EmptyState title="未选择会话" description="先在“会话总览”里选择一条记录，再来这里看消息流。" />
+      )}
+    </Panel>
+  );
+
+  return (
+    <div className="page-stack">
+      <Panel
+        title="会话工作台"
+        subtitle="先用常用总览锁定一条会话，再按需进入风险联动或消息回放，避免一开始就掉进细节里。"
+        aside={(
+          <Toolbar>
+            <Button onClick={() => void loadList()}>刷新</Button>
+            <Button onClick={() => stateDbPath && void openInFinder(stateDbPath, 'state.db', true)} disabled={!stateDbPath}>
+              定位 state.db
+            </Button>
+          </Toolbar>
+        )}
+      >
+        <p className="helper-text">
+          这里展示的是 Hermes 已落盘的真实会话，不依赖 Gateway 在线状态，也不改写任何原始记录。默认顺序：先筛选，再锁定焦点，最后按需看风险或消息。
+        </p>
+        <div className="detail-list compact top-gap">
+          <KeyValueRow label="当前 Profile" value={profile} />
+          <KeyValueRow label="State DB" value={stateDbPath || '—'} />
+          <KeyValueRow label="当前命中" value={filtered.length} />
+          <KeyValueRow label="高风险会话" value={riskySessions.length} />
+          <KeyValueRow label="Gateway" value={snapshot?.gateway?.gatewayState ?? '未检测到'} />
+          <KeyValueRow label="默认模型" value={snapshot?.config.modelDefault ?? '—'} />
+        </div>
+      </Panel>
+
+      <div className="tab-bar">
+        {SESSIONS_TABS.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            className={`tab ${activeTab === tab.key ? 'active' : ''}`}
+            onClick={() => setActiveTab(tab.key)}
+            title={tab.hint}
+          >
+            {tab.label}
+            {tab.key === 'analysis' && selectedSignals.length > 0 ? <span className="tab-dirty-dot" /> : null}
+            {tab.key === 'messages' && (messageQuery.trim() || messageFilter !== 'all') ? <span className="tab-dirty-dot" /> : null}
+          </button>
+        ))}
       </div>
+
+      {activeTab === 'overview' ? overviewSection : null}
+      {activeTab === 'analysis' ? analysisSection : null}
+      {activeTab === 'messages' ? messagesSection : null}
     </div>
   );
 }

@@ -24,63 +24,112 @@ import type {
 } from './types';
 
 const NAV_GROUPS: Array<{
+  id: 'starter' | 'operations' | 'advanced';
   label: string;
-  items: Array<{ key: AppPageKey; label: string; eyebrow: string }>;
+  eyebrow: string;
+  summary: string;
+  collapsible?: boolean;
+  defaultCollapsed?: boolean;
+  items: Array<{
+    key: AppPageKey;
+    label: string;
+    eyebrow: string;
+    description: string;
+    badge?: string;
+    mark: string;
+  }>;
 }> = [
   {
-    label: 'Control',
+    id: 'starter',
+    label: '常用工作台',
+    eyebrow: '新手先看',
+    summary: '把最常用的状态查看、实例切换、配置维护和技能启用放在最前面。',
     items: [
-      { key: 'dashboard', label: '控制中心', eyebrow: 'Mission Control' },
-      { key: 'profiles', label: 'Profile 管理', eyebrow: 'Instances' },
-      { key: 'gateway', label: '网关控制', eyebrow: 'Gateway' },
-      { key: 'diagnostics', label: '诊断面板', eyebrow: 'Doctor' },
+      { key: 'dashboard', label: '总览', eyebrow: 'Overview', description: '先看 Hermes 是否可用、哪里需要处理。', badge: '常用', mark: '总' },
+      { key: 'profiles', label: '实例', eyebrow: 'Profiles', description: '切换默认实例，进入对应工作台。', badge: '常用', mark: '例' },
+      { key: 'config', label: '配置', eyebrow: 'Config', description: '模型、通道和基础参数都在这里。', badge: '常用', mark: '配' },
+      { key: 'skills', label: '技能', eyebrow: 'Skills', description: '安装、整理和编写技能，做能力闭环。', badge: '常用', mark: '技' },
     ],
   },
   {
-    label: 'Runtime',
+    id: 'operations',
+    label: '运行与排障',
+    eyebrow: '运行中用',
+    summary: '遇到链路异常、平台问题或状态不一致时，直接在这里闭环定位与修复。',
     items: [
-      { key: 'config', label: '配置中心', eyebrow: 'Config' },
-      { key: 'extensions', label: '扩展能力', eyebrow: 'Extensions' },
-      { key: 'skills', label: '技能目录', eyebrow: 'Skills' },
-      { key: 'sessions', label: '会话浏览', eyebrow: 'Sessions' },
-      { key: 'logs', label: '日志查看', eyebrow: 'Logs' },
+      { key: 'gateway', label: '通道与网关', eyebrow: 'Gateway', description: '平台接入、通道状态和运行控制。', mark: '网' },
+      { key: 'diagnostics', label: '诊断与修复', eyebrow: 'Doctor', description: '执行体检、比对运行态并快速回路。', mark: '诊' },
+      { key: 'logs', label: '日志与回放', eyebrow: 'Logs', description: '集中查看输出、错误和最近回执。', mark: '志' },
     ],
   },
   {
-    label: 'Data',
+    id: 'advanced',
+    label: '更多能力与资料',
+    eyebrow: '按需展开',
+    summary: '扩展、记忆、会话和定时任务按需展开，不打扰首次上手，需要时也能随时进入。',
+    collapsible: true,
+    defaultCollapsed: true,
     items: [
-      { key: 'memory', label: '记忆编排', eyebrow: 'Memory' },
-      { key: 'cron', label: 'Cron 作业', eyebrow: 'Scheduler' },
+      { key: 'extensions', label: '扩展与插件', eyebrow: 'Extensions', description: '管理插件、扩展和能力依赖。', badge: '进阶', mark: '扩' },
+      { key: 'memory', label: '记忆与资料', eyebrow: 'Memory', description: '维护记忆文件、Provider 和关联材料。', badge: '进阶', mark: '忆' },
+      { key: 'sessions', label: '会话浏览', eyebrow: 'Sessions', description: '查看历史轨迹、链路和上下文。', mark: '会' },
+      { key: 'cron', label: '定时任务', eyebrow: 'Scheduler', description: '管理自动投递和计划任务。', mark: '定' },
     ],
   },
 ];
 
+const PAGE_META = Object.fromEntries(
+  NAV_GROUPS.flatMap((group) =>
+    group.items.map((item) => [
+      item.key,
+      {
+        ...item,
+        groupId: group.id,
+        groupLabel: group.label,
+        groupEyebrow: group.eyebrow,
+        groupSummary: group.summary,
+      },
+    ]),
+  ),
+) as Record<AppPageKey, {
+  key: AppPageKey;
+  label: string;
+  eyebrow: string;
+  description: string;
+  badge?: string;
+  mark: string;
+  groupId: 'starter' | 'operations' | 'advanced';
+  groupLabel: string;
+  groupEyebrow: string;
+  groupSummary: string;
+}>;
+
 const PAGE_TITLES: Record<AppPageKey, string> = {
-  config: '配置中心',
-  cron: 'Cron 作业',
-  dashboard: 'Hermes 控制中心',
-  diagnostics: '诊断面板',
-  extensions: '扩展能力台',
-  gateway: '消息网关控制',
-  logs: '日志查看',
-  memory: '记忆编排台',
-  profiles: 'Profile 管理',
+  config: '配置工作台',
+  cron: '定时任务',
+  dashboard: 'Hermes 总览',
+  diagnostics: '诊断与修复',
+  extensions: '扩展与插件',
+  gateway: '通道与网关',
+  logs: '日志与回放',
+  memory: '记忆与资料',
+  profiles: '实例工作台',
   sessions: '会话浏览',
-  skills: '技能目录',
+  skills: '技能工作台',
 };
 
 const PAGE_HINTS: Record<AppPageKey, string> = {
-  config: '模型、backend、toolsets、provider',
-  cron: '自动化调度与投递',
-  dashboard: '安装、运行、修复总控',
-  diagnostics: '诊断、核对、修复接力',
-  extensions: 'tools、skills、plugins、memory',
-  gateway: '部署、安装、服务控制',
-  logs: '日志、输出、问题回放',
-  memory: '文件、provider、插件、校验',
-  profiles: '多实例、alias、差异治理',
-  sessions: '会话轨迹与链路判读',
-  skills: '技能安装、编排、扫描',
+  config: '直接维护模型、Provider、toolsets、env 与关键配置，不必先去终端再回来。',
+  cron: '把定时触发、远端投递和周期任务收进同一处，不让自动化散落在外部。',
+  dashboard: '先判断 CLI、Gateway、模型与记忆是否形成可用闭环，再决定下一步去哪里。',
+  diagnostics: '针对运行异常、能力缺失和链路不一致做结构化体检，并把结果收回当前客户端。',
+  extensions: '查看插件、扩展和能力依赖的安装态与运行态，避免“装了但没接上”。',
+  gateway: '集中处理平台接入、通道状态、服务控制和相关材料，减少跨页跳转成本。',
+  logs: '把错误、输出和关键动作回执集中到一处，方便回放和问题定位。',
+  memory: '统一查看记忆文件、Provider 和关联材料，方便核对长期记忆链路。',
+  profiles: '面向多实例、多 alias 和差异治理，先选对实例，再进入对应工作台做事。',
+  sessions: '回看历史会话轨迹、链路线索和上下文材料，辅助复盘与排障。',
+  skills: '围绕技能安装、更新、扫描和本地治理做闭环，不再只停留在读取层。',
 };
 
 function renderPage(
@@ -127,6 +176,11 @@ export default function App() {
   const [profiles, setProfiles] = useState<ProfilesSnapshot | null>(null);
   const [selectedProfile, setSelectedProfile] = useState('default');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [collapsedNavGroups, setCollapsedNavGroups] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(
+      NAV_GROUPS.filter((group) => group.defaultCollapsed).map((group) => [group.id, true]),
+    ),
+  );
   const [loadingProfiles, setLoadingProfiles] = useState(true);
   const [syncingActive, setSyncingActive] = useState(false);
   const [shellDashboard, setShellDashboard] = useState<DashboardSnapshot | null>(null);
@@ -233,14 +287,16 @@ export default function App() {
   const activeProfile = profiles?.activeProfile ?? 'default';
   const viewedProfile = profiles?.profiles.find((item) => item.name === selectedProfile) ?? null;
   const activeGroup = useMemo(
-    () => NAV_GROUPS.find((group) => group.items.some((item) => item.key === activePage))?.label ?? 'Control',
+    () => NAV_GROUPS.find((group) => group.items.some((item) => item.key === activePage)) ?? NAV_GROUPS[0],
     [activePage],
   );
+  const activeMeta = PAGE_META[activePage];
   const shellBusy = loadingProfiles || loadingShell || refreshingShell;
   const gatewayTone = shellDashboard?.gateway?.gatewayState === 'running' ? 'good' : 'warn';
   const cliTone = shellInstallation?.binaryFound ? 'good' : 'bad';
   const memoryTone = shellDashboard?.config.memoryEnabled ? 'good' : 'warn';
   const pluginCount = shellExtensions?.plugins.installedCount ?? 0;
+  const envTone = viewedProfile?.envExists ? 'good' : 'warn';
 
   function toggleSidebar() {
     setSidebarCollapsed((current) => {
@@ -254,37 +310,78 @@ export default function App() {
     });
   }
 
+  function toggleNavGroup(groupId: string) {
+    setCollapsedNavGroups((current) => ({
+      ...current,
+      [groupId]: !current[groupId],
+    }));
+  }
+
   return (
     <div className={`app-shell ${sidebarCollapsed ? 'app-shell-sidebar-collapsed' : ''}`}>
       <aside className={`sidebar ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
         <div className="sidebar-brand">
           <span className="brand-mark">HP</span>
-          <div>
+          <div className="sidebar-brand-copy">
             <p>HermesPanel</p>
-            <span>Native control client</span>
+            <span>Hermes 轻量工作台</span>
           </div>
           <button type="button" className="sidebar-collapse-btn" onClick={toggleSidebar}>
             {sidebarCollapsed ? '»' : '«'}
           </button>
         </div>
 
+        {!sidebarCollapsed ? (
+          <div className="sidebar-guide-card">
+            <strong>先做常用，再按需展开高级功能</strong>
+            <p>先从常用工作台开始，遇到问题再进运行与排障，更多能力和资料默认收起，避免第一次就被复杂配置淹没。</p>
+          </div>
+        ) : null}
+
         <div className="sidebar-scroller">
           {NAV_GROUPS.map((group) => (
-            <section className="sidebar-section" key={group.label}>
-              <div className="sidebar-section-label">{group.label}</div>
-              <nav className="sidebar-nav">
-                {group.items.map((item) => (
+            <section className="sidebar-section" key={group.id}>
+              <div className="sidebar-section-header">
+                <div className="sidebar-group-copy">
+                  <span className="sidebar-section-eyebrow">{group.eyebrow}</span>
+                  <div className="sidebar-section-label">{group.label}</div>
+                </div>
+                {group.collapsible ? (
                   <button
-                    key={item.key}
                     type="button"
-                    className={`nav-item ${activePage === item.key ? 'active' : ''}`}
-                    onClick={() => navigate(item.key)}
+                    className="sidebar-section-toggle"
+                    onClick={() => toggleNavGroup(group.id)}
                   >
-                    <span>{item.eyebrow}</span>
-                    <strong>{item.label}</strong>
+                    {collapsedNavGroups[group.id] ? '展开' : '收起'}
                   </button>
-                ))}
-              </nav>
+                ) : (
+                  <span className="sidebar-section-count">{group.items.length} 项</span>
+                )}
+              </div>
+              {!collapsedNavGroups[group.id] || group.items.some((item) => item.key === activePage) ? (
+                <>
+                  <p className="sidebar-section-summary">{group.summary}</p>
+                  <nav className="sidebar-nav">
+                    {group.items.map((item) => (
+                      <button
+                        key={item.key}
+                        type="button"
+                        className={`nav-item ${activePage === item.key ? 'active' : ''}`}
+                        onClick={() => navigate(item.key)}
+                        title={`${item.label} · ${item.description}`}
+                      >
+                        <span className={`nav-item-mark nav-item-mark-${group.id}`}>{item.mark}</span>
+                        <span className="nav-item-copy">
+                          <span className="nav-item-eyebrow">{item.eyebrow}</span>
+                          <strong>{item.label}</strong>
+                          <small>{item.description}</small>
+                        </span>
+                        {item.badge ? <span className="nav-item-badge">{item.badge}</span> : null}
+                      </button>
+                    ))}
+                  </nav>
+                </>
+              ) : null}
             </section>
           ))}
         </div>
@@ -292,36 +389,39 @@ export default function App() {
         <section className="sidebar-status-card">
           <div className="sidebar-status-head">
             <div>
-              <span className="sidebar-section-label">Profile Digest</span>
+              <span className="sidebar-card-label">当前实例</span>
               <strong className="sidebar-status-name">{selectedProfile}</strong>
+              <p className="sidebar-status-copy">
+                {selectedProfile === activeProfile ? '正在查看默认实例。' : '当前是浏览实例，不会影响默认实例。'}
+              </p>
             </div>
-            <Pill tone={selectedProfile === activeProfile ? 'good' : 'warn'}>
-              {selectedProfile === activeProfile ? 'Default' : 'Viewing'}
+            <Pill tone={selectedProfile === activeProfile ? 'good' : 'neutral'}>
+              {selectedProfile === activeProfile ? '默认实例' : '浏览中'}
             </Pill>
           </div>
           <div className="sidebar-status-grid">
             <div className="sidebar-status-item">
-              <span>Model</span>
+              <span>模型</span>
               <strong>{viewedProfile?.modelDefault ?? shellDashboard?.config.modelDefault ?? '—'}</strong>
             </div>
             <div className="sidebar-status-item">
-              <span>Gateway</span>
+              <span>网关</span>
               <strong>{viewedProfile?.gatewayState ?? shellDashboard?.gateway?.gatewayState ?? '—'}</strong>
             </div>
             <div className="sidebar-status-item">
-              <span>Sessions</span>
+              <span>会话</span>
               <strong>{viewedProfile?.sessionCount ?? shellDashboard?.counts.sessions ?? 0}</strong>
             </div>
             <div className="sidebar-status-item">
-              <span>Skills</span>
+              <span>技能</span>
               <strong>{viewedProfile?.skillCount ?? shellDashboard?.counts.skills ?? 0}</strong>
             </div>
             <div className="sidebar-status-item">
-              <span>Env</span>
-              <strong>{viewedProfile?.envExists ? 'Ready' : 'Missing'}</strong>
+              <span>环境</span>
+              <strong>{viewedProfile?.envExists ? '已就绪' : '待补齐'}</strong>
             </div>
             <div className="sidebar-status-item">
-              <span>Plugins</span>
+              <span>插件</span>
               <strong>{pluginCount}</strong>
             </div>
           </div>
@@ -340,47 +440,59 @@ export default function App() {
         </section>
 
         <div className="sidebar-note sidebar-footnote">
-          <p>0 侵入治理</p>
-          <span>只包装 CLI、配置、日志、`state.db` 与 `gateway_state.json`。</span>
+          <p>常用前置，高级后置</p>
+          <span>模型、实例、技能前置展示；扩展、记忆、会话与定时任务收进高级区。</span>
         </div>
       </aside>
 
       <div className="content-shell">
         <header className="topbar">
           <div className="topbar-copy">
-            <p className="eyebrow">{activeGroup}</p>
+            <p className="topbar-kicker">{activeGroup.eyebrow} · {activeGroup.label}</p>
             <div className="topbar-title-row">
-              <h1>{PAGE_TITLES[activePage]}</h1>
-              <InfoTip content={`当前页聚焦：${PAGE_HINTS[activePage]}。说明信息已后置到悬浮提示和状态摘要，避免抢占主要操作区。`} />
+              <div>
+                <h1>{PAGE_TITLES[activePage]}</h1>
+                <p className="topbar-subtitle">{activeMeta.description}</p>
+              </div>
+              <InfoTip content={`当前页聚焦：${PAGE_HINTS[activePage]} 常用入口已前置，高级能力可从“高级与资料”继续展开。`} />
             </div>
             <div className="topbar-context">
-              <Pill tone={cliTone}>CLI {shellInstallation?.binaryFound ? 'Ready' : 'Missing'}</Pill>
-              <Pill tone={gatewayTone}>Gateway {shellDashboard?.gateway?.gatewayState ?? 'unknown'}</Pill>
-              <Pill tone={memoryTone}>Memory {shellDashboard?.config.memoryEnabled ? 'On' : 'Off'}</Pill>
-              <Pill tone={viewedProfile?.envExists ? 'good' : 'warn'}>Env {viewedProfile?.envExists ? 'Ready' : 'Missing'}</Pill>
+              <Pill tone={cliTone}>CLI {shellInstallation?.binaryFound ? '已接管' : '待安装'}</Pill>
+              <Pill tone={gatewayTone}>网关 {shellDashboard?.gateway?.gatewayState ?? 'unknown'}</Pill>
+              <Pill tone={memoryTone}>记忆 {shellDashboard?.config.memoryEnabled ? '已开启' : '已关闭'}</Pill>
+              <Pill tone={envTone}>环境 {viewedProfile?.envExists ? '已就绪' : '待补齐'}</Pill>
             </div>
           </div>
           <div className="topbar-actions">
-            <div className="profile-switcher">
-              <span>Profile</span>
-              <select
-                className="select-input"
-                value={selectedProfile}
-                onChange={(event) => setSelectedProfile(event.target.value)}
-                disabled={loadingProfiles || !profiles}
-              >
-                {(profiles?.profiles ?? []).map((item) => (
-                  <option key={item.name} value={item.name}>
-                    {item.name}{item.isActive ? ' · active' : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="topbar-status">
-              <div className="topbar-badge">Wrapper Client</div>
+            <div className="topbar-control-card">
+              <div className="profile-switcher">
+                <span>实例</span>
+                <select
+                  className="select-input"
+                  value={selectedProfile}
+                  onChange={(event) => setSelectedProfile(event.target.value)}
+                  disabled={loadingProfiles || !profiles}
+                >
+                  {(profiles?.profiles ?? []).map((item) => (
+                    <option key={item.name} value={item.name}>
+                      {item.name}{item.isActive ? ' · 默认' : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="topbar-status">
+                <div className="topbar-badge">{activeGroup.label}</div>
+                <div className="profile-meta">
+                  <strong>默认实例：{activeProfile}</strong>
+                  <span>
+                    当前查看：{selectedProfile}
+                    {profiles ? ` · 共 ${profiles.profiles.length} 个实例` : ''}
+                  </span>
+                </div>
+              </div>
               <div className="profile-meta">
-                <strong>活跃: {activeProfile}</strong>
-                <span>查看中: {selectedProfile}</span>
+                <strong>{activePage === 'dashboard' ? '推荐入口：总览 → 实例 → 配置 → 技能' : `当前页：${PAGE_TITLES[activePage]}`}</strong>
+                <span>{activeGroup.summary}</span>
               </div>
               <Toolbar className="shell-toolbar">
                 <Button onClick={() => void loadProfiles(selectedProfile)} disabled={loadingProfiles}>

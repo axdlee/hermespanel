@@ -18,6 +18,7 @@ import type {
 import type { PageProps } from './types';
 
 type HealthTone = 'neutral' | 'good' | 'warn' | 'bad';
+type DashboardTabKey = 'overview' | 'workspace' | 'advanced';
 
 interface QuickResultState {
   label: string;
@@ -65,6 +66,12 @@ const LOG_OPTIONS = [
   { key: 'gateway.error', label: 'gateway.error.log' },
   { key: 'agent', label: 'agent.log' },
   { key: 'errors', label: 'errors.log' },
+];
+
+const DASHBOARD_TABS: Array<{ key: DashboardTabKey; label: string; hint: string }> = [
+  { key: 'overview', label: '常用总览', hint: '先看当前实例能不能用、下一步该去哪里。' },
+  { key: 'workspace', label: '运行材料', hint: '查看最近动作、日志尾部、会话与记忆文件。' },
+  { key: 'advanced', label: '进阶接管', hint: '低频 CLI 接管、依赖检查和工作区材料定位入口。' },
 ];
 
 const isMacPlatform = typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent);
@@ -212,6 +219,7 @@ export function DashboardPage({ notify, profile, profiles, refreshProfiles, navi
   const [logPreview, setLogPreview] = useState<LogReadResult | null>(null);
   const [logError, setLogError] = useState<string | null>(null);
   const [logLoading, setLogLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<DashboardTabKey>('overview');
 
   const currentProfile = useMemo(
     () => profiles?.profiles.find((item) => item.name === profile) ?? null,
@@ -510,76 +518,266 @@ export function DashboardPage({ notify, profile, profiles, refreshProfiles, navi
     },
   ];
 
-  return (
-    <div className="page-stack">
-      <div className="stat-cards">
-        <StatCard
-          label="Gateway"
-          value={gatewayRunning ? '运行中' : '待启动'}
-          meta={gatewayRunning ? `PID ${data.gateway?.pid ?? '—'} · ${data.gateway?.activeAgents ?? 0} 个活跃 Agent` : '当前还没有检测到运行中的网关状态。'}
-          tone={gatewayRunning ? 'running' : 'warning'}
-        />
-        <StatCard
-          label="CLI / Version"
-          value={installation.binaryFound ? versionHeadline : '未安装 Hermes CLI'}
-          meta={installation.binaryFound ? installation.hermesBinary ?? '已检测到 CLI' : '先安装后才能接管 setup、model、gateway 和 skills。'}
-          tone={installation.binaryFound ? 'running' : 'stopped'}
-        />
-        <StatCard
-          label="Model"
-          value={modelReady ? `${data.config.modelProvider} / ${data.config.modelDefault}` : '模型待配置'}
-          meta={data.config.modelBaseUrl || '建议先跑官方 setup / model 向导，把 provider 与默认模型一次配齐。'}
-          tone={modelReady ? 'running' : 'warning'}
-        />
-        <StatCard
-          label="Workspace"
-          value={`${data.counts.sessions} 会话 / ${data.counts.skills} 技能`}
-          meta={`Cron ${data.counts.cronJobs} · 主 Alias ${primaryAlias?.name ?? '未创建'}`}
-        />
-        <StatCard
-          label="Dependencies"
-          value={`${dependencyReadyCount}/${installation.dependencies.length}`}
-          meta={dependencyReadyCount === installation.dependencies.length ? 'CLI 周边依赖齐备。' : '还存在缺失依赖，建议结合 doctor 继续体检。'}
-          tone={dependencyReadyCount === installation.dependencies.length ? 'running' : 'warning'}
-        />
-        <StatCard
-          label="Artifacts"
-          value={missingArtifacts === 0 ? '工作区完整' : `缺失 ${missingArtifacts} 项`}
-          meta={`Home ${installation.hermesHomeExists ? 'Ready' : 'Missing'} · logs ${installation.logsDirExists ? 'Ready' : 'Missing'}`}
-          tone={missingArtifacts === 0 ? 'running' : 'warning'}
-        />
+  const overviewSection = (
+    <>
+      <Panel
+        title="推荐下一步"
+        subtitle="把最常走的入口放前面，小白先顺着做，熟手再下钻到具体工作台。"
+      >
+        <div className="list-stack">
+          <div className="list-card">
+            <div className="list-card-title">
+              <strong>模型、通道与基础参数</strong>
+              <Pill tone={modelReady ? 'good' : 'warn'}>
+                {modelReady ? '已就绪' : '建议先处理'}
+              </Pill>
+            </div>
+            <p>{modelReady ? `${data.config.modelProvider} / ${data.config.modelDefault}` : '先补齐 provider、默认模型与基础连接参数，后面的能力链路才会稳定。'}</p>
+            <div className="meta-line">
+              <span>{data.config.modelBaseUrl || '未声明 Base URL'}</span>
+              <span>{data.config.contextEngine || 'context.engine 未配置'}</span>
+            </div>
+            <Toolbar>
+              <Button kind="primary" onClick={() => navigate('config')}>进入配置中心</Button>
+              <Button onClick={() => navigate('profiles')}>切换实例</Button>
+            </Toolbar>
+          </div>
+
+          <div className="list-card">
+            <div className="list-card-title">
+              <strong>Gateway 运行与消息链路</strong>
+              <Pill tone={gatewayRunning ? 'good' : 'warn'}>
+                {gatewayRunning ? '运行中' : '待启动'}
+              </Pill>
+            </div>
+            <p>{gatewayRunning ? `PID ${data.gateway?.pid ?? '—'}，当前有 ${data.gateway?.activeAgents ?? 0} 个活跃 Agent。` : '先启动或检查 Gateway，再看平台连接、作业投递和日志材料。'}</p>
+            <div className="meta-line">
+              <span>{data.gateway?.platforms.length ?? 0} 个平台状态</span>
+              <span>{data.gateway?.updatedAt ? formatTimestamp(data.gateway.updatedAt) : '尚无运行更新时间'}</span>
+            </div>
+            <Toolbar>
+              <Button kind="primary" onClick={() => navigate('gateway')}>进入网关控制</Button>
+              <Button onClick={() => navigate('logs')}>查看日志</Button>
+            </Toolbar>
+          </div>
+
+          <div className="list-card">
+            <div className="list-card-title">
+              <strong>技能、扩展与能力面</strong>
+              <Pill tone={data.counts.skills > 0 ? 'good' : 'warn'}>
+                {data.counts.skills > 0 ? `${data.counts.skills} 项已接入` : '待补齐'}
+              </Pill>
+            </div>
+            <p>常用能力建议优先在技能工作台里启用和治理，低频 CLI 接管动作已经后置到“进阶接管”。</p>
+            <div className="meta-line">
+              <span>{data.counts.skills} 个技能</span>
+              <span>{data.counts.cronJobs} 个 Cron 作业</span>
+            </div>
+            <Toolbar>
+              <Button kind="primary" onClick={() => navigate('skills')}>进入技能页</Button>
+              <Button onClick={() => navigate('extensions')}>查看扩展</Button>
+            </Toolbar>
+          </div>
+
+          <div className="list-card">
+            <div className="list-card-title">
+              <strong>最近材料与运行记录</strong>
+              <Pill tone={lastResult || logPreview ? 'good' : 'neutral'}>
+                {lastResult || logPreview ? '已有材料' : '等待新记录'}
+              </Pill>
+            </div>
+            <p>最近动作、日志尾部、会话历史和记忆文件都已经收进“运行材料”，避免首页继续堆满运维细节。</p>
+            <div className="meta-line">
+              <span>{lastLoadedAt ? `最近刷新 ${formatTimestamp(lastLoadedAt)}` : '尚未记录刷新时间'}</span>
+              <span>{autoRefresh ? '自动刷新开启' : '自动刷新关闭'}</span>
+            </div>
+            <Toolbar>
+              <Button kind="primary" onClick={() => setActiveTab('workspace')}>打开运行材料</Button>
+              <Button onClick={() => navigate('sessions')}>查看会话</Button>
+            </Toolbar>
+          </div>
+        </div>
+      </Panel>
+
+      <div className="two-column wide-left">
+        <Panel
+          title="运行姿态"
+          subtitle="围绕 model/provider、terminal backend、context engine、memory、toolsets 和 gateway 看真实运行链路。"
+        >
+          <RuntimePostureView posture={posture} navigate={navigate} />
+        </Panel>
+
+        <Panel
+          title="当前判断"
+          subtitle="先看摘要结论和提醒，不把依赖、文件定位这类低频材料直接压在首页。"
+        >
+          <div className="health-grid">
+            {healthItems.map((item) => (
+              <section className="health-card" key={item.key}>
+                <div className="health-card-header">
+                  <strong>{item.title}</strong>
+                  <Pill tone={item.tone}>{item.summary}</Pill>
+                </div>
+                <p>{item.detail}</p>
+              </section>
+            ))}
+          </div>
+
+          <div className="detail-list compact top-gap">
+            <KeyValueRow label="最近刷新" value={lastLoadedAt ? formatTimestamp(lastLoadedAt) : '—'} />
+            <KeyValueRow label="主 Alias" value={primaryAlias?.name ?? '未创建'} />
+            <KeyValueRow label="当前版本信息" value={installation.versionOutput.trim() || '—'} />
+          </div>
+
+          {runtimeWarnings.length > 0 ? (
+            <div className="warning-stack">
+              {runtimeWarnings.map((warning) => (
+                <div className="warning-item" key={warning}>
+                  {warning}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState
+              title="当前没有额外提醒"
+              description="基础摘要看起来是稳定的，可以继续进入配置、技能或网关工作台做下一步。"
+            />
+          )}
+        </Panel>
+      </div>
+    </>
+  );
+
+  const workspaceSection = (
+    <>
+      <div className="two-column wide-left">
+        <Panel
+          title="最近输出"
+          subtitle="无论是直接执行 gateway / doctor，还是把命令交给 Terminal，最后都能在这里看到最近一次动作摘要。"
+        >
+          {lastResult ? (
+            <div className="result-stack">
+              <div className="result-header">
+                <div>
+                  <p className="eyebrow">Latest Action</p>
+                  <h3 className="action-card-title">{lastResult.label}</h3>
+                </div>
+                <Pill tone={lastResult.result.success ? 'good' : 'bad'}>
+                  {lastResult.result.success ? '成功' : '失败'}
+                </Pill>
+              </div>
+              <div className="detail-list compact">
+                <KeyValueRow label="命令" value={lastResult.result.command} />
+                <KeyValueRow label="退出码" value={lastResult.result.exitCode} />
+                <KeyValueRow label="完成时间" value={formatTimestamp(lastResult.finishedAt)} />
+              </div>
+              <pre className="code-block compact-code">{lastResult.result.stdout || 'stdout 为空'}</pre>
+              {lastResult.result.stderr ? (
+                <pre className="code-block compact-code">{lastResult.result.stderr}</pre>
+              ) : null}
+            </div>
+          ) : (
+            <EmptyState
+              title="暂无执行摘要"
+              description="首页上的任何快捷动作执行后，都会把结果回写到这里，便于确认这次操作是否真正完成。"
+            />
+          )}
+
+          <div className="detail-list compact top-gap">
+            <KeyValueRow label="当前版本信息" value={installation.versionOutput.trim() || '—'} />
+          </div>
+        </Panel>
+
+        <Panel
+          title="日志尾部预览"
+          subtitle="先看日志尾部再决定是否切到日志页深挖，自动刷新也收进这个材料区。"
+          aside={(
+            <Toolbar>
+              <select
+                className="select-input"
+                value={logName}
+                onChange={(event) => setLogName(event.target.value)}
+              >
+                {LOG_OPTIONS.map((item) => (
+                  <option key={item.key} value={item.key}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+              <Button onClick={() => void loadLogPreview()} disabled={logLoading}>
+                {logLoading ? '读取中…' : '刷新日志'}
+              </Button>
+              <Button kind={autoRefresh ? 'primary' : 'secondary'} onClick={toggleAutoRefresh}>
+                {autoRefresh ? '自动刷新: 开' : '自动刷新: 关'}
+              </Button>
+            </Toolbar>
+          )}
+        >
+          {logPreview ? (
+            <>
+              <div className="detail-list compact">
+                <KeyValueRow label="文件" value={logPreview.filePath} />
+                <KeyValueRow label="返回行数" value={logPreview.lines.length} />
+              </div>
+              <pre className="code-block compact-code">{logPreview.lines.join('\n') || '没有匹配到日志行。'}</pre>
+            </>
+          ) : (
+            <EmptyState
+              title="暂无日志预览"
+              description={logError ?? '还没有读取到日志内容，可切换日志类型后再试。'}
+            />
+          )}
+        </Panel>
       </div>
 
-      <div className="quick-actions">
-        <Button
-          kind="primary"
-          onClick={() => installation.binaryFound
-            ? void runGatewayAction(gatewayRunning ? 'restart' : 'start', gatewayRunning ? '重启 Gateway' : '启动 Gateway')
-            : void openInTerminal('terminal:quick-install', lifecycleActions[0].label, installation.quickInstallCommand, { scope: 'global' })}
-          disabled={runningAction !== null}
-        >
-          {installation.binaryFound ? (gatewayRunning ? '重启 Gateway' : '启动 Gateway') : '一键安装 CLI'}
-        </Button>
-        <Button onClick={() => void runDiagnostic('doctor', '健康检查')} disabled={runningAction !== null || !installation.binaryFound}>
-          健康检查
-        </Button>
-        <Button onClick={() => navigate('config')}>配置中心</Button>
-        <Button onClick={() => navigate('gateway')}>网关控制</Button>
-        <Button onClick={() => navigate('logs')}>日志查看</Button>
-        <Button
-          onClick={() => {
-            void load({ includeProfiles: true });
-            void loadLogPreview({ silent: true });
-          }}
-          disabled={refreshing}
-        >
-          {refreshing ? '刷新中…' : '刷新'}
-        </Button>
-        <Button kind={autoRefresh ? 'primary' : 'secondary'} onClick={toggleAutoRefresh}>
-          {autoRefresh ? '自动刷新: 开' : '自动刷新: 关'}
-        </Button>
-      </div>
+      <div className="two-column">
+        <Panel title="最近会话">
+          {data.recentSessions.length === 0 ? (
+            <EmptyState title="暂无会话" description="先运行一次 Hermes 对话，会话历史就会回到这里。" />
+          ) : (
+            <div className="list-stack">
+              {data.recentSessions.map((session) => (
+                <div className="list-card" key={session.id}>
+                  <div className="list-card-title">
+                    <strong>{session.title || session.preview || session.id}</strong>
+                    <Pill>{session.source}</Pill>
+                  </div>
+                  <p>{session.preview || '无预览文本'}</p>
+                  <div className="meta-line">
+                    <span>{session.model || '未知模型'}</span>
+                    <span>{formatEpoch(session.startedAt)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
 
+        <Panel title="记忆文件">
+          <div className="list-stack">
+            {data.memoryFiles.map((item) => (
+              <div className="list-card" key={item.key}>
+                <div className="list-card-title">
+                  <strong>{item.label}</strong>
+                  <Pill tone={item.exists ? 'good' : 'warn'}>
+                    {item.exists ? '已存在' : '缺失'}
+                  </Pill>
+                </div>
+                <p>{item.path}</p>
+                <div className="meta-line">
+                  <span>{item.key}</span>
+                  <span>{formatTimestamp(item.updatedAt)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      </div>
+    </>
+  );
+
+  const advancedSection = (
+    <>
       <div className="overview-grid">
         <OverviewCard
           title="CLI 生命周期"
@@ -649,7 +847,7 @@ export function DashboardPage({ notify, profile, profiles, refreshProfiles, navi
         <OverviewCard
           title="Gateway / Finder"
           value={gatewayRunning ? '服务已接管' : '等待 service 接管'}
-          meta="把 gateway service 和关键工作区入口集中在首页，减少来回切页。"
+          meta="把 gateway service 和关键工作区入口集中在低频维护层，不再干扰首页判断。"
           actions={(
             <Toolbar>
               {gatewayServiceActions.map((item) => (
@@ -689,191 +887,126 @@ export function DashboardPage({ notify, profile, profiles, refreshProfiles, navi
         />
       </div>
 
-      <div className="two-column wide-left">
-        <Panel
-          title="运行姿态"
-          subtitle="围绕 model/provider、terminal backend、context engine、memory、toolsets 和 gateway 看真实运行链路。"
-        >
-          <RuntimePostureView posture={posture} navigate={navigate} />
-        </Panel>
+      <Panel
+        title="依赖与工作区"
+        subtitle="把可执行依赖、关键文件和工作区材料收敛到进阶维护层，避免新手首页直接面对太多系统细节。"
+      >
+        <div className="status-list">
+          {installation.dependencies.map((dependency) => (
+            <section className="status-item" key={dependency.name}>
+              <div>
+                <div className="status-item-title">{dependency.name}</div>
+                <p className="status-item-copy">{dependency.note}</p>
+                <span className="status-item-path">{dependency.path ?? '未检测到可执行路径'}</span>
+              </div>
+              <Pill tone={dependencyTone(dependency)}>
+                {dependency.found ? '已发现' : '缺失'}
+              </Pill>
+            </section>
+          ))}
+        </div>
 
-        <Panel
-          title="系统就绪度"
-          subtitle="把安装、依赖、关键文件和运行提醒收敛到一个更适合排查问题的右侧面板。"
-        >
-          <div className="health-grid">
-            {healthItems.map((item) => (
-              <section className="health-card" key={item.key}>
-                <div className="health-card-header">
-                  <strong>{item.title}</strong>
-                  <Pill tone={item.tone}>{item.summary}</Pill>
-                </div>
-                <p>{item.detail}</p>
-              </section>
-            ))}
-          </div>
-
-          <div className="status-list">
-            {installation.dependencies.map((dependency) => (
-              <section className="status-item" key={dependency.name}>
-                <div>
-                  <div className="status-item-title">{dependency.name}</div>
-                  <p className="status-item-copy">{dependency.note}</p>
-                  <span className="status-item-path">{dependency.path ?? '未检测到可执行路径'}</span>
-                </div>
-                <Pill tone={dependencyTone(dependency)}>
-                  {dependency.found ? '已发现' : '缺失'}
-                </Pill>
-              </section>
-            ))}
-          </div>
-
-          <div className="artifact-grid">
-            {workspaceArtifacts.map((item) => (
-              <section className="artifact-card" key={item.key}>
-                <div className="artifact-card-header">
-                  <strong>{item.label}</strong>
-                  <Pill tone={item.exists ? 'good' : 'warn'}>
-                    {item.exists ? '存在' : '缺失'}
-                  </Pill>
-                </div>
-                <p>{item.path}</p>
-              </section>
-            ))}
-          </div>
-
-          {runtimeWarnings.length > 0 ? (
-            <div className="warning-stack">
-              {runtimeWarnings.map((warning) => (
-                <div className="warning-item" key={warning}>
-                  {warning}
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </Panel>
-      </div>
-
-      <div className="two-column wide-left">
-        <Panel
-          title="最近输出"
-          subtitle="无论是直接执行 gateway/doctor，还是把命令交给 Terminal，最后都能在这里看到最近一次动作摘要。"
-        >
-          {lastResult ? (
-            <div className="result-stack">
-              <div className="result-header">
-                <div>
-                  <p className="eyebrow">Latest Action</p>
-                  <h3 className="action-card-title">{lastResult.label}</h3>
-                </div>
-                <Pill tone={lastResult.result.success ? 'good' : 'bad'}>
-                  {lastResult.result.success ? '成功' : '失败'}
+        <div className="artifact-grid">
+          {workspaceArtifacts.map((item) => (
+            <section className="artifact-card" key={item.key}>
+              <div className="artifact-card-header">
+                <strong>{item.label}</strong>
+                <Pill tone={item.exists ? 'good' : 'warn'}>
+                  {item.exists ? '存在' : '缺失'}
                 </Pill>
               </div>
-              <div className="detail-list compact">
-                <KeyValueRow label="命令" value={lastResult.result.command} />
-                <KeyValueRow label="退出码" value={lastResult.result.exitCode} />
-                <KeyValueRow label="完成时间" value={formatTimestamp(lastResult.finishedAt)} />
-              </div>
-              <pre className="code-block compact-code">{lastResult.result.stdout || 'stdout 为空'}</pre>
-              {lastResult.result.stderr ? (
-                <pre className="code-block compact-code">{lastResult.result.stderr}</pre>
-              ) : null}
-            </div>
-          ) : (
-            <EmptyState
-              title="暂无执行摘要"
-              description="首页上的任何快捷动作执行后，都会把结果回写到这里，便于确认这次操作是否真正完成。"
-            />
-          )}
+              <p>{item.path}</p>
+            </section>
+          ))}
+        </div>
+      </Panel>
+    </>
+  );
 
-          <div className="detail-list compact top-gap">
-            <KeyValueRow label="当前版本信息" value={installation.versionOutput.trim() || '—'} />
-          </div>
-        </Panel>
+  return (
+    <div className="page-stack">
+      <div className="stat-cards">
+        <StatCard
+          label="Gateway"
+          value={gatewayRunning ? '运行中' : '待启动'}
+          meta={gatewayRunning ? `PID ${data.gateway?.pid ?? '—'} · ${data.gateway?.activeAgents ?? 0} 个活跃 Agent` : '当前还没有检测到运行中的网关状态。'}
+          tone={gatewayRunning ? 'running' : 'warning'}
+        />
+        <StatCard
+          label="CLI / Version"
+          value={installation.binaryFound ? versionHeadline : '未安装 Hermes CLI'}
+          meta={installation.binaryFound ? installation.hermesBinary ?? '已检测到 CLI' : '先安装后才能接管 setup、model、gateway 和 skills。'}
+          tone={installation.binaryFound ? 'running' : 'stopped'}
+        />
+        <StatCard
+          label="Model"
+          value={modelReady ? `${data.config.modelProvider} / ${data.config.modelDefault}` : '模型待配置'}
+          meta={data.config.modelBaseUrl || '建议先跑官方 setup / model 向导，把 provider 与默认模型一次配齐。'}
+          tone={modelReady ? 'running' : 'warning'}
+        />
+        <StatCard
+          label="Workspace"
+          value={`${data.counts.sessions} 会话 / ${data.counts.skills} 技能`}
+          meta={`Cron ${data.counts.cronJobs} · 主 Alias ${primaryAlias?.name ?? '未创建'}`}
+        />
+        <StatCard
+          label="Dependencies"
+          value={`${dependencyReadyCount}/${installation.dependencies.length}`}
+          meta={dependencyReadyCount === installation.dependencies.length ? 'CLI 周边依赖齐备。' : '还存在缺失依赖，建议结合 doctor 继续体检。'}
+          tone={dependencyReadyCount === installation.dependencies.length ? 'running' : 'warning'}
+        />
+        <StatCard
+          label="Artifacts"
+          value={missingArtifacts === 0 ? '工作区完整' : `缺失 ${missingArtifacts} 项`}
+          meta={`Home ${installation.hermesHomeExists ? 'Ready' : 'Missing'} · logs ${installation.logsDirExists ? 'Ready' : 'Missing'}`}
+          tone={missingArtifacts === 0 ? 'running' : 'warning'}
+        />
+      </div>
 
-        <Panel
-          title="日志尾部预览"
-          subtitle="保留首页先看日志尾部的节奏，先做判断，再决定是否切到日志页深挖。"
-          aside={(
-            <Toolbar>
-              <select
-                className="select-input"
-                value={logName}
-                onChange={(event) => setLogName(event.target.value)}
-              >
-                {LOG_OPTIONS.map((item) => (
-                  <option key={item.key} value={item.key}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-              <Button onClick={() => void loadLogPreview()} disabled={logLoading}>
-                {logLoading ? '读取中…' : '刷新日志'}
-              </Button>
-            </Toolbar>
-          )}
+      <div className="quick-actions">
+        <Button
+          kind="primary"
+          onClick={() => installation.binaryFound
+            ? void runGatewayAction(gatewayRunning ? 'restart' : 'start', gatewayRunning ? '重启 Gateway' : '启动 Gateway')
+            : void openInTerminal('terminal:quick-install', lifecycleActions[0].label, installation.quickInstallCommand, { scope: 'global' })}
+          disabled={runningAction !== null}
         >
-          {logPreview ? (
-            <>
-              <div className="detail-list compact">
-                <KeyValueRow label="文件" value={logPreview.filePath} />
-                <KeyValueRow label="返回行数" value={logPreview.lines.length} />
-              </div>
-              <pre className="code-block compact-code">{logPreview.lines.join('\n') || '没有匹配到日志行。'}</pre>
-            </>
-          ) : (
-            <EmptyState
-              title="暂无日志预览"
-              description={logError ?? '还没有读取到日志内容，可切换日志类型后再试。'}
-            />
-          )}
-        </Panel>
+          {installation.binaryFound ? (gatewayRunning ? '重启 Gateway' : '启动 Gateway') : '一键安装 CLI'}
+        </Button>
+        <Button onClick={() => void runDiagnostic('doctor', '健康检查')} disabled={runningAction !== null || !installation.binaryFound}>
+          健康检查
+        </Button>
+        <Button onClick={() => navigate('config')}>配置中心</Button>
+        <Button onClick={() => navigate('gateway')}>网关控制</Button>
+        <Button onClick={() => navigate('logs')}>日志查看</Button>
+        <Button
+          onClick={() => {
+            void load({ includeProfiles: true });
+            void loadLogPreview({ silent: true });
+          }}
+          disabled={refreshing}
+        >
+          {refreshing ? '刷新中…' : '刷新'}
+        </Button>
       </div>
 
-      <div className="two-column">
-        <Panel title="最近会话">
-          {data.recentSessions.length === 0 ? (
-            <EmptyState title="暂无会话" description="先运行一次 Hermes 对话，会话历史就会回到这里。" />
-          ) : (
-            <div className="list-stack">
-              {data.recentSessions.map((session) => (
-                <div className="list-card" key={session.id}>
-                  <div className="list-card-title">
-                    <strong>{session.title || session.preview || session.id}</strong>
-                    <Pill>{session.source}</Pill>
-                  </div>
-                  <p>{session.preview || '无预览文本'}</p>
-                  <div className="meta-line">
-                    <span>{session.model || '未知模型'}</span>
-                    <span>{formatEpoch(session.startedAt)}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Panel>
-
-        <Panel title="记忆文件">
-          <div className="list-stack">
-            {data.memoryFiles.map((item) => (
-              <div className="list-card" key={item.key}>
-                <div className="list-card-title">
-                  <strong>{item.label}</strong>
-                  <Pill tone={item.exists ? 'good' : 'warn'}>
-                    {item.exists ? '已存在' : '缺失'}
-                  </Pill>
-                </div>
-                <p>{item.path}</p>
-                <div className="meta-line">
-                  <span>{item.key}</span>
-                  <span>{formatTimestamp(item.updatedAt)}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </Panel>
+      <div className="tab-bar">
+        {DASHBOARD_TABS.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            className={`tab ${activeTab === tab.key ? 'active' : ''}`}
+            onClick={() => setActiveTab(tab.key)}
+            title={tab.hint}
+          >
+            {tab.label}
+            {tab.key === 'workspace' && (lastResult || logError) ? <span className="tab-dirty-dot" /> : null}
+            {tab.key === 'advanced' && (missingArtifacts > 0 || dependencyReadyCount !== installation.dependencies.length) ? <span className="tab-dirty-dot" /> : null}
+          </button>
+        ))}
       </div>
+
+      {activeTab === 'overview' ? overviewSection : activeTab === 'workspace' ? workspaceSection : advancedSection}
     </div>
   );
 }

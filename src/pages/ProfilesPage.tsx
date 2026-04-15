@@ -31,6 +31,7 @@ import type {
 import type { AppPageKey, MemoryPageIntent, PageIntent, PageProps } from './types';
 
 type CreateMode = 'fresh' | 'clone' | 'clone-all';
+type ProfilesTabKey = 'overview' | 'compare' | 'manage';
 
 interface ProfileRuntimeBundle {
   dashboard: DashboardSnapshot;
@@ -39,6 +40,12 @@ interface ProfileRuntimeBundle {
   cron: CronJobsSnapshot;
   installation: InstallationSnapshot;
 }
+
+const PROFILE_TABS: Array<{ key: ProfilesTabKey; label: string; hint: string }> = [
+  { key: 'overview', label: '常用总览', hint: '先看当前实例摘要和常用工作台，再决定是否下钻。' },
+  { key: 'compare', label: '差异对照', hint: '把两个 profile 的运行差异直接拉平来看。' },
+  { key: 'manage', label: '高级治理', hint: '低频创建、迁移、Alias 与删除操作统一收在这里。' },
+];
 
 function chooseCompareName(
   selectedName: string | null,
@@ -171,6 +178,7 @@ function profileRelaySeed(profileName: string, bundle?: ProfileRuntimeBundle | n
 export function ProfilesPage({ notify, profile, profiles, refreshProfiles, navigate }: PageProps) {
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [compareName, setCompareName] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<ProfilesTabKey>('overview');
 
   const [createName, setCreateName] = useState('');
   const [createMode, setCreateMode] = useState<CreateMode>('fresh');
@@ -294,6 +302,10 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles, navig
     }
   }, [compareProfile?.name]);
 
+  useEffect(() => {
+    setActiveTab('overview');
+  }, [profile]);
+
   const selectedRuntime = selectedProfile ? runtimeBundles[selectedProfile.name] : undefined;
   const compareRuntime = compareProfile ? runtimeBundles[compareProfile.name] : undefined;
   const selectedRuntimeLoading = selectedProfile ? loadingRuntimeNames.includes(selectedProfile.name) : false;
@@ -302,6 +314,8 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles, navig
   const compareWarnings = selectedProfile && selectedRuntime && compareProfile && compareRuntime
     ? profileDrifts(selectedProfile, selectedRuntime, compareProfile, compareRuntime)
     : [];
+  const overviewWarnings = selectedWarnings.slice(0, 4);
+  const remainingOverviewWarningCount = Math.max(0, selectedWarnings.length - overviewWarnings.length);
   const selectedInstallation = selectedRuntime?.installation;
   const selectedRelaySeed = selectedProfile ? profileRelaySeed(selectedProfile.name, selectedRuntime ?? null) : null;
   const configModelIntent = selectedProfile && selectedRelaySeed
@@ -637,108 +651,103 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles, navig
     }
   }
 
-  return (
-    <div className="two-column wide-left">
-      <Panel
-        title="Profile 管理"
-        subtitle="多实例治理思路，把 Hermes profile 从“目录列表”升级成“运行态工作区”来管理。"
-        aside={
+  const detailSection = (
+    <Panel
+      title="当前焦点实例"
+      subtitle={selectedProfile ? '先确认当前正在看的实例、它是否为默认实例，以及最适合先进入哪个工作台。' : '先从左侧选择一个 Hermes profile。'}
+      aside={
+        selectedProfile ? (
           <Toolbar>
-            <Button onClick={() => void refreshProfileWorkspace()}>刷新列表</Button>
+            <Button
+              disabled={runningAction !== null}
+              onClick={() => void openInFinder(selectedProfile.homePath, `${selectedProfile.name} 目录`)}
+            >
+              打开目录
+            </Button>
+            <Button
+              disabled={runningAction !== null || !selectedRuntime}
+              onClick={() => selectedRuntime && void openInFinder(selectedRuntime.config.configPath, `${selectedProfile.name} config.yaml`, true)}
+            >
+              定位配置
+            </Button>
+            <Button
+              disabled={runningAction !== null || !selectedRuntime}
+              onClick={() => selectedRuntime && void openInFinder(selectedRuntime.config.envPath, `${selectedProfile.name} .env`, true)}
+            >
+              定位 .env
+            </Button>
+            <Button
+              kind="primary"
+              disabled={selectedProfile.isActive || runningAction !== null}
+              onClick={() => void activateProfile(selectedProfile.name)}
+            >
+              {runningAction === `activate:${selectedProfile.name}` ? '同步中…' : selectedProfile.isActive ? '已是默认' : '设为默认'}
+            </Button>
           </Toolbar>
+        ) : undefined
+      }
+    >
+      {selectedProfile ? (
+        <div className="detail-list">
+          <KeyValueRow label="名称" value={selectedProfile.name} />
+          <KeyValueRow label="默认实例" value={selectedProfile.isDefault ? '是' : '否'} />
+          <KeyValueRow label="当前活跃" value={selectedProfile.isActive ? '是' : '否'} />
+          <KeyValueRow label="模型" value={selectedRuntime?.config.summary.modelDefault || selectedProfile.modelDefault || '—'} />
+          <KeyValueRow label="Gateway" value={selectedRuntime?.dashboard.gateway?.gatewayState || selectedProfile.gatewayState || '—'} />
+          <KeyValueRow label="会话数" value={selectedProfile.sessionCount} />
+          <KeyValueRow label="技能数" value={selectedProfile.skillCount} />
+          <KeyValueRow label=".env" value={selectedProfile.envExists ? 'exists' : 'missing'} />
+          <KeyValueRow label="SOUL.md" value={selectedProfile.soulExists ? 'exists' : 'missing'} />
+          <KeyValueRow label="主 Alias" value={selectedProfile.aliasPath || '—'} />
+          <KeyValueRow label="Alias 数量" value={selectedProfile.aliases.length} />
+        </div>
+      ) : (
+        <EmptyState title="未选择 profile" description="从左侧选择一个 Hermes profile 查看详情。" />
+      )}
+    </Panel>
+  );
+
+  const overviewSection = (
+    <div className="page-stack">
+      <Panel
+        title="推荐下一步"
+        subtitle="先切换到正确实例，再进入配置、Gateway、扩展、记忆或诊断页面，避免一开始就掉进 Alias 或迁移操作。"
+        aside={
+          selectedProfile ? (
+            <Toolbar>
+              <Button
+                onClick={() => void refreshProfileWorkspace(selectedProfile.name)}
+                disabled={runningAction !== null || selectedRuntimeLoading}
+              >
+                {selectedRuntimeLoading ? '刷新中…' : '刷新实例'}
+              </Button>
+            </Toolbar>
+          ) : undefined
         }
       >
-        {profileItems.length === 0 ? (
-          <EmptyState title="未发现 profile" description="当前还没有可管理的 Hermes profile。" />
-        ) : (
-          <div className="list-stack profile-rail">
-            {profileItems.map((item) => (
-              <button
-                key={item.name}
-                type="button"
-                className={`list-card session-card ${selectedProfile?.name === item.name ? 'selected' : ''}`}
-                onClick={() => setSelectedName(item.name)}
-              >
-                <div className="list-card-title">
-                  <strong>{item.name}</strong>
-                  <div className="pill-row">
-                    {item.isDefault && <Pill>default</Pill>}
-                    {item.isActive && <Pill tone="good">active</Pill>}
-                    <Pill tone={item.envExists ? 'good' : 'warn'}>{item.envExists ? '.env ok' : '.env missing'}</Pill>
-                  </div>
-                </div>
-                <p>{item.homePath}</p>
-                <div className="meta-line">
-                  <span>{item.modelDefault || '未配置模型'}</span>
-                  <span>{item.gatewayState || 'gateway unknown'}</span>
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-      </Panel>
-
-      <div className="page-stack">
-        <Panel
-          title="Profile 详情"
-          subtitle={selectedProfile?.homePath}
-          aside={
-            selectedProfile ? (
+        {selectedProfile ? (
+          <div className="list-stack">
+            <div className="list-card">
+              <div className="list-card-title">
+                <strong>先确认当前实例是不是你真正要操作的那个</strong>
+                <Pill tone={selectedProfile.isActive ? 'good' : 'warn'}>
+                  {selectedProfile.isActive ? '当前已是默认实例' : '当前不是默认实例'}
+                </Pill>
+              </div>
+              <p>多实例场景下，最容易出错的不是配置本身，而是改到了错误实例。先确认当前焦点实例，再进入具体工作台。</p>
+              <div className="meta-line">
+                <span>{selectedProfile.name}</span>
+                <span>{selectedProfile.isDefault ? 'default 保留实例' : '普通实例'}</span>
+                <span>{selectedRuntime?.config.summary.modelDefault || selectedProfile.modelDefault || '模型未配置'}</span>
+              </div>
               <Toolbar>
-                <Button
-                  disabled={runningAction !== null}
-                  onClick={() => void openInFinder(selectedProfile.homePath, `${selectedProfile.name} 目录`)}
-                >
-                  打开目录
-                </Button>
-                <Button
-                  disabled={runningAction !== null || !selectedRuntime}
-                  onClick={() => selectedRuntime && void openInFinder(selectedRuntime.config.configPath, `${selectedProfile.name} config.yaml`, true)}
-                >
-                  定位配置
-                </Button>
-                <Button
-                  disabled={runningAction !== null || !selectedRuntime}
-                  onClick={() => selectedRuntime && void openInFinder(selectedRuntime.config.envPath, `${selectedProfile.name} .env`, true)}
-                >
-                  定位 .env
-                </Button>
                 <Button
                   kind="primary"
                   disabled={selectedProfile.isActive || runningAction !== null}
                   onClick={() => void activateProfile(selectedProfile.name)}
                 >
-                  {runningAction === `activate:${selectedProfile.name}` ? '同步中…' : selectedProfile.isActive ? '已是默认' : '设为默认'}
+                  {runningAction === `activate:${selectedProfile.name}` ? '设为默认中…' : selectedProfile.isActive ? '已是默认' : '设为默认'}
                 </Button>
-              </Toolbar>
-            ) : undefined
-          }
-        >
-          {selectedProfile ? (
-            <div className="detail-list">
-              <KeyValueRow label="名称" value={selectedProfile.name} />
-              <KeyValueRow label="默认实例" value={String(selectedProfile.isDefault)} />
-              <KeyValueRow label="当前活跃" value={String(selectedProfile.isActive)} />
-              <KeyValueRow label="模型" value={selectedProfile.modelDefault || '—'} />
-              <KeyValueRow label="Gateway" value={selectedProfile.gatewayState || '—'} />
-              <KeyValueRow label="会话数" value={selectedProfile.sessionCount} />
-              <KeyValueRow label="技能数" value={selectedProfile.skillCount} />
-              <KeyValueRow label=".env" value={selectedProfile.envExists ? 'exists' : 'missing'} />
-              <KeyValueRow label="SOUL.md" value={selectedProfile.soulExists ? 'exists' : 'missing'} />
-              <KeyValueRow label="主 Alias" value={selectedProfile.aliasPath || '—'} />
-              <KeyValueRow label="Alias 数量" value={selectedProfile.aliases.length} />
-            </div>
-          ) : (
-            <EmptyState title="未选择 profile" description="从左侧选择一个 Hermes profile 查看详情。" />
-          )}
-        </Panel>
-
-        <Panel
-          title="实例工作台"
-          subtitle="把模型、通道、扩展、技能、记忆与诊断入口收回到客户端里，优先走结构化治理页面。"
-          aside={
-            selectedProfile ? (
-              <Toolbar>
                 <Button
                   onClick={() => void refreshProfileWorkspace(selectedProfile.name)}
                   disabled={runningAction !== null || selectedRuntimeLoading}
@@ -746,393 +755,327 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles, navig
                   {selectedRuntimeLoading ? '刷新中…' : '刷新实例'}
                 </Button>
               </Toolbar>
-            ) : undefined
-          }
-        >
-          {selectedProfile ? (
-            <div className="control-card-grid">
-              <section className="action-card action-card-compact">
-                <div className="action-card-header">
-                  <div>
-                    <p className="eyebrow">Workspace</p>
-                    <h3 className="action-card-title">实例主卡</h3>
-                  </div>
-                  <Pill tone={selectedProfile.isActive ? 'good' : 'warn'}>
-                    {selectedProfile.isActive ? '当前默认' : '独立实例'}
-                  </Pill>
-                </div>
-                <p className="action-card-copy">
-                  先把这个 profile 的 home、config、env 和基础状态核准，再决定是否切换默认实例或进入专项工作台。
-                </p>
-                <div className="detail-list compact">
-                  <KeyValueRow label="Home" value={selectedProfile.homePath} />
-                  <KeyValueRow label="模型" value={selectedRuntime?.config.summary.modelDefault || selectedProfile.modelDefault || '—'} />
-                  <KeyValueRow label="Gateway" value={selectedRuntime?.dashboard.gateway?.gatewayState || selectedProfile.gatewayState || '—'} />
-                </div>
-                <Toolbar>
-                  <Button onClick={() => void openInFinder(selectedProfile.homePath, `${selectedProfile.name} 目录`)} disabled={runningAction !== null}>
-                    打开目录
-                  </Button>
-                  <Button
-                    onClick={() => void openInFinder(selectedRuntime?.config.configPath ?? '', `${selectedProfile.name} config.yaml`, true)}
-                    disabled={runningAction !== null || !selectedRuntime}
-                  >
-                    定位配置
-                  </Button>
-                  <Button
-                    onClick={() => void openInFinder(selectedRuntime?.config.envPath ?? '', `${selectedProfile.name} .env`, true)}
-                    disabled={runningAction !== null || !selectedRuntime}
-                  >
-                    定位 .env
-                  </Button>
-                  <Button
-                    kind="primary"
-                    disabled={selectedProfile.isActive || runningAction !== null}
-                    onClick={() => void activateProfile(selectedProfile.name)}
-                  >
-                    {runningAction === `activate:${selectedProfile.name}` ? '同步中…' : selectedProfile.isActive ? '已是默认' : '设为默认'}
-                  </Button>
-                </Toolbar>
-              </section>
-
-              <section className="action-card action-card-compact">
-                <div className="action-card-header">
-                  <div>
-                    <p className="eyebrow">Workbench</p>
-                    <h3 className="action-card-title">配置 / Gateway / 扩展</h3>
-                  </div>
-                  <Pill tone={selectedRuntime?.config.summary.modelDefault ? 'good' : 'warn'}>
-                    {selectedRuntime?.config.summary.modelDefault || '模型待配置'}
-                  </Pill>
-                </div>
-                <p className="action-card-copy">
-                  模型、provider、凭证、通道和 toolsets 优先在结构化页面里治理，不再把常用接管动作丢给命令行向导。
-                </p>
-                <Toolbar>
-                  <Button
-                    kind="primary"
-                    onClick={() => void enterProfileWorkbench('config', {
-                      actionKey: 'profile:goto-config-model',
-                      intent: configModelIntent,
-                    })}
-                    disabled={runningAction !== null || !configModelIntent}
-                  >
-                    {runningAction === 'profile:goto-config-model' ? '进入配置中心…' : '模型配置'}
-                  </Button>
-                  <Button
-                    onClick={() => void enterProfileWorkbench('config', {
-                      actionKey: 'profile:goto-config-credentials',
-                      intent: configCredentialsIntent,
-                    })}
-                    disabled={runningAction !== null || !configCredentialsIntent}
-                  >
-                    {runningAction === 'profile:goto-config-credentials' ? '进入配置中心…' : '凭证 / 通道'}
-                  </Button>
-                  <Button
-                    onClick={() => void enterProfileWorkbench('gateway', {
-                      actionKey: 'profile:goto-gateway',
-                      intent: gatewayWorkbenchIntent,
-                    })}
-                    disabled={runningAction !== null || !gatewayWorkbenchIntent}
-                  >
-                    {runningAction === 'profile:goto-gateway' ? '进入 Gateway…' : 'Gateway 工作台'}
-                  </Button>
-                  <Button
-                    onClick={() => void enterProfileWorkbench('extensions', {
-                      actionKey: 'profile:goto-extensions',
-                      intent: extensionsWorkbenchIntent,
-                    })}
-                    disabled={runningAction !== null || !extensionsWorkbenchIntent}
-                  >
-                    {runningAction === 'profile:goto-extensions' ? '进入扩展页…' : '扩展工作台'}
-                  </Button>
-                </Toolbar>
-              </section>
-
-              <section className="action-card action-card-compact">
-                <div className="action-card-header">
-                  <div>
-                    <p className="eyebrow">Capability</p>
-                    <h3 className="action-card-title">技能 / 记忆 / 诊断 / 日志</h3>
-                  </div>
-                  <Pill tone={selectedRuntime && selectedRuntime.extensions.runtimeSkills.length > 0 ? 'good' : 'warn'}>
-                    {selectedRuntime ? `${selectedRuntime.extensions.runtimeSkills.length} 个运行时技能` : '能力面待读取'}
-                  </Pill>
-                </div>
-                <p className="action-card-copy">
-                  把技能安装态、记忆文件、系统诊断和日志追踪都收进客户端闭环，异常再顺着页面间 intent 继续追。
-                </p>
-                <Toolbar>
-                  <Button
-                    kind="primary"
-                    onClick={() => void enterProfileWorkbench('skills', {
-                      actionKey: 'profile:goto-skills',
-                    })}
-                    disabled={runningAction !== null}
-                  >
-                    {runningAction === 'profile:goto-skills' ? '进入技能页…' : '技能工作台'}
-                  </Button>
-                  <Button
-                    onClick={() => void enterProfileWorkbench('memory', {
-                      actionKey: 'profile:goto-memory',
-                      intent: memoryWorkbenchIntent,
-                    })}
-                    disabled={runningAction !== null || !memoryWorkbenchIntent}
-                  >
-                    {runningAction === 'profile:goto-memory' ? '进入记忆页…' : '记忆工作台'}
-                  </Button>
-                  <Button
-                    onClick={() => void enterProfileWorkbench('diagnostics', {
-                      actionKey: 'profile:goto-diagnostics',
-                      intent: diagnosticsWorkbenchIntent,
-                    })}
-                    disabled={runningAction !== null || !diagnosticsWorkbenchIntent}
-                  >
-                    {runningAction === 'profile:goto-diagnostics' ? '进入诊断页…' : '系统诊断'}
-                  </Button>
-                  <Button
-                    onClick={() => void enterProfileWorkbench('logs', {
-                      actionKey: 'profile:goto-logs',
-                      intent: logsWorkbenchIntent,
-                    })}
-                    disabled={runningAction !== null || !logsWorkbenchIntent}
-                  >
-                    {runningAction === 'profile:goto-logs' ? '进入日志页…' : '日志查看'}
-                  </Button>
-                </Toolbar>
-              </section>
-
-              <section className="action-card action-card-compact">
-                <div className="action-card-header">
-                  <div>
-                    <p className="eyebrow">Artifacts</p>
-                    <h3 className="action-card-title">运行物料与恢复点</h3>
-                  </div>
-                  <Pill tone={selectedWarnings.length === 0 ? 'good' : 'warn'}>
-                    {selectedWarnings.length === 0 ? '完整' : `${selectedWarnings.length} 条提醒`}
-                  </Pill>
-                </div>
-                <p className="action-card-copy">
-                  当某个实例状态漂移时，优先确认核心文件和运行物料是否齐全，再决定是否导出、迁移或回滚。
-                </p>
-                <div className="pill-row">
-                  <Pill tone={selectedInstallation?.configExists ? 'good' : 'warn'}>config.yaml</Pill>
-                  <Pill tone={selectedInstallation?.envExists ? 'good' : 'warn'}>.env</Pill>
-                  <Pill tone={selectedInstallation?.stateDbExists ? 'good' : 'warn'}>state.db</Pill>
-                  <Pill tone={selectedInstallation?.gatewayStateExists ? 'good' : 'warn'}>gateway_state.json</Pill>
-                  <Pill tone={selectedInstallation?.logsDirExists ? 'good' : 'warn'}>logs</Pill>
-                </div>
-                <Toolbar>
-                  <Button
-                    onClick={() => void openInFinder(`${selectedProfile.homePath}/state.db`, `${selectedProfile.name} state.db`, true)}
-                    disabled={runningAction !== null || !selectedInstallation?.stateDbExists}
-                  >
-                    定位 state.db
-                  </Button>
-                  <Button
-                    onClick={() => void openInFinder(`${selectedProfile.homePath}/gateway_state.json`, `${selectedProfile.name} gateway_state.json`, true)}
-                    disabled={runningAction !== null || !selectedInstallation?.gatewayStateExists}
-                  >
-                    定位网关状态
-                  </Button>
-                  <Button
-                    onClick={() => void openInFinder(`${selectedProfile.homePath}/logs`, `${selectedProfile.name} logs`)}
-                    disabled={runningAction !== null || !selectedInstallation?.logsDirExists}
-                  >
-                    打开 logs
-                  </Button>
-                  <Button
-                    onClick={() => void enterProfileWorkbench('diagnostics', {
-                      actionKey: 'profile:goto-artifact-diagnostics',
-                      intent: diagnosticsWorkbenchIntent,
-                    })}
-                    disabled={runningAction !== null || !diagnosticsWorkbenchIntent}
-                  >
-                    {runningAction === 'profile:goto-artifact-diagnostics' ? '进入诊断页…' : '进入诊断页'}
-                  </Button>
-                </Toolbar>
-              </section>
             </div>
-          ) : (
-            <EmptyState title="请选择 profile" description="选中一个 profile 后，这里会显示它的客户端治理入口、运行物料和实例级工作台。" />
-          )}
-        </Panel>
 
-        <Panel
-          title="运行态画像"
-          subtitle="把 config / extensions / cron / gateway 合在一起看，这才更像真正的桌面管理客户端。"
-          aside={
-            selectedProfile ? (
+            <div className="list-card">
+              <div className="list-card-title">
+                <strong>核心配置、通道和能力面优先走结构化工作台</strong>
+                <Pill tone={selectedRuntime?.config.summary.modelDefault ? 'good' : 'warn'}>
+                  {selectedRuntime?.config.summary.modelDefault || '模型待配置'}
+                </Pill>
+              </div>
+              <p>模型、provider、凭证、通道和 toolsets 优先在结构化页面里治理，不再把常用接管动作丢给命令行向导。</p>
+              <div className="meta-line">
+                <span>{selectedRuntime?.config.summary.modelProvider || 'provider 未配置'}</span>
+                <span>{selectedRuntime?.config.summary.contextEngine || 'context 未配置'}</span>
+                <span>{toolsetLabel(selectedRuntime)}</span>
+              </div>
               <Toolbar>
-                <Button disabled={runningAction !== null || selectedRuntimeLoading} onClick={() => void loadRuntimeBundle(selectedProfile.name, true)}>
-                  {selectedRuntimeLoading ? '刷新中…' : '刷新运行态'}
+                <Button
+                  kind="primary"
+                  onClick={() => void enterProfileWorkbench('config', {
+                    actionKey: 'profile:goto-config-model',
+                    intent: configModelIntent,
+                  })}
+                  disabled={runningAction !== null || !configModelIntent}
+                >
+                  {runningAction === 'profile:goto-config-model' ? '进入配置中心…' : '模型配置'}
+                </Button>
+                <Button
+                  onClick={() => void enterProfileWorkbench('config', {
+                    actionKey: 'profile:goto-config-credentials',
+                    intent: configCredentialsIntent,
+                  })}
+                  disabled={runningAction !== null || !configCredentialsIntent}
+                >
+                  {runningAction === 'profile:goto-config-credentials' ? '进入配置中心…' : '凭证 / 通道'}
+                </Button>
+                <Button
+                  onClick={() => void enterProfileWorkbench('gateway', {
+                    actionKey: 'profile:goto-gateway',
+                    intent: gatewayWorkbenchIntent,
+                  })}
+                  disabled={runningAction !== null || !gatewayWorkbenchIntent}
+                >
+                  {runningAction === 'profile:goto-gateway' ? '进入 Gateway…' : 'Gateway 工作台'}
+                </Button>
+                <Button
+                  onClick={() => void enterProfileWorkbench('extensions', {
+                    actionKey: 'profile:goto-extensions',
+                    intent: extensionsWorkbenchIntent,
+                  })}
+                  disabled={runningAction !== null || !extensionsWorkbenchIntent}
+                >
+                  {runningAction === 'profile:goto-extensions' ? '进入扩展页…' : '扩展工作台'}
                 </Button>
               </Toolbar>
-            ) : undefined
-          }
-        >
-          {selectedProfile && selectedRuntime ? (
-            <>
-              <div className="metrics-grid">
-                <MetricCard label="工具面" value={`${enabledToolCount(selectedRuntime)}/${totalToolCount(selectedRuntime)}`} hint="当前 profile 实际启用的 tools 总量" />
-                <MetricCard label="运行时技能" value={selectedRuntime.extensions.runtimeSkills.length} hint="来自 `hermes skills list` 的安装态" />
-                <MetricCard label="插件数" value={selectedRuntime.extensions.plugins.installedCount} hint="来自 `hermes plugins list`" />
-                <MetricCard label="Cron / 远端" value={`${selectedRuntime.cron.jobs.length} / ${remoteJobCount(selectedRuntime)}`} hint="总作业数 / 依赖 gateway 的作业数" />
-              </div>
-              <div className="health-grid">
-                <section className="health-card">
-                  <div className="health-card-header">
-                    <strong>Config Runtime</strong>
-                    <Pill tone={selectedRuntime.config.summary.terminalBackend ? 'good' : 'warn'}>
-                      {selectedRuntime.config.summary.terminalBackend || '未配置 backend'}
-                    </Pill>
-                  </div>
-                  <p>
-                    {selectedRuntime.config.summary.modelProvider || '未配置 provider'} / {selectedRuntime.config.summary.modelDefault || '未配置 model'}
-                    {' · '}
-                    Memory {selectedRuntime.config.summary.memoryProvider || 'builtin-file'}
-                  </p>
-                </section>
-                <section className="health-card">
-                  <div className="health-card-header">
-                    <strong>Gateway Runtime</strong>
-                    <Pill tone={platformTone(selectedRuntime.dashboard.gateway?.gatewayState)}>
-                      {selectedRuntime.dashboard.gateway?.gatewayState ?? '未检测到'}
-                    </Pill>
-                  </div>
-                  <p>Connected Platforms {selectedRuntime.dashboard.gateway?.platforms.length ?? 0} · 远端作业 {remoteJobCount(selectedRuntime)}</p>
-                </section>
-                <section className="health-card">
-                  <div className="health-card-header">
-                    <strong>Toolsets</strong>
-                    <Pill tone={selectedRuntime.config.summary.toolsets.length > 0 ? 'good' : 'warn'}>
-                      {selectedRuntime.config.summary.toolsets.length}
-                    </Pill>
-                  </div>
-                  <p>{toolsetLabel(selectedRuntime)}</p>
-                </section>
-                <section className="health-card">
-                  <div className="health-card-header">
-                    <strong>Memory Surface</strong>
-                    <Pill tone={selectedRuntime.extensions.memoryRuntime.provider.includes('none') ? 'warn' : 'good'}>
-                      {selectedRuntime.extensions.memoryRuntime.provider}
-                    </Pill>
-                  </div>
-                  <p>Built-in {selectedRuntime.extensions.memoryRuntime.builtInStatus} · Local Skills {localRuntimeSkillCount(selectedRuntime)}</p>
-                </section>
-              </div>
-              {selectedWarnings.length > 0 ? (
-                <div className="warning-stack">
-                  {selectedWarnings.map((warning) => (
-                    <div className="warning-item" key={warning}>
-                      {warning}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <EmptyState title="运行态较完整" description="当前 profile 没有出现明显的结构性缺口，可以继续做对照或生命周期管理。" />
-              )}
-            </>
-          ) : (
-            <EmptyState
-              title={selectedRuntimeLoading ? '正在读取运行态' : '运行态未就绪'}
-              description={selectedProfile ? '将自动读取当前 profile 的 dashboard / config / extensions / cron 快照。' : '先从左侧选择一个 profile。'}
-            />
-          )}
-        </Panel>
+            </div>
 
-        <Panel
-          title="Profile 对照"
-          subtitle="把多 profile 的运行差异直接拉平来看，更适合做环境隔离、迁移和回归检查。"
-          aside={
-            selectedProfile && compareName ? (
+            <div className="list-card">
+              <div className="list-card-title">
+                <strong>技能、记忆、诊断和日志按需继续下钻</strong>
+                <Pill tone={selectedRuntime && selectedRuntime.extensions.runtimeSkills.length > 0 ? 'good' : 'warn'}>
+                  {selectedRuntime ? `${selectedRuntime.extensions.runtimeSkills.length} 个运行时技能` : '能力面待读取'}
+                </Pill>
+              </div>
+              <p>把技能安装态、记忆文件、系统诊断和日志追踪都收进客户端闭环，异常再顺着页面间 intent 继续追。</p>
+              <div className="meta-line">
+                <span>Memory {selectedRuntime?.extensions.memoryRuntime.provider || '未读取'}</span>
+                <span>Logs {selectedInstallation?.logsDirExists ? '已就绪' : '待确认'}</span>
+                <span>Gateway {selectedRuntime?.dashboard.gateway?.gatewayState ?? '未检测到'}</span>
+              </div>
               <Toolbar>
-                <select
-                  className="select-input"
-                  value={compareName}
-                  onChange={(event) => setCompareName(event.target.value || null)}
+                <Button
+                  kind="primary"
+                  onClick={() => void enterProfileWorkbench('skills', {
+                    actionKey: 'profile:goto-skills',
+                  })}
                   disabled={runningAction !== null}
                 >
-                  {profileItems
-                    .filter((item) => item.name !== selectedProfile.name)
-                    .map((item) => (
-                      <option key={item.name} value={item.name}>
-                        {item.name}
-                      </option>
-                    ))}
-                </select>
+                  {runningAction === 'profile:goto-skills' ? '进入技能页…' : '技能工作台'}
+                </Button>
                 <Button
-                  disabled={!compareProfile || compareRuntimeLoading}
-                  onClick={() => compareProfile && void loadRuntimeBundle(compareProfile.name, true)}
+                  onClick={() => void enterProfileWorkbench('memory', {
+                    actionKey: 'profile:goto-memory',
+                    intent: memoryWorkbenchIntent,
+                  })}
+                  disabled={runningAction !== null || !memoryWorkbenchIntent}
                 >
-                  {compareRuntimeLoading ? '刷新中…' : '刷新对照'}
+                  {runningAction === 'profile:goto-memory' ? '进入记忆页…' : '记忆工作台'}
+                </Button>
+                <Button
+                  onClick={() => void enterProfileWorkbench('diagnostics', {
+                    actionKey: 'profile:goto-diagnostics',
+                    intent: diagnosticsWorkbenchIntent,
+                  })}
+                  disabled={runningAction !== null || !diagnosticsWorkbenchIntent}
+                >
+                  {runningAction === 'profile:goto-diagnostics' ? '进入诊断页…' : '系统诊断'}
+                </Button>
+                <Button
+                  onClick={() => void enterProfileWorkbench('logs', {
+                    actionKey: 'profile:goto-logs',
+                    intent: logsWorkbenchIntent,
+                  })}
+                  disabled={runningAction !== null || !logsWorkbenchIntent}
+                >
+                  {runningAction === 'profile:goto-logs' ? '进入日志页…' : '日志查看'}
                 </Button>
               </Toolbar>
-            ) : undefined
-          }
-        >
-          {selectedProfile && selectedRuntime && compareProfile && compareRuntime ? (
-            <>
-              <div className="two-column profile-actions-grid">
-                <div className="list-card">
-                  <div className="list-card-title">
-                    <strong>{selectedProfile.name}</strong>
-                    <div className="pill-row">
-                      {selectedProfile.isActive && <Pill tone="good">active</Pill>}
-                      {selectedProfile.isDefault && <Pill>default</Pill>}
-                    </div>
-                  </div>
-                  <div className="detail-list compact">
-                    <KeyValueRow label="模型" value={selectedRuntime.config.summary.modelDefault || '—'} />
-                    <KeyValueRow label="Context" value={selectedRuntime.config.summary.contextEngine || '—'} />
-                    <KeyValueRow label="Backend" value={selectedRuntime.config.summary.terminalBackend || '—'} />
-                    <KeyValueRow label="Memory Provider" value={selectedRuntime.config.summary.memoryProvider || 'builtin-file'} />
-                    <KeyValueRow label="Toolsets" value={toolsetLabel(selectedRuntime)} />
-                    <KeyValueRow label="工具面" value={`${enabledToolCount(selectedRuntime)}/${totalToolCount(selectedRuntime)}`} />
-                    <KeyValueRow label="插件数" value={selectedRuntime.extensions.plugins.installedCount} />
-                    <KeyValueRow label="Cron / 远端" value={`${selectedRuntime.cron.jobs.length} / ${remoteJobCount(selectedRuntime)}`} />
-                  </div>
+            </div>
+          </div>
+        ) : (
+          <EmptyState title="请选择 profile" description="选中一个 profile 后，这里会显示它的客户端治理入口、运行物料和实例级工作台。" />
+        )}
+      </Panel>
+
+      <Panel
+        title="当前判断"
+        subtitle="把 config / extensions / cron / gateway 合在一起看，新手先看这里就能判断这个实例是否健康。"
+        aside={
+          selectedProfile ? (
+            <Toolbar>
+              <Button disabled={runningAction !== null || selectedRuntimeLoading} onClick={() => void loadRuntimeBundle(selectedProfile.name, true)}>
+                {selectedRuntimeLoading ? '刷新中…' : '刷新运行态'}
+              </Button>
+            </Toolbar>
+          ) : undefined
+        }
+      >
+        {selectedProfile && selectedRuntime ? (
+          <>
+            <div className="metrics-grid">
+              <MetricCard label="工具面" value={`${enabledToolCount(selectedRuntime)}/${totalToolCount(selectedRuntime)}`} hint="当前 profile 实际启用的 tools 总量" />
+              <MetricCard label="运行时技能" value={selectedRuntime.extensions.runtimeSkills.length} hint="来自 `hermes skills list` 的安装态" />
+              <MetricCard label="插件数" value={selectedRuntime.extensions.plugins.installedCount} hint="来自 `hermes plugins list`" />
+              <MetricCard label="Cron / 远端" value={`${selectedRuntime.cron.jobs.length} / ${remoteJobCount(selectedRuntime)}`} hint="总作业数 / 依赖 gateway 的作业数" />
+            </div>
+            <div className="health-grid">
+              <section className="health-card">
+                <div className="health-card-header">
+                  <strong>Config Runtime</strong>
+                  <Pill tone={selectedRuntime.config.summary.terminalBackend ? 'good' : 'warn'}>
+                    {selectedRuntime.config.summary.terminalBackend || '未配置 backend'}
+                  </Pill>
                 </div>
-                <div className="list-card">
-                  <div className="list-card-title">
-                    <strong>{compareProfile.name}</strong>
-                    <div className="pill-row">
-                      {compareProfile.isActive && <Pill tone="good">active</Pill>}
-                      {compareProfile.isDefault && <Pill>default</Pill>}
-                    </div>
-                  </div>
-                  <div className="detail-list compact">
-                    <KeyValueRow label="模型" value={compareRuntime.config.summary.modelDefault || '—'} />
-                    <KeyValueRow label="Context" value={compareRuntime.config.summary.contextEngine || '—'} />
-                    <KeyValueRow label="Backend" value={compareRuntime.config.summary.terminalBackend || '—'} />
-                    <KeyValueRow label="Memory Provider" value={compareRuntime.config.summary.memoryProvider || 'builtin-file'} />
-                    <KeyValueRow label="Toolsets" value={toolsetLabel(compareRuntime)} />
-                    <KeyValueRow label="工具面" value={`${enabledToolCount(compareRuntime)}/${totalToolCount(compareRuntime)}`} />
-                    <KeyValueRow label="插件数" value={compareRuntime.extensions.plugins.installedCount} />
-                    <KeyValueRow label="Cron / 远端" value={`${compareRuntime.cron.jobs.length} / ${remoteJobCount(compareRuntime)}`} />
-                  </div>
+                <p>
+                  {selectedRuntime.config.summary.modelProvider || '未配置 provider'} / {selectedRuntime.config.summary.modelDefault || '未配置 model'}
+                  {' · '}
+                  Memory {selectedRuntime.config.summary.memoryProvider || 'builtin-file'}
+                </p>
+              </section>
+              <section className="health-card">
+                <div className="health-card-header">
+                  <strong>Gateway Runtime</strong>
+                  <Pill tone={platformTone(selectedRuntime.dashboard.gateway?.gatewayState)}>
+                    {selectedRuntime.dashboard.gateway?.gatewayState ?? '未检测到'}
+                  </Pill>
                 </div>
-              </div>
-              {compareWarnings.length > 0 ? (
+                <p>Connected Platforms {selectedRuntime.dashboard.gateway?.platforms.length ?? 0} · 远端作业 {remoteJobCount(selectedRuntime)}</p>
+              </section>
+              <section className="health-card">
+                <div className="health-card-header">
+                  <strong>Toolsets</strong>
+                  <Pill tone={selectedRuntime.config.summary.toolsets.length > 0 ? 'good' : 'warn'}>
+                    {selectedRuntime.config.summary.toolsets.length}
+                  </Pill>
+                </div>
+                <p>{toolsetLabel(selectedRuntime)}</p>
+              </section>
+              <section className="health-card">
+                <div className="health-card-header">
+                  <strong>Memory Surface</strong>
+                  <Pill tone={selectedRuntime.extensions.memoryRuntime.provider.includes('none') ? 'warn' : 'good'}>
+                    {selectedRuntime.extensions.memoryRuntime.provider}
+                  </Pill>
+                </div>
+                <p>Built-in {selectedRuntime.extensions.memoryRuntime.builtInStatus} · Local Skills {localRuntimeSkillCount(selectedRuntime)}</p>
+              </section>
+            </div>
+            {overviewWarnings.length > 0 ? (
+              <>
                 <div className="warning-stack">
-                  {compareWarnings.map((warning) => (
+                  {overviewWarnings.map((warning) => (
                     <div className="warning-item" key={warning}>
                       {warning}
                     </div>
                   ))}
                 </div>
-              ) : (
-                <EmptyState title="两侧运行态接近" description="当前选中的两个 profile 没有明显的配置或能力面漂移。" />
-              )}
-            </>
-          ) : (
-            <EmptyState
-              title="暂无可对照目标"
-              description="至少需要两个 profile，且两边运行态都读取完成后，才能做差异对照。"
-            />
-          )}
-        </Panel>
+                {remainingOverviewWarningCount > 0 ? (
+                  <p className="helper-text top-gap">其余 {remainingOverviewWarningCount} 条提醒继续收在“差异对照”和“高级治理”里。</p>
+                ) : null}
+              </>
+            ) : (
+              <EmptyState title="运行态较完整" description="当前 profile 没有出现明显的结构性缺口，可以继续做对照或生命周期管理。" />
+            )}
+            <Toolbar>
+              <Button
+                onClick={() => void openInFinder(`${selectedProfile.homePath}/state.db`, `${selectedProfile.name} state.db`, true)}
+                disabled={runningAction !== null || !selectedInstallation?.stateDbExists}
+              >
+                定位 state.db
+              </Button>
+              <Button
+                onClick={() => void openInFinder(`${selectedProfile.homePath}/gateway_state.json`, `${selectedProfile.name} gateway_state.json`, true)}
+                disabled={runningAction !== null || !selectedInstallation?.gatewayStateExists}
+              >
+                定位网关状态
+              </Button>
+              <Button
+                onClick={() => void openInFinder(`${selectedProfile.homePath}/logs`, `${selectedProfile.name} logs`)}
+                disabled={runningAction !== null || !selectedInstallation?.logsDirExists}
+              >
+                打开 logs
+              </Button>
+            </Toolbar>
+          </>
+        ) : (
+          <EmptyState
+            title={selectedRuntimeLoading ? '正在读取运行态' : '运行态未就绪'}
+            description={selectedProfile ? '将自动读取当前 profile 的 dashboard / config / extensions / cron 快照。' : '先从左侧选择一个 profile。'}
+          />
+        )}
+      </Panel>
+    </div>
+  );
 
+  const compareSection = (
+    <Panel
+      title="实例对照"
+      subtitle="把多 profile 的运行差异直接拉平来看，更适合做环境隔离、迁移和回归检查。"
+      aside={
+        selectedProfile && compareName ? (
+          <Toolbar>
+            <select
+              className="select-input"
+              value={compareName}
+              onChange={(event) => setCompareName(event.target.value || null)}
+              disabled={runningAction !== null}
+            >
+              {profileItems
+                .filter((item) => item.name !== selectedProfile.name)
+                .map((item) => (
+                  <option key={item.name} value={item.name}>
+                    {item.name}
+                  </option>
+                ))}
+            </select>
+            <Button
+              disabled={!compareProfile || compareRuntimeLoading}
+              onClick={() => compareProfile && void loadRuntimeBundle(compareProfile.name, true)}
+            >
+              {compareRuntimeLoading ? '刷新中…' : '刷新对照'}
+            </Button>
+          </Toolbar>
+        ) : undefined
+      }
+    >
+      {selectedProfile && selectedRuntime && compareProfile && compareRuntime ? (
+        <>
+          <div className="two-column profile-actions-grid">
+            <div className="list-card">
+              <div className="list-card-title">
+                <strong>{selectedProfile.name}</strong>
+                <div className="pill-row">
+                  {selectedProfile.isActive && <Pill tone="good">active</Pill>}
+                  {selectedProfile.isDefault && <Pill>default</Pill>}
+                </div>
+              </div>
+              <div className="detail-list compact">
+                <KeyValueRow label="模型" value={selectedRuntime.config.summary.modelDefault || '—'} />
+                <KeyValueRow label="Context" value={selectedRuntime.config.summary.contextEngine || '—'} />
+                <KeyValueRow label="Backend" value={selectedRuntime.config.summary.terminalBackend || '—'} />
+                <KeyValueRow label="Memory Provider" value={selectedRuntime.config.summary.memoryProvider || 'builtin-file'} />
+                <KeyValueRow label="Toolsets" value={toolsetLabel(selectedRuntime)} />
+                <KeyValueRow label="工具面" value={`${enabledToolCount(selectedRuntime)}/${totalToolCount(selectedRuntime)}`} />
+                <KeyValueRow label="插件数" value={selectedRuntime.extensions.plugins.installedCount} />
+                <KeyValueRow label="Cron / 远端" value={`${selectedRuntime.cron.jobs.length} / ${remoteJobCount(selectedRuntime)}`} />
+              </div>
+            </div>
+            <div className="list-card">
+              <div className="list-card-title">
+                <strong>{compareProfile.name}</strong>
+                <div className="pill-row">
+                  {compareProfile.isActive && <Pill tone="good">active</Pill>}
+                  {compareProfile.isDefault && <Pill>default</Pill>}
+                </div>
+              </div>
+              <div className="detail-list compact">
+                <KeyValueRow label="模型" value={compareRuntime.config.summary.modelDefault || '—'} />
+                <KeyValueRow label="Context" value={compareRuntime.config.summary.contextEngine || '—'} />
+                <KeyValueRow label="Backend" value={compareRuntime.config.summary.terminalBackend || '—'} />
+                <KeyValueRow label="Memory Provider" value={compareRuntime.config.summary.memoryProvider || 'builtin-file'} />
+                <KeyValueRow label="Toolsets" value={toolsetLabel(compareRuntime)} />
+                <KeyValueRow label="工具面" value={`${enabledToolCount(compareRuntime)}/${totalToolCount(compareRuntime)}`} />
+                <KeyValueRow label="插件数" value={compareRuntime.extensions.plugins.installedCount} />
+                <KeyValueRow label="Cron / 远端" value={`${compareRuntime.cron.jobs.length} / ${remoteJobCount(compareRuntime)}`} />
+              </div>
+            </div>
+          </div>
+          {compareWarnings.length > 0 ? (
+            <div className="warning-stack">
+              {compareWarnings.map((warning) => (
+                <div className="warning-item" key={warning}>
+                  {warning}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState title="两侧运行态接近" description="当前选中的两个 profile 没有明显的配置或能力面漂移。" />
+          )}
+        </>
+      ) : (
+        <EmptyState
+          title="暂无可对照目标"
+          description="至少需要两个 profile，且两边运行态都读取完成后，才能做差异对照。"
+        />
+      )}
+    </Panel>
+  );
+
+  const manageSection = (
+    <div className="page-stack">
+      <div className="two-column profile-actions-grid">
         <Panel
           title="创建 Profile"
           className="panel-nested"
@@ -1204,63 +1147,6 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles, navig
           </p>
         </Panel>
 
-        <div className="two-column profile-actions-grid">
-          <Panel
-            title="重命名 Profile"
-            className="panel-nested"
-            aside={
-              <Toolbar>
-                <Button
-                  onClick={() => void renameProfile()}
-                  disabled={!selectedProfile || selectedProfile.isDefault || runningAction !== null}
-                >
-                  {runningAction === 'rename-profile' ? '重命名中…' : '重命名'}
-                </Button>
-              </Toolbar>
-            }
-          >
-            <label className="field-stack">
-              <span>新名称</span>
-              <input
-                className="search-input"
-                value={renameTo}
-                onChange={(event) => setRenameTo(event.target.value)}
-                disabled={!selectedProfile || selectedProfile.isDefault}
-                placeholder="新的 profile 名称"
-              />
-            </label>
-            {selectedProfile?.isDefault && (
-              <p className="helper-text">`default` 是 Hermes 保留实例，不能重命名。</p>
-            )}
-          </Panel>
-
-          <Panel
-            title="导出 Profile"
-            className="panel-nested"
-            aside={
-              <Toolbar>
-                <Button
-                  onClick={() => void exportProfile()}
-                  disabled={!selectedProfile || runningAction !== null}
-                >
-                  {runningAction === 'export-profile' ? '导出中…' : '导出'}
-                </Button>
-              </Toolbar>
-            }
-          >
-            <label className="field-stack">
-              <span>输出路径</span>
-              <input
-                className="search-input"
-                value={exportOutput}
-                onChange={(event) => setExportOutput(event.target.value)}
-                placeholder="ops-backup.tar.gz"
-              />
-            </label>
-            <p className="helper-text">留空则交给 Hermes 使用默认 `&lt;name&gt;.tar.gz`。</p>
-          </Panel>
-        </div>
-
         <Panel
           title="导入 Profile"
           className="panel-nested"
@@ -1298,121 +1184,180 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles, navig
             </label>
           </div>
         </Panel>
+      </div>
 
-        <Panel title="Alias 管理" className="panel-nested">
-          {selectedProfile ? (
-            <div className="page-stack">
-              {selectedProfile.aliases.length > 0 ? (
-                <div className="list-stack">
-                  {selectedProfile.aliases.map((alias) => (
-                    <div className="list-card session-card" key={alias.path}>
-                      <div className="list-card-title">
-                        <strong>{alias.name}</strong>
-                        <div className="pill-row">
-                          {alias.isPrimary && <Pill>primary</Pill>}
-                        </div>
-                      </div>
-                      <p>{alias.path}</p>
-                      <Toolbar>
-                        <Button
-                          disabled={runningAction !== null}
-                          onClick={() => void openInFinder(alias.path, `${alias.name} Alias`, true)}
-                        >
-                          在 Finder 中定位
-                        </Button>
-                      </Toolbar>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <EmptyState
-                  title="暂无 Alias"
-                  description="当前 profile 还没有可用的 wrapper alias，可以在下面直接创建。"
-                />
-              )}
-
-              <div className="two-column profile-actions-grid">
-                <div className="page-stack">
-                  <label className="field-stack">
-                    <span>Alias 名称</span>
-                    <input
-                      className="search-input"
-                      value={aliasName}
-                      onChange={(event) => setAliasName(event.target.value)}
-                      placeholder="留空时会回退到 profile 名称"
-                    />
-                  </label>
-                  <p className="helper-text">
-                    这里直接复用 `hermes profile alias {selectedProfile.name} --name &lt;alias&gt;`。
-                  </p>
-                  <Toolbar>
-                    <Button
-                      kind="primary"
-                      onClick={() => void createAlias()}
-                      disabled={runningAction !== null}
-                    >
-                      {runningAction === 'create-alias' ? '创建中…' : '创建 / 更新 Alias'}
-                    </Button>
-                  </Toolbar>
-                </div>
-
-                <div className="page-stack">
-                  <div className="danger-copy">
-                    <strong>⚠️ 危险操作检测！</strong>
-                    <p>操作类型：删除 wrapper alias</p>
-                    <p>影响范围：当前 profile 在 `~/.local/bin` 下的启动脚本</p>
-                    <p>风险评估：删除后不会影响 profile 数据，但会失去对应快捷命令入口。</p>
-                  </div>
-                  <label className="field-stack">
-                    <span>删除目标</span>
-                    <select
-                      className="select-input"
-                      value={removeAliasName}
-                      onChange={(event) => setRemoveAliasName(event.target.value)}
-                      disabled={selectedProfile.aliases.length === 0}
-                    >
-                      {selectedProfile.aliases.length === 0 ? (
-                        <option value="">当前没有 alias</option>
-                      ) : (
-                        selectedProfile.aliases.map((alias) => (
-                          <option key={alias.name} value={alias.name}>
-                            {alias.name}
-                          </option>
-                        ))
-                      )}
-                    </select>
-                  </label>
-                  <label className="field-stack">
-                    <span>请输入 `{removeAliasName || 'alias 名称'}` 以确认删除</span>
-                    <input
-                      className="search-input"
-                      value={removeAliasConfirm}
-                      onChange={(event) => setRemoveAliasConfirm(event.target.value)}
-                      disabled={selectedProfile.aliases.length === 0}
-                      placeholder={removeAliasName || '选择一个 alias'}
-                    />
-                  </label>
-                  <Toolbar>
-                    <Button
-                      kind="danger"
-                      onClick={() => void deleteAlias()}
-                      disabled={
-                        selectedProfile.aliases.length === 0
-                        || removeAliasConfirm.trim() !== removeAliasName.trim()
-                        || runningAction !== null
-                      }
-                    >
-                      {runningAction === 'delete-alias' ? '删除中…' : '删除 Alias'}
-                    </Button>
-                  </Toolbar>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <EmptyState title="未选择 profile" description="选择一个 profile 后才能管理 alias。" />
+      <div className="two-column profile-actions-grid">
+        <Panel
+          title="重命名 Profile"
+          className="panel-nested"
+          aside={
+            <Toolbar>
+              <Button
+                onClick={() => void renameProfile()}
+                disabled={!selectedProfile || selectedProfile.isDefault || runningAction !== null}
+              >
+                {runningAction === 'rename-profile' ? '重命名中…' : '重命名'}
+              </Button>
+            </Toolbar>
+          }
+        >
+          <label className="field-stack">
+            <span>新名称</span>
+            <input
+              className="search-input"
+              value={renameTo}
+              onChange={(event) => setRenameTo(event.target.value)}
+              disabled={!selectedProfile || selectedProfile.isDefault}
+              placeholder="新的 profile 名称"
+            />
+          </label>
+          {selectedProfile?.isDefault && (
+            <p className="helper-text">`default` 是 Hermes 保留实例，不能重命名。</p>
           )}
         </Panel>
 
+        <Panel
+          title="导出 Profile"
+          className="panel-nested"
+          aside={
+            <Toolbar>
+              <Button
+                onClick={() => void exportProfile()}
+                disabled={!selectedProfile || runningAction !== null}
+              >
+                {runningAction === 'export-profile' ? '导出中…' : '导出'}
+              </Button>
+            </Toolbar>
+          }
+        >
+          <label className="field-stack">
+            <span>输出路径</span>
+            <input
+              className="search-input"
+              value={exportOutput}
+              onChange={(event) => setExportOutput(event.target.value)}
+              placeholder="ops-backup.tar.gz"
+            />
+          </label>
+          <p className="helper-text">留空则交给 Hermes 使用默认 `&lt;name&gt;.tar.gz`。</p>
+        </Panel>
+      </div>
+
+      <Panel title="Alias 管理" className="panel-nested">
+        {selectedProfile ? (
+          <div className="page-stack">
+            {selectedProfile.aliases.length > 0 ? (
+              <div className="list-stack">
+                {selectedProfile.aliases.map((alias) => (
+                  <div className="list-card session-card" key={alias.path}>
+                    <div className="list-card-title">
+                      <strong>{alias.name}</strong>
+                      <div className="pill-row">
+                        {alias.isPrimary && <Pill>primary</Pill>}
+                      </div>
+                    </div>
+                    <p>{alias.path}</p>
+                    <Toolbar>
+                      <Button
+                        disabled={runningAction !== null}
+                        onClick={() => void openInFinder(alias.path, `${alias.name} Alias`, true)}
+                      >
+                        在 Finder 中定位
+                      </Button>
+                    </Toolbar>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyState
+                title="暂无 Alias"
+                description="当前 profile 还没有可用的 wrapper alias，可以在下面直接创建。"
+              />
+            )}
+
+            <div className="two-column profile-actions-grid">
+              <div className="page-stack">
+                <label className="field-stack">
+                  <span>Alias 名称</span>
+                  <input
+                    className="search-input"
+                    value={aliasName}
+                    onChange={(event) => setAliasName(event.target.value)}
+                    placeholder="留空时会回退到 profile 名称"
+                  />
+                </label>
+                <p className="helper-text">
+                  这里直接复用 `hermes profile alias {selectedProfile.name} --name &lt;alias&gt;`。
+                </p>
+                <Toolbar>
+                  <Button
+                    kind="primary"
+                    onClick={() => void createAlias()}
+                    disabled={runningAction !== null}
+                  >
+                    {runningAction === 'create-alias' ? '创建中…' : '创建 / 更新 Alias'}
+                  </Button>
+                </Toolbar>
+              </div>
+
+              <div className="page-stack">
+                <div className="danger-copy">
+                  <strong>⚠️ 危险操作检测！</strong>
+                  <p>操作类型：删除 wrapper alias</p>
+                  <p>影响范围：当前 profile 在 `~/.local/bin` 下的启动脚本</p>
+                  <p>风险评估：删除后不会影响 profile 数据，但会失去对应快捷命令入口。</p>
+                </div>
+                <label className="field-stack">
+                  <span>删除目标</span>
+                  <select
+                    className="select-input"
+                    value={removeAliasName}
+                    onChange={(event) => setRemoveAliasName(event.target.value)}
+                    disabled={selectedProfile.aliases.length === 0}
+                  >
+                    {selectedProfile.aliases.length === 0 ? (
+                      <option value="">当前没有 alias</option>
+                    ) : (
+                      selectedProfile.aliases.map((alias) => (
+                        <option key={alias.name} value={alias.name}>
+                          {alias.name}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </label>
+                <label className="field-stack">
+                  <span>请输入 `{removeAliasName || 'alias 名称'}` 以确认删除</span>
+                  <input
+                    className="search-input"
+                    value={removeAliasConfirm}
+                    onChange={(event) => setRemoveAliasConfirm(event.target.value)}
+                    disabled={selectedProfile.aliases.length === 0}
+                    placeholder={removeAliasName || '选择一个 alias'}
+                  />
+                </label>
+                <Toolbar>
+                  <Button
+                    kind="danger"
+                    onClick={() => void deleteAlias()}
+                    disabled={
+                      selectedProfile.aliases.length === 0
+                      || removeAliasConfirm.trim() !== removeAliasName.trim()
+                      || runningAction !== null
+                    }
+                  >
+                    {runningAction === 'delete-alias' ? '删除中…' : '删除 Alias'}
+                  </Button>
+                </Toolbar>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <EmptyState title="未选择 profile" description="选择一个 profile 后才能管理 alias。" />
+        )}
+      </Panel>
+
+      <div className="two-column profile-actions-grid">
         <Panel
           title="危险区"
           className="panel-nested panel-danger"
@@ -1475,6 +1420,74 @@ export function ProfilesPage({ notify, profile, profiles, refreshProfiles, navig
             <EmptyState title="尚无动作回执" description="这里会显示创建、重命名、导入导出、Alias 管理和桌面文件动作的执行结果。" />
           )}
         </Panel>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="two-column wide-left">
+      <Panel
+        title="实例列表"
+        subtitle="先选一个实例，再决定是查看当前状态、做差异对照，还是进入高级治理。"
+        aside={
+          <Toolbar>
+            <Button onClick={() => void refreshProfileWorkspace()}>刷新列表</Button>
+          </Toolbar>
+        }
+      >
+        {profileItems.length === 0 ? (
+          <EmptyState title="未发现 profile" description="当前还没有可管理的 Hermes profile。" />
+        ) : (
+          <div className="list-stack profile-rail">
+            {profileItems.map((item) => (
+              <button
+                key={item.name}
+                type="button"
+                className={`list-card session-card ${selectedProfile?.name === item.name ? 'selected' : ''}`}
+                onClick={() => setSelectedName(item.name)}
+              >
+                <div className="list-card-title">
+                  <strong>{item.name}</strong>
+                  <div className="pill-row">
+                    {item.isDefault && <Pill>default</Pill>}
+                    {item.isActive && <Pill tone="good">active</Pill>}
+                    <Pill tone={item.envExists ? 'good' : 'warn'}>{item.envExists ? '.env ok' : '.env missing'}</Pill>
+                  </div>
+                </div>
+                <p>{item.homePath}</p>
+                <div className="meta-line">
+                  <span>{item.modelDefault || '未配置模型'}</span>
+                  <span>{item.gatewayState || 'gateway unknown'}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </Panel>
+
+      <div className="page-stack">
+        {detailSection}
+
+        <div className="tab-bar">
+          {PROFILE_TABS.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              className={`tab ${activeTab === tab.key ? 'active' : ''}`}
+              onClick={() => setActiveTab(tab.key)}
+              title={tab.hint}
+            >
+              {tab.label}
+              {tab.key === 'overview' && selectedWarnings.length > 0 ? <span className="tab-dirty-dot" /> : null}
+              {tab.key === 'compare' && compareWarnings.length > 0 ? <span className="tab-dirty-dot" /> : null}
+              {tab.key === 'manage' && lastCommand !== null ? <span className="tab-dirty-dot" /> : null}
+            </button>
+          ))}
+        </div>
+
+        {activeTab === 'overview' ? overviewSection : null}
+        {activeTab === 'compare' ? compareSection : null}
+        {activeTab === 'manage' ? manageSection : null}
       </div>
     </div>
   );

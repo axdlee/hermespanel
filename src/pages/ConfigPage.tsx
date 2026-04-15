@@ -25,6 +25,14 @@ const CONFIG_WORKBENCH_KEYS: DiagnosticKind[] = [
   'gateway-status',
 ];
 
+type ConfigTabKey = 'overview' | 'files' | 'advanced';
+
+const CONFIG_TABS: Array<{ key: ConfigTabKey; label: string; hint: string }> = [
+  { key: 'overview', label: '常用总览', hint: '先看推荐下一步、当前判断和常用体检。' },
+  { key: 'files', label: '文件与保存', hint: '集中修改 config.yaml 与 .env。' },
+  { key: 'advanced', label: '高级接管', hint: '低频但必要的官方向导与 CLI 接管动作。' },
+];
+
 function isDiagnosticCommandDefinition(
   value: DiagnosticCommandDefinition | undefined,
 ): value is DiagnosticCommandDefinition {
@@ -84,6 +92,7 @@ function runtimeWarnings(
 }
 
 export function ConfigPage({ notify, profile, navigate, pageIntent, consumePageIntent }: PageProps) {
+  const [activeTab, setActiveTab] = useState<ConfigTabKey>('overview');
   const [data, setData] = useState<ConfigDocuments | null>(null);
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
   const [installation, setInstallation] = useState<InstallationSnapshot | null>(null);
@@ -228,6 +237,7 @@ export function ConfigPage({ notify, profile, navigate, pageIntent, consumePageI
     }
 
     setInvestigation(pageIntent);
+    setActiveTab('overview');
     notify('info', `${pageIntent.headline} 已带入配置工作台。`);
     consumePageIntent();
   }, [consumePageIntent, notify, pageIntent]);
@@ -261,13 +271,268 @@ export function ConfigPage({ notify, profile, navigate, pageIntent, consumePageI
     return <LoadingState label="正在读取 Hermes 配置文件。" />;
   }
 
+  const modelReady = Boolean(data.summary.modelDefault && data.summary.modelProvider);
+  const backendReady = Boolean(data.summary.terminalBackend);
+  const toolingReady = data.summary.toolsets.length > 0 && enabledToolCount(extensions) > 0;
+  const memoryRuntimeReady = data.summary.memoryEnabled !== false && !(extensions?.memoryRuntime.provider.includes('none') ?? true);
+  const overviewWarnings = warnings.slice(0, 4);
+  const remainingWarningCount = Math.max(0, warnings.length - overviewWarnings.length);
+
+  const recentResultSection = (
+    <Panel title="最近校验输出" subtitle="保留 Hermes 原生命令回显，避免把配置页做成另一个解释器。">
+      {lastResult ? (
+        <div className="result-stack">
+          <div className="detail-list compact">
+            <KeyValueRow label="命令类型" value={lastResultLabel ?? getDiagnosticCommand(lastDiagnostic ?? '')?.label ?? '—'} />
+            <KeyValueRow label="命令" value={lastResult.command} />
+            <KeyValueRow label="退出码" value={lastResult.exitCode} />
+            <KeyValueRow label="结果" value={<Pill tone={lastResult.success ? 'good' : 'bad'}>{lastResult.success ? '成功' : '失败'}</Pill>} />
+          </div>
+          <pre className="code-block">{lastResult.stdout || 'stdout 为空'}</pre>
+          {lastResult.stderr ? <pre className="code-block">{lastResult.stderr}</pre> : null}
+          {lastDiagnostic ? (
+            <Toolbar>
+              <Button onClick={() => navigate(getDiagnosticCommand(lastDiagnostic)?.relatedPage ?? 'diagnostics')}>进入相关页</Button>
+            </Toolbar>
+          ) : (
+            <Toolbar>
+              <Button onClick={() => navigate('diagnostics')}>打开诊断页</Button>
+            </Toolbar>
+          )}
+        </div>
+      ) : (
+        <EmptyState title="尚未执行校验" description="保存后执行 `config-check`，或者直接从上面的工作台触发任一校验动作。" />
+      )}
+      <div className="detail-list compact top-gap">
+        <KeyValueRow label="默认模型" value={data.summary.modelDefault || '—'} />
+        <KeyValueRow label="提供商" value={data.summary.modelProvider || '—'} />
+        <KeyValueRow label="Context Engine" value={data.summary.contextEngine || '—'} />
+        <KeyValueRow label="Toolsets" value={data.summary.toolsets.length ? data.summary.toolsets.join(', ') : '—'} />
+      </div>
+    </Panel>
+  );
+
+  const closureSignalsSection = (
+    <div className="two-column wide-left">
+      <Panel
+        title="配置闭环信号"
+        subtitle="看配置与运行态是否一致。"
+        aside={(
+          <Toolbar>
+            <Button onClick={() => void openInFinder(data.hermesHome, 'Hermes Home')}>打开 Home</Button>
+            <Button onClick={() => void openInFinder(data.configPath, 'config.yaml', true)}>定位 config.yaml</Button>
+            <Button onClick={() => void openInFinder(data.envPath, '.env', true)}>定位 .env</Button>
+          </Toolbar>
+        )}
+      >
+        <div className="health-grid">
+          <section className="health-card">
+            <div className="health-card-header">
+              <strong>Memory Runtime</strong>
+              <Pill tone={extensions?.memoryRuntime.provider.includes('none') ? 'warn' : 'good'}>
+                {extensions?.memoryRuntime.provider || '未读取'}
+              </Pill>
+            </div>
+            <p>配置声明 {data.summary.memoryProvider || 'builtin-file'} · 运行态 {extensions?.memoryRuntime.provider || '未读取'}。</p>
+          </section>
+          <section className="health-card">
+            <div className="health-card-header">
+              <strong>Gateway Delivery</strong>
+              <Pill tone={remoteJobs.length === 0 || snapshot?.gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
+                {snapshot?.gateway?.gatewayState ?? '未检测到'}
+              </Pill>
+            </div>
+            <p>{remoteJobs.length > 0 ? `当前有 ${remoteJobs.length} 个远端作业依赖 gateway。` : '当前没有依赖 gateway 的远端投递作业。'}</p>
+          </section>
+          <section className="health-card">
+            <div className="health-card-header">
+              <strong>Skills Closure</strong>
+              <Pill tone={skills.length === localRuntimeSkillCount(extensions) ? 'good' : 'warn'}>
+                {localRuntimeSkillCount(extensions)}/{skills.length}
+              </Pill>
+            </div>
+            <p>CLI 运行态 local skills / 本地目录扫描 skills，用来发现安装态与文件态的偏差。</p>
+          </section>
+          <section className="health-card">
+            <div className="health-card-header">
+              <strong>Plugin Overlay</strong>
+              <Pill tone={pluginsCount(extensions) > 0 ? 'good' : 'neutral'}>
+                {pluginsCount(extensions)}
+              </Pill>
+            </div>
+            <p>插件数 {pluginsCount(extensions)} · 已启用工具 {enabledToolCount(extensions)} / {totalToolCount(extensions)}。</p>
+          </section>
+        </div>
+      </Panel>
+    </div>
+  );
+
+  const advancedActionsSection = (
+    <Panel
+      title="高级接管动作"
+      subtitle="把低频、交互式、仍需官方向导参与的能力收进这里，避免打断日常配置流程。"
+    >
+      <div className="control-card-grid">
+        <section className="action-card action-card-compact">
+          <div className="action-card-header">
+            <div>
+              <p className="eyebrow">Onboarding</p>
+              <h3 className="action-card-title">Setup / Model / Migration</h3>
+            </div>
+            <Pill tone={installation.binaryFound ? 'good' : 'bad'}>
+              {installation.binaryFound ? 'CLI 就绪' : 'CLI 缺失'}
+            </Pill>
+          </div>
+          <p className="action-card-copy">
+            首次接管或大幅调整 provider 时，优先走 Hermes 官方向导，而不是在 YAML 里硬改。
+          </p>
+          <p className="command-line">
+            {installation.setupCommand} · {installation.modelCommand} · {installation.configMigrateCommand} · {installation.clawMigrateCommand}
+          </p>
+          <Toolbar>
+            <Button
+              kind="primary"
+              onClick={() => void openInTerminal('config:setup', '全量 Setup', installation.setupCommand, { workingDirectory })}
+              disabled={actionBusy || !installation.binaryFound}
+            >
+              {runningDesktopAction === 'config:setup' ? '全量 Setup…' : '全量 Setup'}
+            </Button>
+            <Button
+              onClick={() => void openInTerminal('config:model', '模型 / Provider', installation.modelCommand, { workingDirectory })}
+              disabled={actionBusy || !installation.binaryFound}
+            >
+              {runningDesktopAction === 'config:model' ? '模型 / Provider…' : '模型 / Provider'}
+            </Button>
+            <Button
+              onClick={() => void openInTerminal('config:migrate', '迁移配置', installation.configMigrateCommand, { workingDirectory })}
+              disabled={actionBusy || !installation.binaryFound}
+            >
+              {runningDesktopAction === 'config:migrate' ? '迁移配置…' : '迁移配置'}
+            </Button>
+            <Button
+              onClick={() => void openInTerminal('config:claw-migrate', '导入 OpenClaw', installation.clawMigrateCommand, { workingDirectory })}
+              disabled={actionBusy || !installation.binaryFound}
+            >
+              {runningDesktopAction === 'config:claw-migrate' ? '导入 OpenClaw…' : '导入 OpenClaw'}
+            </Button>
+          </Toolbar>
+        </section>
+
+        <section className="action-card action-card-compact">
+          <div className="action-card-header">
+            <div>
+              <p className="eyebrow">Capability</p>
+              <h3 className="action-card-title">Terminal / Tools / Skills</h3>
+            </div>
+            <Pill tone={data.summary.toolsets.length > 0 ? 'good' : 'warn'}>
+              {data.summary.toolsets.length > 0 ? `${data.summary.toolsets.length} 个 toolset` : '待配置'}
+            </Pill>
+          </div>
+          <p className="action-card-copy">
+            Hermes 的能力面不是只写在配置里，更要通过 terminal backend、tools 和 skills 交互式确认。
+          </p>
+          <p className="command-line">
+            {installation.terminalSetupCommand} · {installation.toolsSetupCommand} · {installation.skillsConfigCommand}
+          </p>
+          <Toolbar>
+            <Button
+              onClick={() => void openInTerminal('config:terminal-backend', '终端后端', installation.terminalSetupCommand, { workingDirectory })}
+              disabled={actionBusy || !installation.binaryFound}
+            >
+              {runningDesktopAction === 'config:terminal-backend' ? '终端后端…' : '终端后端'}
+            </Button>
+            <Button
+              onClick={() => void openInTerminal('config:tools-setup', '工具选择', installation.toolsSetupCommand, { workingDirectory })}
+              disabled={actionBusy || !installation.binaryFound}
+            >
+              {runningDesktopAction === 'config:tools-setup' ? '工具选择…' : '工具选择'}
+            </Button>
+            <Button
+              onClick={() => void openInTerminal('config:skills-config', '技能开关', installation.skillsConfigCommand, { workingDirectory })}
+              disabled={actionBusy || !installation.binaryFound}
+            >
+              {runningDesktopAction === 'config:skills-config' ? '技能开关…' : '技能开关'}
+            </Button>
+          </Toolbar>
+        </section>
+
+        <section className="action-card action-card-compact">
+          <div className="action-card-header">
+            <div>
+              <p className="eyebrow">Provider</p>
+              <h3 className="action-card-title">Memory / Plugins / Gateway</h3>
+            </div>
+            <Pill tone={snapshot?.gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
+              {snapshot?.gateway?.gatewayState ?? 'gateway 待接管'}
+            </Pill>
+          </div>
+          <p className="action-card-copy">
+            记忆 provider、context engine 和消息平台接入都需要官方向导配合，面板只做桌面封装。
+          </p>
+          <p className="command-line">
+            hermes memory setup · hermes plugins · {installation.gatewaySetupCommand}
+          </p>
+          <Toolbar>
+            <Button
+              onClick={() => void openInTerminal('config:memory-setup', '记忆 Provider', 'hermes memory setup', { workingDirectory })}
+              disabled={actionBusy || !installation.binaryFound}
+            >
+              {runningDesktopAction === 'config:memory-setup' ? '记忆 Provider…' : '记忆 Provider'}
+            </Button>
+            <Button
+              onClick={() => void openInTerminal('config:plugins', '插件 / Context Engine', 'hermes plugins', { workingDirectory })}
+              disabled={actionBusy || !installation.binaryFound}
+            >
+              {runningDesktopAction === 'config:plugins' ? '插件 / Context Engine…' : '插件 / Context Engine'}
+            </Button>
+            <Button
+              onClick={() => void openInTerminal('config:gateway-setup', 'Gateway Setup', installation.gatewaySetupCommand, { workingDirectory })}
+              disabled={actionBusy || !installation.binaryFound}
+            >
+              {runningDesktopAction === 'config:gateway-setup' ? 'Gateway Setup…' : 'Gateway Setup'}
+            </Button>
+          </Toolbar>
+        </section>
+
+        <section className="action-card action-card-compact">
+          <div className="action-card-header">
+            <div>
+              <p className="eyebrow">Workspace</p>
+              <h3 className="action-card-title">文件与闭环验证</h3>
+            </div>
+            <Pill tone={warnings.length === 0 ? 'good' : 'warn'}>
+              {warnings.length === 0 ? '姿态稳定' : `${warnings.length} 条提醒`}
+            </Pill>
+          </div>
+          <p className="action-card-copy">
+            编辑器仍然保留，但推荐先做接管动作，再回来保存和体检，避免只改文件不验证运行态。
+          </p>
+          <p className="command-line">
+            hermes config check · hermes memory status · hermes gateway status · hermes doctor
+          </p>
+          <Toolbar>
+            <Button onClick={() => void openInFinder(data.hermesHome, 'Hermes Home')} disabled={actionBusy}>打开 Home</Button>
+            <Button onClick={() => void openInFinder(data.configPath, 'config.yaml', true)} disabled={actionBusy}>定位 config.yaml</Button>
+            <Button onClick={() => void openInFinder(data.envPath, '.env', true)} disabled={actionBusy}>定位 .env</Button>
+            <Button onClick={() => void runDiagnostic('config-check')} disabled={actionBusy}>
+              {runningDiagnostic === 'config-check' ? '配置体检…' : '配置体检'}
+            </Button>
+          </Toolbar>
+        </section>
+      </div>
+      <p className="helper-text">
+        macOS 下这些交互式命令会交给系统 Terminal 持续运行，执行完成后回到面板点刷新即可看到最新姿态。
+      </p>
+    </Panel>
+  );
+
   return (
     <div className="page-stack">
       <Panel
         title="配置中心"
-        subtitle="配置编辑、体检、接管"
+        subtitle="先处理核心配置，再按需进入文件编辑和高级接管。"
         tip={(
-          <InfoTip content="配置页聚焦文件编辑、运行体检和官方向导接管。跨页导航不再在页头重复展示，避免和侧边栏抢主操作区。"/>
+          <InfoTip content="这里优先承接模型、终端、工具、记忆这些高频配置。低频 CLI 接管动作统一后置到“高级接管”，避免新手被复杂操作打断。"/>
         )}
         aside={(
           <Toolbar>
@@ -280,13 +545,13 @@ export function ConfigPage({ notify, profile, navigate, pageIntent, consumePageI
       >
         <div className="hero-grid">
           <div className="hero-copy">
-            <p className="hero-title">Hermes Runtime Composition</p>
-            <p className="hero-subtitle">文件层、能力层和运行体检在这里合流。</p>
+            <p className="hero-title">Hermes Core Setup</p>
+            <p className="hero-subtitle">模型、工具、记忆和体检在这里收束成一条更顺手的配置路径。</p>
             <div className="detail-list">
               <KeyValueRow label="当前 Profile" value={profile} />
               <KeyValueRow label="Hermes Home" value={data.hermesHome} />
-              <KeyValueRow label="Config Path" value={data.configPath} />
-              <KeyValueRow label="Env Path" value={data.envPath} />
+              <KeyValueRow label="默认模型" value={data.summary.modelDefault || '—'} />
+              <KeyValueRow label="Model Provider" value={data.summary.modelProvider || '—'} />
               <KeyValueRow label="Gateway" value={snapshot?.gateway?.gatewayState ?? '未检测到'} />
               <KeyValueRow label="Context Engine" value={data.summary.contextEngine || '—'} />
             </div>
@@ -326,388 +591,279 @@ export function ConfigPage({ notify, profile, navigate, pageIntent, consumePageI
         />
       ) : null}
 
-      <Panel
-        title="运行姿态"
-        subtitle="这里比首页多带了扩展、cron 和技能上下文，更适合判断这个 profile 的真实能力编排是否闭环。"
-      >
-        <RuntimePostureView posture={posture} navigate={navigate} />
-      </Panel>
+      <div className="tab-bar">
+        {CONFIG_TABS.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            className={`tab ${activeTab === tab.key ? 'active' : ''}`}
+            onClick={() => setActiveTab(tab.key)}
+            title={tab.hint}
+          >
+            {tab.label}
+            {tab.key === 'files' && (configDirty || envDirty) ? <span className="tab-dirty-dot" /> : null}
+          </button>
+        ))}
+      </div>
 
-      <Panel
-        title="配置接管动作台"
-        subtitle="参考闭环思路，把 Hermes 配置相关的交互式命令直接收进配置页，不再只是编辑 `config.yaml`。"
-      >
-        <div className="control-card-grid">
-          <section className="action-card action-card-compact">
-            <div className="action-card-header">
-              <div>
-                <p className="eyebrow">Onboarding</p>
-                <h3 className="action-card-title">Setup / Model / Migration</h3>
-              </div>
-              <Pill tone={installation.binaryFound ? 'good' : 'bad'}>
-                {installation.binaryFound ? 'CLI 就绪' : 'CLI 缺失'}
-              </Pill>
-            </div>
-            <p className="action-card-copy">
-              首次接管或大幅调整 provider 时，优先走 Hermes 官方向导，而不是在 YAML 里硬改。
-            </p>
-            <p className="command-line">
-              {installation.setupCommand} · {installation.modelCommand} · {installation.configMigrateCommand} · {installation.clawMigrateCommand}
-            </p>
-            <Toolbar>
-              <Button
-                kind="primary"
-                onClick={() => void openInTerminal('config:setup', '全量 Setup', installation.setupCommand, { workingDirectory })}
-                disabled={actionBusy || !installation.binaryFound}
-              >
-                {runningDesktopAction === 'config:setup' ? '全量 Setup…' : '全量 Setup'}
-              </Button>
-              <Button
-                onClick={() => void openInTerminal('config:model', '模型 / Provider', installation.modelCommand, { workingDirectory })}
-                disabled={actionBusy || !installation.binaryFound}
-              >
-                {runningDesktopAction === 'config:model' ? '模型 / Provider…' : '模型 / Provider'}
-              </Button>
-              <Button
-                onClick={() => void openInTerminal('config:migrate', '迁移配置', installation.configMigrateCommand, { workingDirectory })}
-                disabled={actionBusy || !installation.binaryFound}
-              >
-                {runningDesktopAction === 'config:migrate' ? '迁移配置…' : '迁移配置'}
-              </Button>
-              <Button
-                onClick={() => void openInTerminal('config:claw-migrate', '导入 OpenClaw', installation.clawMigrateCommand, { workingDirectory })}
-                disabled={actionBusy || !installation.binaryFound}
-              >
-                {runningDesktopAction === 'config:claw-migrate' ? '导入 OpenClaw…' : '导入 OpenClaw'}
-              </Button>
-            </Toolbar>
-          </section>
-
-          <section className="action-card action-card-compact">
-            <div className="action-card-header">
-              <div>
-                <p className="eyebrow">Capability</p>
-                <h3 className="action-card-title">Terminal / Tools / Skills</h3>
-              </div>
-              <Pill tone={data.summary.toolsets.length > 0 ? 'good' : 'warn'}>
-                {data.summary.toolsets.length > 0 ? `${data.summary.toolsets.length} 个 toolset` : '待配置'}
-              </Pill>
-            </div>
-            <p className="action-card-copy">
-              Hermes 的能力面不是只写在配置里，更要通过 terminal backend、tools 和 skills 交互式确认。
-            </p>
-            <p className="command-line">
-              {installation.terminalSetupCommand} · {installation.toolsSetupCommand} · {installation.skillsConfigCommand}
-            </p>
-            <Toolbar>
-              <Button
-                onClick={() => void openInTerminal('config:terminal-backend', '终端后端', installation.terminalSetupCommand, { workingDirectory })}
-                disabled={actionBusy || !installation.binaryFound}
-              >
-                {runningDesktopAction === 'config:terminal-backend' ? '终端后端…' : '终端后端'}
-              </Button>
-              <Button
-                onClick={() => void openInTerminal('config:tools-setup', '工具选择', installation.toolsSetupCommand, { workingDirectory })}
-                disabled={actionBusy || !installation.binaryFound}
-              >
-                {runningDesktopAction === 'config:tools-setup' ? '工具选择…' : '工具选择'}
-              </Button>
-              <Button
-                onClick={() => void openInTerminal('config:skills-config', '技能开关', installation.skillsConfigCommand, { workingDirectory })}
-                disabled={actionBusy || !installation.binaryFound}
-              >
-                {runningDesktopAction === 'config:skills-config' ? '技能开关…' : '技能开关'}
-              </Button>
-            </Toolbar>
-          </section>
-
-          <section className="action-card action-card-compact">
-            <div className="action-card-header">
-              <div>
-                <p className="eyebrow">Provider</p>
-                <h3 className="action-card-title">Memory / Plugins / Gateway</h3>
-              </div>
-              <Pill tone={snapshot?.gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
-                {snapshot?.gateway?.gatewayState ?? 'gateway 待接管'}
-              </Pill>
-            </div>
-            <p className="action-card-copy">
-              记忆 provider、context engine 和消息平台接入都需要官方向导配合，面板只做桌面封装。
-            </p>
-            <p className="command-line">
-              hermes memory setup · hermes plugins · {installation.gatewaySetupCommand}
-            </p>
-            <Toolbar>
-              <Button
-                onClick={() => void openInTerminal('config:memory-setup', '记忆 Provider', 'hermes memory setup', { workingDirectory })}
-                disabled={actionBusy || !installation.binaryFound}
-              >
-                {runningDesktopAction === 'config:memory-setup' ? '记忆 Provider…' : '记忆 Provider'}
-              </Button>
-              <Button
-                onClick={() => void openInTerminal('config:plugins', '插件 / Context Engine', 'hermes plugins', { workingDirectory })}
-                disabled={actionBusy || !installation.binaryFound}
-              >
-                {runningDesktopAction === 'config:plugins' ? '插件 / Context Engine…' : '插件 / Context Engine'}
-              </Button>
-              <Button
-                onClick={() => void openInTerminal('config:gateway-setup', 'Gateway Setup', installation.gatewaySetupCommand, { workingDirectory })}
-                disabled={actionBusy || !installation.binaryFound}
-              >
-                {runningDesktopAction === 'config:gateway-setup' ? 'Gateway Setup…' : 'Gateway Setup'}
-              </Button>
-            </Toolbar>
-          </section>
-
-          <section className="action-card action-card-compact">
-            <div className="action-card-header">
-              <div>
-                <p className="eyebrow">Workspace</p>
-                <h3 className="action-card-title">文件与闭环验证</h3>
-              </div>
-              <Pill tone={warnings.length === 0 ? 'good' : 'warn'}>
-                {warnings.length === 0 ? '姿态稳定' : `${warnings.length} 条提醒`}
-              </Pill>
-            </div>
-            <p className="action-card-copy">
-              编辑器仍然保留，但推荐先做接管动作，再回来保存和体检，避免只改文件不验证运行态。
-            </p>
-            <p className="command-line">
-              hermes config check · hermes memory status · hermes gateway status · hermes doctor
-            </p>
-            <Toolbar>
-              <Button onClick={() => void openInFinder(data.hermesHome, 'Hermes Home')} disabled={actionBusy}>打开 Home</Button>
-              <Button onClick={() => void openInFinder(data.configPath, 'config.yaml', true)} disabled={actionBusy}>定位 config.yaml</Button>
-              <Button onClick={() => void openInFinder(data.envPath, '.env', true)} disabled={actionBusy}>定位 .env</Button>
-              <Button onClick={() => void runDiagnostic('config-check')} disabled={actionBusy}>
-                {runningDiagnostic === 'config-check' ? '配置体检…' : '配置体检'}
-              </Button>
-            </Toolbar>
-          </section>
-        </div>
-        <p className="helper-text">
-          macOS 下这些交互式命令会交给系统 Terminal 持续运行，执行完成后回到面板点刷新即可看到最新姿态。
-        </p>
-      </Panel>
-
-      <div className="two-column wide-left">
-        <Panel title="能力编排摘要" subtitle="这些摘要比原始 YAML 更容易帮助你判断当前 profile 能做什么。">
-          <div className="health-grid">
-            <section className="health-card">
-              <div className="health-card-header">
-                <strong>Provider / Model</strong>
-                <Pill tone={data.summary.modelDefault && data.summary.modelProvider ? 'good' : 'warn'}>
-                  {data.summary.modelDefault && data.summary.modelProvider ? '已就绪' : '缺失'}
-                </Pill>
-              </div>
-              <p>{data.summary.modelProvider || '未配置 provider'} / {data.summary.modelDefault || '未配置 model'}</p>
-            </section>
-            <section className="health-card">
-              <div className="health-card-header">
-                <strong>Terminal Backend</strong>
-                <Pill tone={data.summary.terminalBackend ? 'good' : 'warn'}>
-                  {data.summary.terminalBackend || '未配置'}
-                </Pill>
-              </div>
-              <p>{data.summary.terminalCwd || '当前未声明工作目录，工具执行上下文可能不稳定。'}</p>
-            </section>
-            <section className="health-card">
-              <div className="health-card-header">
-                <strong>Toolsets / Tools</strong>
-                <Pill tone={data.summary.toolsets.length && enabledToolCount(extensions) > 0 ? 'good' : 'warn'}>
-                  {enabledToolCount(extensions)}/{totalToolCount(extensions)}
-                </Pill>
-              </div>
-              <p>{data.summary.toolsets.join(', ') || '当前没有配置 toolsets。'}</p>
-            </section>
-            <section className="health-card">
-              <div className="health-card-header">
-                <strong>Context / Memory</strong>
-                <Pill tone={data.summary.contextEngine ? 'good' : 'warn'}>
-                  {data.summary.contextEngine || '未配置'}
-                </Pill>
-              </div>
-              <p>
-                Memory Provider {data.summary.memoryProvider || 'builtin-file'} · 用户画像 {String(data.summary.userProfileEnabled ?? false)} ·
-                流式输出 {String(data.summary.streamingEnabled ?? false)}
-              </p>
-            </section>
-          </div>
-          {warnings.length > 0 ? (
-            <div className="warning-stack">
-              {warnings.map((warning) => (
-                <div className="warning-item" key={warning}>
-                  {warning}
+      {activeTab === 'overview' ? (
+        <>
+          <Panel
+            title="推荐下一步"
+            subtitle="先把模型、终端、工具和记忆这几件高频事项处理好，再决定是否要进入文件编辑或高级接管。"
+          >
+            <div className="list-stack">
+              <div className="list-card">
+                <div className="list-card-title">
+                  <strong>先确认模型、Provider 和终端后端</strong>
+                  <Pill tone={modelReady && backendReady ? 'good' : 'warn'}>
+                    {modelReady && backendReady ? '核心已就绪' : '建议先处理'}
+                  </Pill>
                 </div>
+                <p>如果默认模型、provider 或 terminal backend 还没稳定，后面的工具链、记忆链路和消息链路都会变得难判断。</p>
+                <div className="meta-line">
+                  <span>{data.summary.modelProvider || 'provider 未配置'} / {data.summary.modelDefault || 'model 未配置'}</span>
+                  <span>{data.summary.terminalBackend || 'terminal backend 未配置'}</span>
+                </div>
+                <Toolbar>
+                  <Button kind="primary" onClick={() => setActiveTab('files')}>
+                    去文件与保存
+                  </Button>
+                  <Button onClick={() => navigate('profiles')}>
+                    切换实例
+                  </Button>
+                </Toolbar>
+              </div>
+
+              <div className="list-card">
+                <div className="list-card-title">
+                  <strong>保存配置后优先做一次体检</strong>
+                  <Pill tone={configDirty || envDirty ? 'warn' : warnings.length > 0 ? 'warn' : 'good'}>
+                    {configDirty || envDirty ? '有未保存修改' : '可以直接体检'}
+                  </Pill>
+                </div>
+                <p>建议把“改配置”和“看运行态”绑在一起，保存后马上做 `config-check`，这样最容易发现文件态与运行态不一致的问题。</p>
+                <div className="meta-line">
+                  <span>{configDirty || envDirty ? '当前有草稿改动' : '当前文件已同步'}</span>
+                  <span>{lastResultLabel ?? '尚未执行最近一次体检'}</span>
+                </div>
+                <Toolbar>
+                  <Button kind="primary" onClick={() => void runDiagnostic('config-check')} disabled={runningDiagnostic !== null}>
+                    {runningDiagnostic === 'config-check' ? '配置体检中…' : '运行配置体检'}
+                  </Button>
+                  <Button onClick={() => setActiveTab('files')}>
+                    去编辑配置文件
+                  </Button>
+                </Toolbar>
+              </div>
+
+              <div className="list-card">
+                <div className="list-card-title">
+                  <strong>工具、记忆和消息链路分别去对应工作台核对</strong>
+                  <Pill tone={toolingReady && memoryRuntimeReady && snapshot?.gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
+                    {toolingReady && memoryRuntimeReady && snapshot?.gateway?.gatewayState === 'running' ? '闭环较完整' : '仍需交叉核对'}
+                  </Pill>
+                </div>
+                <p>配置中心只负责总开关与核心参数，技能、扩展、记忆和 Gateway 的细节建议去对应工作台查看，避免把所有复杂度都堆在一个页面里。</p>
+                <div className="meta-line">
+                  <span>{data.summary.toolsets.length} 个 toolset / {enabledToolCount(extensions)} 个运行态 tools</span>
+                  <span>{extensions?.memoryRuntime.provider || 'memory runtime 未读取'} / {snapshot?.gateway?.gatewayState ?? 'gateway 未检测到'}</span>
+                </div>
+                <Toolbar>
+                  <Button kind="primary" onClick={() => navigate('extensions')}>
+                    查看扩展与工具
+                  </Button>
+                  <Button onClick={() => navigate('memory')}>
+                    查看记忆与 Provider
+                  </Button>
+                  <Button onClick={() => navigate('gateway')}>
+                    查看 Gateway
+                  </Button>
+                </Toolbar>
+              </div>
+            </div>
+          </Panel>
+
+          <Panel title="当前判断" subtitle="把核心配置状态收成摘要，新手先看这里就能知道现在先修什么。">
+            <div className="health-grid">
+              <section className="health-card">
+                <div className="health-card-header">
+                  <strong>Provider / Model</strong>
+                  <Pill tone={modelReady ? 'good' : 'warn'}>
+                    {modelReady ? '已就绪' : '缺失'}
+                  </Pill>
+                </div>
+                <p>{data.summary.modelProvider || '未配置 provider'} / {data.summary.modelDefault || '未配置 model'}</p>
+              </section>
+              <section className="health-card">
+                <div className="health-card-header">
+                  <strong>Terminal Backend</strong>
+                  <Pill tone={backendReady ? 'good' : 'warn'}>
+                    {data.summary.terminalBackend || '未配置'}
+                  </Pill>
+                </div>
+                <p>{data.summary.terminalCwd || '当前未声明工作目录，工具执行上下文可能不稳定。'}</p>
+              </section>
+              <section className="health-card">
+                <div className="health-card-header">
+                  <strong>Toolsets / Tools</strong>
+                  <Pill tone={toolingReady ? 'good' : 'warn'}>
+                    {enabledToolCount(extensions)}/{totalToolCount(extensions)}
+                  </Pill>
+                </div>
+                <p>{data.summary.toolsets.join(', ') || '当前没有配置 toolsets。'}</p>
+              </section>
+              <section className="health-card">
+                <div className="health-card-header">
+                  <strong>Context / Memory</strong>
+                  <Pill tone={data.summary.contextEngine && memoryRuntimeReady ? 'good' : 'warn'}>
+                    {data.summary.contextEngine || '未配置'}
+                  </Pill>
+                </div>
+                <p>
+                  Memory Provider {data.summary.memoryProvider || 'builtin-file'} · 用户画像 {String(data.summary.userProfileEnabled ?? false)} ·
+                  Gateway {snapshot?.gateway?.gatewayState ?? '未检测到'}
+                </p>
+              </section>
+            </div>
+            {overviewWarnings.length > 0 ? (
+              <>
+                <div className="warning-stack">
+                  {overviewWarnings.map((warning) => (
+                    <div className="warning-item" key={warning}>
+                      {warning}
+                    </div>
+                  ))}
+                </div>
+                {remainingWarningCount > 0 ? (
+                  <p className="helper-text top-gap">其余 {remainingWarningCount} 条提醒继续收在“文件与保存”和“高级接管”里。</p>
+                ) : null}
+              </>
+            ) : (
+              <EmptyState title="配置较完整" description="当前没有明显的运行态配置风险，可以继续去技能页或诊断页验证闭环。" />
+            )}
+          </Panel>
+
+          <Panel
+            title="运行姿态与分流"
+            subtitle="这里比首页多带了扩展、cron 和技能上下文，更适合判断这个 profile 的真实能力编排是否闭环。"
+          >
+            <RuntimePostureView posture={posture} navigate={navigate} />
+          </Panel>
+
+          <Panel title="常用体检" subtitle="把最常用的四类体检收在这里，复杂接管动作继续留在高级页。">
+            <div className="workbench-grid">
+              {workbenchCommands.map((command) => (
+                <section className="action-card" key={command.key}>
+                  <div className="action-card-header">
+                    <div>
+                      <p className="eyebrow">{command.scope === 'capability' ? 'Capability' : 'Runtime'}</p>
+                      <h3 className="action-card-title">{command.label}</h3>
+                    </div>
+                    <Pill tone={command.kind === 'primary' ? 'good' : 'neutral'}>{command.key}</Pill>
+                  </div>
+                  <p className="action-card-copy">{command.description}</p>
+                  <p className="helper-text">{command.cli}</p>
+                  <Toolbar>
+                    <Button
+                      kind={command.kind}
+                      onClick={() => void runDiagnostic(command.key)}
+                      disabled={runningDiagnostic !== null}
+                    >
+                      {runningDiagnostic === command.key ? `${command.label}…` : `执行 ${command.label}`}
+                    </Button>
+                    <Button onClick={() => navigate(command.relatedPage)}>进入相关页</Button>
+                  </Toolbar>
+                </section>
               ))}
             </div>
-          ) : (
-            <EmptyState title="配置较完整" description="当前没有明显的运行态配置风险，可以继续去技能页或诊断页验证闭环。" />
-          )}
-        </Panel>
+            <p className="helper-text">
+              推荐顺序：保存配置后先做 `config-check`，再看 `memory-status` 和 `gateway-status`，如果仍不清楚就执行 `doctor`。
+            </p>
+          </Panel>
+        </>
+      ) : null}
 
-        <Panel title="校验与修复工作台" subtitle="治理工作台思路，把保存、体检、验证和跳转收成一条顺手路径。">
-          <div className="workbench-grid">
-            {workbenchCommands.map((command) => (
-              <section className="action-card" key={command.key}>
-                <div className="action-card-header">
-                  <div>
-                    <p className="eyebrow">{command.scope === 'capability' ? 'Capability' : 'Runtime'}</p>
-                    <h3 className="action-card-title">{command.label}</h3>
-                  </div>
-                  <Pill tone={command.kind === 'primary' ? 'good' : 'neutral'}>{command.key}</Pill>
-                </div>
-                <p className="action-card-copy">{command.description}</p>
-                <p className="helper-text">{command.cli}</p>
+      {activeTab === 'files' ? (
+        <>
+          <Panel
+            title="文件编辑工作区"
+            subtitle="日常配置建议只在这里完成：修改文件、保存、体检，然后再看闭环信号。"
+            aside={(
+              <Toolbar>
+                <Pill tone={configDirty || envDirty ? 'warn' : 'good'}>
+                  {configDirty || envDirty ? '有未保存修改' : '文件已同步'}
+                </Pill>
+                <Button onClick={() => void runDiagnostic('config-check')} disabled={runningDiagnostic !== null}>
+                  {runningDiagnostic === 'config-check' ? '体检中…' : '保存后体检'}
+                </Button>
+              </Toolbar>
+            )}
+          >
+            <div className="detail-list compact">
+              <KeyValueRow label="建议顺序" value="修改文件 → 保存 → 配置体检 → 看闭环信号" />
+              <KeyValueRow label="config.yaml" value={data.configPath} />
+              <KeyValueRow label=".env" value={data.envPath} />
+            </div>
+          </Panel>
+
+          <div className="two-column">
+            <Panel
+              title="config.yaml"
+              aside={(
                 <Toolbar>
-                  <Button
-                    kind={command.kind}
-                    onClick={() => void runDiagnostic(command.key)}
-                    disabled={runningDiagnostic !== null}
-                  >
-                    {runningDiagnostic === command.key ? `${command.label}…` : `执行 ${command.label}`}
+                  {configDirty && <Pill tone="warn">未保存</Pill>}
+                  <Button kind="primary" onClick={() => void saveConfig()} disabled={saving !== null || runningDiagnostic !== null}>
+                    {saving === 'config' ? '保存中…' : '保存 YAML'}
                   </Button>
-                  <Button onClick={() => navigate(command.relatedPage)}>进入相关页</Button>
-                </Toolbar>
-              </section>
-            ))}
-          </div>
-          <p className="helper-text">
-            推荐顺序：保存配置后先做 `config-check`，再看 `memory-status` 和 `gateway-status`，如果仍不清楚就执行 `doctor`。
-          </p>
-        </Panel>
-      </div>
-
-      <div className="two-column wide-left">
-        <Panel
-          title="配置闭环信号"
-          subtitle="看配置与运行态是否一致。"
-          aside={(
-            <Toolbar>
-              <Button onClick={() => void openInFinder(data.hermesHome, 'Hermes Home')}>打开 Home</Button>
-              <Button onClick={() => void openInFinder(data.configPath, 'config.yaml', true)}>定位 config.yaml</Button>
-              <Button onClick={() => void openInFinder(data.envPath, '.env', true)}>定位 .env</Button>
-            </Toolbar>
-          )}
-        >
-          <div className="health-grid">
-            <section className="health-card">
-              <div className="health-card-header">
-                <strong>Memory Runtime</strong>
-                <Pill tone={extensions?.memoryRuntime.provider.includes('none') ? 'warn' : 'good'}>
-                  {extensions?.memoryRuntime.provider || '未读取'}
-                </Pill>
-              </div>
-              <p>配置声明 {data.summary.memoryProvider || 'builtin-file'} · 运行态 {extensions?.memoryRuntime.provider || '未读取'}。</p>
-            </section>
-            <section className="health-card">
-              <div className="health-card-header">
-                <strong>Gateway Delivery</strong>
-                <Pill tone={remoteJobs.length === 0 || snapshot?.gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
-                  {snapshot?.gateway?.gatewayState ?? '未检测到'}
-                </Pill>
-              </div>
-              <p>{remoteJobs.length > 0 ? `当前有 ${remoteJobs.length} 个远端作业依赖 gateway。` : '当前没有依赖 gateway 的远端投递作业。'}</p>
-            </section>
-            <section className="health-card">
-              <div className="health-card-header">
-                <strong>Skills Closure</strong>
-                <Pill tone={skills.length === localRuntimeSkillCount(extensions) ? 'good' : 'warn'}>
-                  {localRuntimeSkillCount(extensions)}/{skills.length}
-                </Pill>
-              </div>
-              <p>CLI 运行态 local skills / 本地目录扫描 skills，用来发现安装态与文件态的偏差。</p>
-            </section>
-            <section className="health-card">
-              <div className="health-card-header">
-                <strong>Plugin Overlay</strong>
-                <Pill tone={pluginsCount(extensions) > 0 ? 'good' : 'neutral'}>
-                  {pluginsCount(extensions)}
-                </Pill>
-              </div>
-              <p>插件数 {pluginsCount(extensions)} · 已启用工具 {enabledToolCount(extensions)} / {totalToolCount(extensions)}。</p>
-            </section>
-          </div>
-        </Panel>
-      </div>
-
-      <Panel title="最近校验输出" subtitle="保留 Hermes 原生命令回显，避免把配置页做成另一个解释器。">
-          {lastResult ? (
-            <div className="result-stack">
-              <div className="detail-list compact">
-                <KeyValueRow label="命令类型" value={lastResultLabel ?? getDiagnosticCommand(lastDiagnostic ?? '')?.label ?? '—'} />
-                <KeyValueRow label="命令" value={lastResult.command} />
-                <KeyValueRow label="退出码" value={lastResult.exitCode} />
-                <KeyValueRow label="结果" value={<Pill tone={lastResult.success ? 'good' : 'bad'}>{lastResult.success ? '成功' : '失败'}</Pill>} />
-              </div>
-              <pre className="code-block">{lastResult.stdout || 'stdout 为空'}</pre>
-              {lastResult.stderr ? <pre className="code-block">{lastResult.stderr}</pre> : null}
-              {lastDiagnostic ? (
-                <Toolbar>
-                  <Button onClick={() => navigate(getDiagnosticCommand(lastDiagnostic)?.relatedPage ?? 'diagnostics')}>进入相关页</Button>
-                </Toolbar>
-              ) : (
-                <Toolbar>
-                  <Button onClick={() => navigate('diagnostics')}>打开诊断页</Button>
+                  <Button onClick={() => void saveConfig(true)} disabled={saving !== null || runningDiagnostic !== null}>
+                    {saving === 'config' ? '保存中…' : '保存并体检'}
+                  </Button>
                 </Toolbar>
               )}
-            </div>
-          ) : (
-            <EmptyState title="尚未执行校验" description="保存后执行 `config-check`，或者直接从上面的工作台触发任一校验动作。" />
-          )}
-          <div className="detail-list compact top-gap">
-            <KeyValueRow label="默认模型" value={data.summary.modelDefault || '—'} />
-            <KeyValueRow label="提供商" value={data.summary.modelProvider || '—'} />
-            <KeyValueRow label="Context Engine" value={data.summary.contextEngine || '—'} />
-            <KeyValueRow label="Toolsets" value={data.summary.toolsets.length ? data.summary.toolsets.join(', ') : '—'} />
+            >
+              <textarea
+                className="editor"
+                value={configYaml}
+                onChange={(event) => setConfigYaml(event.target.value)}
+                spellCheck={false}
+              />
+            </Panel>
+
+            <Panel
+              title=".env"
+              aside={(
+                <Toolbar>
+                  {envDirty && <Pill tone="warn">未保存</Pill>}
+                  <Button kind="primary" onClick={() => void saveEnv()} disabled={saving !== null || runningDiagnostic !== null}>
+                    {saving === 'env' ? '保存中…' : '保存 ENV'}
+                  </Button>
+                  <Button onClick={() => void saveEnv(true)} disabled={saving !== null || runningDiagnostic !== null}>
+                    {saving === 'env' ? '保存中…' : '保存并体检'}
+                  </Button>
+                </Toolbar>
+              )}
+            >
+              <textarea
+                className="editor"
+                value={envFile}
+                onChange={(event) => setEnvFile(event.target.value)}
+                spellCheck={false}
+              />
+            </Panel>
           </div>
-      </Panel>
 
-      <div className="two-column">
-        <Panel
-          title="config.yaml"
-          aside={(
-            <Toolbar>
-              {configDirty && <Pill tone="warn">未保存</Pill>}
-              <Button kind="primary" onClick={() => void saveConfig()} disabled={saving !== null || runningDiagnostic !== null}>
-                {saving === 'config' ? '保存中…' : '保存 YAML'}
-              </Button>
-              <Button onClick={() => void saveConfig(true)} disabled={saving !== null || runningDiagnostic !== null}>
-                {saving === 'config' ? '保存中…' : '保存并体检'}
-              </Button>
-            </Toolbar>
-          )}
-        >
-          <textarea
-            className="editor"
-            value={configYaml}
-            onChange={(event) => setConfigYaml(event.target.value)}
-            spellCheck={false}
-          />
-        </Panel>
+          {closureSignalsSection}
+          {recentResultSection}
+        </>
+      ) : null}
 
-        <Panel
-          title=".env"
-          aside={(
-            <Toolbar>
-              {envDirty && <Pill tone="warn">未保存</Pill>}
-              <Button kind="primary" onClick={() => void saveEnv()} disabled={saving !== null || runningDiagnostic !== null}>
-                {saving === 'env' ? '保存中…' : '保存 ENV'}
-              </Button>
-              <Button onClick={() => void saveEnv(true)} disabled={saving !== null || runningDiagnostic !== null}>
-                {saving === 'env' ? '保存中…' : '保存并体检'}
-              </Button>
-            </Toolbar>
-          )}
-        >
-          <textarea
-            className="editor"
-            value={envFile}
-            onChange={(event) => setEnvFile(event.target.value)}
-            spellCheck={false}
-          />
-        </Panel>
-      </div>
+      {activeTab === 'advanced' ? (
+        <>
+          {advancedActionsSection}
+          {recentResultSection}
+        </>
+      ) : null}
     </div>
   );
 }

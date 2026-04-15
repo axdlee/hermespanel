@@ -14,6 +14,14 @@ import type { DashboardSnapshot, LogReadResult } from '../types';
 import { Button, ContextBanner, EmptyState, KeyValueRow, LoadingState, Panel, Pill, Toolbar } from '../components/ui';
 import { isLogsPageIntent, type LogsPageIntent, type PageProps } from './types';
 
+type LogsTabKey = 'quick' | 'filters' | 'stream';
+
+const LOGS_TABS: Array<{ key: LogsTabKey; label: string; hint: string }> = [
+  { key: 'quick', label: '常用概览', hint: '先判断当前日志焦点，再用预设或联动入口。' },
+  { key: 'filters', label: '精细筛选', hint: '手动调整日志文件、级别、关键词和返回行数。' },
+  { key: 'stream', label: '日志正文', hint: '查看最终返回的日志内容。' },
+];
+
 const LOG_OPTIONS = [
   { key: 'agent', label: 'agent.log' },
   { key: 'errors', label: 'errors.log' },
@@ -82,6 +90,7 @@ export function LogsPage({ notify, profile, navigate, pageIntent, consumePageInt
   const [investigation, setInvestigation] = useState<LogsPageIntent | null>(null);
   const [loading, setLoading] = useState(true);
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const [activeTab, setActiveTab] = useState<LogsTabKey>('quick');
 
   async function loadContext() {
     try {
@@ -155,7 +164,25 @@ export function LogsPage({ notify, profile, navigate, pageIntent, consumePageInt
     notify('info', next ? '已开启 5 秒自动刷新日志。' : '已关闭自动刷新日志。');
   }
 
+  function resetFilters(options?: { quiet?: boolean }) {
+    setAutoRefresh(false);
+    setLogName('agent');
+    setLevel('');
+    setContains('');
+    setLimit('120');
+    if (!options?.quiet) {
+      notify('info', '已恢复默认日志视图。');
+    }
+    void load({
+      logName: 'agent',
+      level: '',
+      contains: '',
+      limit: '120',
+    });
+  }
+
   useEffect(() => {
+    setActiveTab('quick');
     void Promise.all([
       load(),
       loadContext(),
@@ -168,6 +195,7 @@ export function LogsPage({ notify, profile, navigate, pageIntent, consumePageInt
     }
 
     setInvestigation(pageIntent);
+    setActiveTab('stream');
     setAutoRefresh(false);
     setLogName(pageIntent.logName ?? 'agent');
     setLevel(pageIntent.level ?? '');
@@ -232,22 +260,194 @@ export function LogsPage({ notify, profile, navigate, pageIntent, consumePageInt
     focus: logName.startsWith('gateway') ? 'context' : relaySeed.context?.toolNames.length ? 'toolsets' : 'model',
     suggestedCommand: logName.startsWith('gateway') ? 'gateway-status' : 'config-check',
   });
-
-  return (
-    <div className="page-stack">
+  const activeLogOption = LOG_OPTIONS.find((item) => item.key === logName);
+  const lineCount = data?.lines.length ?? 0;
+  const customFilterActive = Boolean(level || contains || limit !== '120' || logName !== 'agent');
+  const filterSummary = [
+    level ? `level=${level}` : null,
+    contains ? `关键词=${contains}` : null,
+    `limit=${limit || '120'}`,
+  ].filter(Boolean).join(' / ');
+  const warnings = Array.from(new Set([
+    logName.startsWith('gateway') && snapshot?.gateway?.gatewayState !== 'running'
+      ? '当前正在看网关日志，但 gateway 还不是 running，异常很可能来自服务未恢复。'
+      : null,
+    lineCount === 0
+      ? '这次筛选没有返回任何日志行，建议先恢复默认视图，或直接应用高频预设重新判断。'
+      : null,
+    customFilterActive
+      ? '当前已启用自定义筛选，排障完成后建议恢复默认视图，避免下次继续带着旧条件查看。'
+      : null,
+    investigation
+      ? '当前日志条件来自其他工作台的下钻线索，适合继续联动到诊断、网关或配置页。'
+      : null,
+  ].filter((item): item is string => Boolean(item))));
+  const overviewWarnings = warnings.slice(0, 4);
+  const remainingWarningCount = Math.max(0, warnings.length - overviewWarnings.length);
+  const quickSection = (
+    <>
       <Panel
-        title="日志查看"
-        subtitle="直接读取 Hermes 本地日志目录，并补上预设、自动刷新和排障联动，方便把日志分析当成日常工作流。"
-        aside={(
-          <Toolbar>
-            <Button onClick={() => void load()} disabled={loading}>
-              {loading ? '读取中…' : '读取'}
-            </Button>
-            <Button kind={autoRefresh ? 'primary' : 'secondary'} onClick={toggleAutoRefresh}>
-              {autoRefresh ? '自动刷新: 开' : '自动刷新: 关'}
-            </Button>
-          </Toolbar>
-        )}
+        title="推荐下一步"
+        subtitle="先锁定当前日志焦点，再决定是直接看正文、应用预设，还是带着线索继续联动排查。"
+      >
+        <div className="list-stack">
+          <div className="list-card">
+            <div className="list-card-title">
+              <strong>先确认当前看的是什么日志</strong>
+              <Pill tone={lineCount > 0 ? 'good' : 'warn'}>{activeLogOption?.label ?? logName}</Pill>
+            </div>
+            <p>新手先看当前文件、关键词和返回行数，避免还没锁定对象就直接去改配置或跑命令。</p>
+            <div className="meta-line">
+              <span>{data?.filePath ?? '尚未读取日志文件路径'}</span>
+              <span>{lineCount} 行返回结果</span>
+            </div>
+            <Toolbar>
+              <Button kind="primary" onClick={() => setActiveTab('stream')}>
+                打开日志正文
+              </Button>
+              <Button onClick={() => setActiveTab('filters')}>
+                去精细筛选
+              </Button>
+            </Toolbar>
+          </div>
+
+          <div className="list-card">
+            <div className="list-card-title">
+              <strong>优先用高频预设，不必每次都手工筛选</strong>
+              <Pill tone={customFilterActive ? 'warn' : 'good'}>
+                {customFilterActive ? '当前为自定义条件' : '当前为默认视图'}
+              </Pill>
+            </div>
+            <p>拿不准该看哪份日志时，先从网关错误、Provider 异常或工具异常这些高频入口开始。</p>
+            <div className="meta-line">
+              <span>{filterSummary || '默认过滤条件'}</span>
+              <span>{autoRefresh ? '自动刷新开启' : '自动刷新关闭'}</span>
+            </div>
+            <Toolbar>
+              <Button
+                kind="primary"
+                onClick={() => {
+                  applyPreset('gateway-error');
+                  setActiveTab('stream');
+                }}
+              >
+                看网关错误
+              </Button>
+              <Button
+                onClick={() => {
+                  applyPreset('provider-error');
+                  setActiveTab('stream');
+                }}
+              >
+                看 Provider 异常
+              </Button>
+              <Button onClick={() => resetFilters()}>
+                恢复默认视图
+              </Button>
+            </Toolbar>
+          </div>
+
+          <div className="list-card">
+            <div className="list-card-title">
+              <strong>日志别孤立看，必要时直接带着线索下钻</strong>
+              <Pill tone={investigation ? 'warn' : 'neutral'}>
+                {investigation ? '带上下文继续排查' : '常用联动'}
+              </Pill>
+            </div>
+            <p>日志只负责暴露症状，真正修复通常还要回到诊断、网关、扩展或配置中心继续核对。</p>
+            <div className="meta-line">
+              <span>{investigation?.headline ?? '未带入额外下钻上下文'}</span>
+              <span>{snapshot?.gateway?.gatewayState === 'running' ? 'Gateway 运行中' : 'Gateway 待确认'}</span>
+            </div>
+            <Toolbar>
+              <Button kind="primary" onClick={() => navigate('diagnostics', diagnosticsIntent)}>
+                进入诊断页
+              </Button>
+              <Button onClick={() => navigate('gateway', gatewayIntent)}>
+                进入网关页
+              </Button>
+              <Button onClick={() => navigate('config', configIntent)}>
+                进入配置页
+              </Button>
+              <Button onClick={() => navigate('extensions', extensionsIntent)}>
+                进入扩展页
+              </Button>
+            </Toolbar>
+          </div>
+        </div>
+      </Panel>
+
+      <Panel
+        title="当前判断"
+        subtitle="把当前文件、过滤条件、Gateway 状态和结果数量收成摘要，小白先看这里就够了。"
+      >
+        <div className="health-grid">
+          <section className="health-card">
+            <div className="health-card-header">
+              <strong>当前文件</strong>
+              <Pill tone={lineCount > 0 ? 'good' : 'warn'}>{activeLogOption?.label ?? logName}</Pill>
+            </div>
+            <p>{data?.filePath ?? '尚未读取日志文件路径。'}</p>
+          </section>
+          <section className="health-card">
+            <div className="health-card-header">
+              <strong>筛选模式</strong>
+              <Pill tone={customFilterActive ? 'warn' : 'good'}>
+                {customFilterActive ? '自定义' : '默认'}
+              </Pill>
+            </div>
+            <p>{filterSummary || '当前没有额外 level / 关键词 过滤条件。'}</p>
+          </section>
+          <section className="health-card">
+            <div className="health-card-header">
+              <strong>返回结果</strong>
+              <Pill tone={lineCount > 0 ? 'good' : 'warn'}>{lineCount} 行</Pill>
+            </div>
+            <p>{autoRefresh ? '自动刷新已开启，日志会每 5 秒自动更新。' : '当前为手动刷新模式。'}</p>
+          </section>
+          <section className="health-card">
+            <div className="health-card-header">
+              <strong>Gateway</strong>
+              <Pill tone={snapshot?.gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
+                {snapshot?.gateway?.gatewayState ?? '未检测到'}
+              </Pill>
+            </div>
+            <p>最后运行态更新时间：{formatTimestamp(snapshot?.gateway?.updatedAt)}</p>
+          </section>
+        </div>
+        {overviewWarnings.length > 0 ? (
+          <>
+            <div className="warning-stack top-gap">
+              {overviewWarnings.map((warning) => (
+                <div className="warning-item" key={warning}>
+                  {warning}
+                </div>
+              ))}
+            </div>
+            {remainingWarningCount > 0 ? (
+              <p className="helper-text top-gap">其余 {remainingWarningCount} 条提醒继续收在“精细筛选”和“日志正文”里。</p>
+            ) : null}
+          </>
+        ) : null}
+        <Toolbar>
+          <Button onClick={() => logsDir && void openInFinder(logsDir, 'logs 目录')} disabled={!logsDir}>
+            打开 logs
+          </Button>
+          <Button
+            onClick={() => data?.filePath && void openInFinder(data.filePath, '当前日志文件', true)}
+            disabled={!data?.filePath}
+          >
+            定位当前日志
+          </Button>
+          <Button onClick={() => setActiveTab('filters')}>
+            去精细筛选
+          </Button>
+        </Toolbar>
+      </Panel>
+
+      <Panel
+        title="常用预设"
+        subtitle="不确定从哪里看起时，优先从这些高频入口开始，再决定要不要做精细筛选。"
       >
         <div className="workbench-grid">
           {PRESETS.map((preset) => (
@@ -257,17 +457,151 @@ export function LogsPage({ notify, profile, navigate, pageIntent, consumePageInt
                   <p className="eyebrow">Preset</p>
                   <h3 className="action-card-title">{preset.label}</h3>
                 </div>
-                <Pill tone="neutral">{preset.logName}</Pill>
+                <Pill tone={preset.logName === logName ? 'good' : 'neutral'}>{preset.logName}</Pill>
               </div>
               <p className="action-card-copy">
                 {preset.contains ? `包含关键词 ${preset.contains}` : '不附加关键词过滤'}，默认读取 {preset.limit} 行。
               </p>
               <Toolbar>
-                <Button onClick={() => applyPreset(preset.key)}>应用预设</Button>
+                <Button
+                  kind="primary"
+                  onClick={() => {
+                    applyPreset(preset.key);
+                    setActiveTab('stream');
+                  }}
+                >
+                  应用并查看
+                </Button>
+                <Button
+                  onClick={() => {
+                    applyPreset(preset.key);
+                    setActiveTab('filters');
+                  }}
+                >
+                  应用后微调
+                </Button>
               </Toolbar>
             </section>
           ))}
         </div>
+        <p className="helper-text top-gap">
+          建议顺序：先用预设看尾部日志，再根据异常类型跳到诊断页执行 `doctor / gateway-status / config-check / tools-summary`，最后回到配置页修正 provider、context engine、toolsets 或终端后端。
+        </p>
+      </Panel>
+    </>
+  );
+
+  const filtersSection = (
+    <Panel
+      title="精细筛选"
+      subtitle="常用预设不够时，再手动缩小范围。这里适合熟手做二次深挖。"
+      aside={(
+        <Toolbar>
+          <Button onClick={() => void load()} disabled={loading}>
+            {loading ? '读取中…' : '读取'}
+          </Button>
+          <Button onClick={() => resetFilters()}>
+            恢复默认
+          </Button>
+          <Button kind={autoRefresh ? 'primary' : 'secondary'} onClick={toggleAutoRefresh}>
+            {autoRefresh ? '自动刷新: 开' : '自动刷新: 关'}
+          </Button>
+        </Toolbar>
+      )}
+    >
+      <div className="tab-bar tab-bar-dense">
+        {LOG_OPTIONS.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            className={`tab ${logName === item.key ? 'active' : ''}`}
+            onClick={() => setLogName(item.key)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+
+      <Toolbar>
+        <input className="search-input narrow" placeholder="level" value={level} onChange={(event) => setLevel(event.target.value)} />
+        <input className="search-input" placeholder="包含关键词" value={contains} onChange={(event) => setContains(event.target.value)} />
+        <input className="search-input tiny" placeholder="120" value={limit} onChange={(event) => setLimit(event.target.value)} />
+        <Button
+          kind="primary"
+          onClick={() => {
+            void load();
+            setActiveTab('stream');
+          }}
+          disabled={loading}
+        >
+          应用筛选
+        </Button>
+      </Toolbar>
+
+      <div className="detail-list">
+        <KeyValueRow label="当前文件" value={logName} />
+        <KeyValueRow label="日志目录" value={logsDir || '—'} />
+        <KeyValueRow label="level" value={level || '未设置'} />
+        <KeyValueRow label="contains" value={contains || '未设置'} />
+        <KeyValueRow label="limit" value={limit || '120'} />
+        <KeyValueRow label="最后运行态更新时间" value={formatTimestamp(snapshot?.gateway?.updatedAt)} />
+      </div>
+    </Panel>
+  );
+
+  const streamSection = (
+    <Panel
+      title="日志正文"
+      subtitle="这里只显示当前筛选条件下的最终返回内容，修改条件请回到“精细筛选”。"
+      aside={(
+        <Toolbar>
+          <Button onClick={() => setActiveTab('filters')}>
+            调整筛选
+          </Button>
+          <Button onClick={() => resetFilters()}>
+            恢复默认
+          </Button>
+        </Toolbar>
+      )}
+    >
+      {data ? (
+        <>
+          <div className="detail-list compact">
+            <div className="key-value-row"><span>文件</span><strong>{data.filePath}</strong></div>
+            <div className="key-value-row"><span>返回行数</span><strong>{data.lines.length}</strong></div>
+            <div className="key-value-row"><span>level</span><strong>{level || '—'}</strong></div>
+            <div className="key-value-row"><span>contains</span><strong>{contains || '—'}</strong></div>
+          </div>
+          <pre className="code-block tall">{data.lines.join('\n') || '没有匹配到日志行。'}</pre>
+        </>
+      ) : (
+        <EmptyState title="暂无日志" description="点击上方“读取”开始加载日志。" />
+      )}
+    </Panel>
+  );
+
+  return (
+    <div className="page-stack">
+      <Panel
+        title="日志工作台"
+        subtitle="先用常用概览锁定问题方向，复杂过滤和正文查看都已经收进后面的子模块。"
+        aside={(
+          <Toolbar>
+            <Button onClick={() => void load()} disabled={loading}>
+              {loading ? '读取中…' : '读取'}
+            </Button>
+            <Button onClick={() => resetFilters()}>
+              恢复默认
+            </Button>
+            <Button kind={autoRefresh ? 'primary' : 'secondary'} onClick={toggleAutoRefresh}>
+              {autoRefresh ? '自动刷新: 开' : '自动刷新: 关'}
+            </Button>
+          </Toolbar>
+        )}
+      >
+        <p className="helper-text">
+          默认顺序：先看“常用概览”里的当前判断和推荐动作，再决定是不是要进入“精细筛选”，最后才看“日志正文”里的原始输出。
+        </p>
       </Panel>
 
       {investigation ? (
@@ -284,6 +618,7 @@ export function LogsPage({ notify, profile, navigate, pageIntent, consumePageInt
           )}
           actions={(
             <Toolbar>
+              <Button onClick={() => setActiveTab('stream')}>打开日志正文</Button>
               <Button onClick={() => setInvestigation(null)}>清除上下文</Button>
               <Button onClick={() => navigate('sessions')}>回到会话页</Button>
               <Button onClick={() => navigate('diagnostics', diagnosticsIntent)}>继续做诊断</Button>
@@ -294,81 +629,23 @@ export function LogsPage({ notify, profile, navigate, pageIntent, consumePageInt
         />
       ) : null}
 
-      <div className="two-column wide-left">
-        <Panel
-          title="过滤条件"
-          subtitle="适合手动缩小范围。预设更适合快速排障，手动过滤更适合二次深挖。"
-          aside={(
-            <Toolbar>
-              <select className="select-input" value={logName} onChange={(event) => setLogName(event.target.value)}>
-                {LOG_OPTIONS.map((item) => (
-                  <option key={item.key} value={item.key}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-              <input className="search-input narrow" placeholder="level" value={level} onChange={(event) => setLevel(event.target.value)} />
-              <input className="search-input" placeholder="包含关键词" value={contains} onChange={(event) => setContains(event.target.value)} />
-              <input className="search-input tiny" placeholder="120" value={limit} onChange={(event) => setLimit(event.target.value)} />
-            </Toolbar>
-          )}
-        >
-          <div className="detail-list">
-            <KeyValueRow label="当前 Profile" value={profile} />
-            <KeyValueRow
-              label="Gateway"
-              value={(
-                <Pill tone={snapshot?.gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
-                  {snapshot?.gateway?.gatewayState ?? '未检测到'}
-                </Pill>
-              )}
-            />
-            <KeyValueRow label="日志目录" value={logsDir || '—'} />
-            <KeyValueRow label="文件" value={data?.filePath ?? '—'} />
-            <KeyValueRow label="返回行数" value={data?.lines.length ?? 0} />
-            <KeyValueRow label="最后运行态更新时间" value={formatTimestamp(snapshot?.gateway?.updatedAt)} />
-          </div>
-        </Panel>
-
-        <Panel
-          title="联动入口"
-          subtitle="日志不该孤立分析，必要时直接跳到诊断、网关或配置页面继续排查。"
-        >
-          <Toolbar>
-            <Button onClick={() => logsDir && void openInFinder(logsDir, 'logs 目录')} disabled={!logsDir}>
-              打开 logs
-            </Button>
-            <Button
-              onClick={() => data?.filePath && void openInFinder(data.filePath, '当前日志文件', true)}
-              disabled={!data?.filePath}
-            >
-              定位当前日志
-            </Button>
-            <Button onClick={() => navigate('diagnostics', diagnosticsIntent)}>进入诊断页</Button>
-            <Button onClick={() => navigate('gateway', gatewayIntent)}>进入网关页</Button>
-            <Button onClick={() => navigate('extensions', extensionsIntent)}>进入扩展页</Button>
-            <Button onClick={() => navigate('config', configIntent)}>进入配置页</Button>
-            <Button onClick={() => navigate('dashboard')}>回到工作台</Button>
-          </Toolbar>
-          <p className="helper-text">
-            建议顺序：先用预设看尾部日志，再根据异常类型跳到诊断页执行 `doctor / gateway-status / config-check / tools-summary`，最后回到配置页修正 provider、context engine、toolsets 或终端后端。
-          </p>
-        </Panel>
+      <div className="tab-bar">
+        {LOGS_TABS.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            className={`tab ${activeTab === tab.key ? 'active' : ''}`}
+            onClick={() => setActiveTab(tab.key)}
+            title={tab.hint}
+          >
+            {tab.label}
+            {tab.key === 'filters' && (level || contains || limit !== '120' || logName !== 'agent') ? <span className="tab-dirty-dot" /> : null}
+            {tab.key === 'stream' && data?.lines.length ? <span className="tab-dirty-dot" /> : null}
+          </button>
+        ))}
       </div>
 
-      <Panel title="日志内容">
-        {data ? (
-          <>
-            <div className="detail-list compact">
-              <div className="key-value-row"><span>文件</span><strong>{data.filePath}</strong></div>
-              <div className="key-value-row"><span>返回行数</span><strong>{data.lines.length}</strong></div>
-            </div>
-            <pre className="code-block tall">{data.lines.join('\n') || '没有匹配到日志行。'}</pre>
-          </>
-        ) : (
-          <EmptyState title="暂无日志" description="点击上方“读取”开始加载日志。" />
-        )}
-      </Panel>
+      {activeTab === 'quick' ? quickSection : activeTab === 'filters' ? filtersSection : streamSection}
     </div>
   );
 }

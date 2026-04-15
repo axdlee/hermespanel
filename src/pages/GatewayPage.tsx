@@ -26,6 +26,14 @@ import {
 import type { CommandRunResult, CronJobsSnapshot, DashboardSnapshot, InstallationSnapshot } from '../types';
 import { isGatewayPageIntent, type GatewayPageIntent, type PageProps } from './types';
 
+type GatewayTabKey = 'overview' | 'delivery' | 'repair';
+
+const GATEWAY_TABS: Array<{ key: GatewayTabKey; label: string; hint: string }> = [
+  { key: 'overview', label: '常用总览', hint: '先看当前链路判断和最常走的排查入口。' },
+  { key: 'delivery', label: '平台与远端', hint: '查看平台状态和远端投递作业。' },
+  { key: 'repair', label: '修复与材料', hint: '集中处理 service 接管、CLI 诊断与原始输出。' },
+];
+
 export function GatewayPage({ notify, profile, navigate, pageIntent, consumePageIntent }: PageProps) {
   const [data, setData] = useState<DashboardSnapshot | null>(null);
   const [installation, setInstallation] = useState<InstallationSnapshot | null>(null);
@@ -36,6 +44,7 @@ export function GatewayPage({ notify, profile, navigate, pageIntent, consumePage
   const [investigation, setInvestigation] = useState<GatewayPageIntent | null>(null);
   const [loading, setLoading] = useState(true);
   const [runningCommand, setRunningCommand] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<GatewayTabKey>('overview');
 
   async function load() {
     setLoading(true);
@@ -130,6 +139,7 @@ export function GatewayPage({ notify, profile, navigate, pageIntent, consumePage
     setDiagnostic(null);
     setLastKind(null);
     setLastActionLabel(null);
+    setActiveTab('overview');
     void Promise.all([
       load(),
       runDiagnostic('gateway-status', { silent: true, refresh: false }),
@@ -142,6 +152,7 @@ export function GatewayPage({ notify, profile, navigate, pageIntent, consumePage
     }
 
     setInvestigation(pageIntent);
+    setActiveTab('overview');
     notify('info', `${pageIntent.headline} 已带入网关编排台。`);
     consumePageIntent();
   }, [consumePageIntent, notify, pageIntent]);
@@ -223,61 +234,242 @@ export function GatewayPage({ notify, profile, navigate, pageIntent, consumePage
   if (!data.config.contextEngine) {
     warnings.push('当前没有显式声明 context.engine，消息处理链路的上下文组织方式不够清晰。');
   }
+  const overviewWarnings = warnings.slice(0, 4);
+  const remainingWarningCount = Math.max(0, warnings.length - overviewWarnings.length);
 
-  return (
-    <div className="page-stack">
-      <div className="stat-cards">
-        <StatCard
-          label="Gateway"
-          value={gatewayRunning ? '运行中' : '待启动'}
-          meta={gatewayRunning ? `PID ${gateway?.pid ?? '—'} · ${gateway?.activeAgents ?? 0} 个活跃 Agent` : '当前还没有看到运行中的 gateway 状态。'}
-          tone={gatewayRunning ? 'running' : 'warning'}
-        />
-        <StatCard
-          label="Platforms"
-          value={platforms.length > 0 ? `${connectedPlatforms}/${platforms.length}` : '暂无平台'}
-          meta={unhealthyPlatforms.length === 0 ? '当前没有明显的平台连接异常。' : `异常平台 ${unhealthyPlatforms.length} 个`}
-          tone={unhealthyPlatforms.length === 0 ? 'running' : 'warning'}
-        />
-        <StatCard
-          label="Delivery"
-          value={remoteJobs.length > 0 ? `${remoteJobs.length} 个远端作业` : '本地优先'}
-          meta={failingRemoteJobs.length > 0 ? `${failingRemoteJobs.length} 个作业已有交付异常。` : '暂未发现远端投递失败。'}
-          tone={failingRemoteJobs.length > 0 ? 'warning' : 'running'}
-        />
-        <StatCard
-          label="Context"
-          value={data.config.contextEngine || '未配置'}
-          meta={`${data.config.modelProvider || 'provider 未配置'} / ${data.config.modelDefault || 'model 未配置'}`}
-          tone={data.config.contextEngine ? 'running' : 'warning'}
-        />
-        <StatCard
-          label="State File"
-          value={installation.gatewayStateExists ? 'gateway_state.json 已就绪' : '状态文件缺失'}
-          meta={gatewayStatePath}
-          tone={installation.gatewayStateExists ? 'running' : 'warning'}
-        />
-        <StatCard
-          label="Runtime"
-          value={gateway?.updatedAt ? formatTimestamp(gateway.updatedAt) : '尚无更新时间'}
-          meta={`restart_requested ${String(gateway?.restartRequested ?? false)} · logs ${logsDir}`}
-        />
-      </div>
+  const overviewSection = (
+    <div className="two-column wide-left">
+      <Panel
+        title="当前判断"
+        subtitle="先看 Hermes gateway 的运行态、平台连接、作业依赖和上下游配置是不是对上。"
+      >
+        <div className="health-grid">
+          <section className="health-card">
+            <div className="health-card-header">
+              <strong>Service State</strong>
+              <Pill tone={gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
+                {gateway?.gatewayState ?? '未检测到'}
+              </Pill>
+            </div>
+            <p>PID {gateway?.pid ?? '—'} · 更新时间 {formatTimestamp(gateway?.updatedAt)} · restart_requested {String(gateway?.restartRequested ?? false)}</p>
+          </section>
+          <section className="health-card">
+            <div className="health-card-header">
+              <strong>Platform Connectivity</strong>
+              <Pill tone={unhealthyPlatforms.length === 0 ? 'good' : 'bad'}>
+                {platforms.length ? `${connectedPlatforms}/${platforms.length} 已连接` : '暂无平台'}
+              </Pill>
+            </div>
+            <p>{unhealthyPlatforms.length === 0 ? '当前没有明显平台异常。' : `异常平台：${unhealthyPlatforms.map((item) => item.name).join('、')}`}</p>
+          </section>
+          <section className="health-card">
+            <div className="health-card-header">
+              <strong>Delivery Dependency</strong>
+              <Pill tone={remoteJobs.length === 0 || gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
+                {remoteJobs.length ? `${remoteJobs.length} 个远端作业` : '本地优先'}
+              </Pill>
+            </div>
+            <p>{failingRemoteJobs.length === 0 ? '当前没有明显的远端交付失败。' : `${failingRemoteJobs.length} 个远端作业已经出现交付异常。`}</p>
+          </section>
+          <section className="health-card">
+            <div className="health-card-header">
+              <strong>Runtime Composition</strong>
+              <Pill tone={data.config.contextEngine ? 'good' : 'warn'}>
+                {data.config.contextEngine || '未配置'}
+              </Pill>
+            </div>
+            <p>{data.config.modelProvider || '未配置 provider'} / {data.config.modelDefault || '未配置 model'} · Memory {data.config.memoryProvider || 'builtin-file'}</p>
+          </section>
+        </div>
+        {overviewWarnings.length > 0 ? (
+          <>
+            <div className="warning-stack">
+              {overviewWarnings.map((warning) => (
+                <div className="warning-item" key={warning}>
+                  {warning}
+                </div>
+              ))}
+            </div>
+            {remainingWarningCount > 0 ? (
+              <p className="helper-text top-gap">其余 {remainingWarningCount} 条提醒继续收在“平台与远端”和“修复与材料”里。</p>
+            ) : null}
+          </>
+        ) : (
+          <EmptyState title="网关状态稳定" description="当前没有看到明显的网关结构性风险，可以继续看平台细节或远端作业映射。" />
+        )}
+      </Panel>
 
-      <div className="quick-actions">
-        <Button kind="primary" onClick={() => void runAction(gatewayRunning ? 'restart' : 'start')} disabled={runningCommand !== null || !installation.binaryFound}>
-          {gatewayRunning ? '重启 Gateway' : '启动 Gateway'}
-        </Button>
-        <Button kind="danger" onClick={() => void runAction('stop')} disabled={runningCommand !== null || !installation.binaryFound}>
-          停止 Gateway
-        </Button>
-        <Button onClick={() => void runDiagnostic('gateway-status')} disabled={runningCommand !== null || !installation.binaryFound}>
-          网关状态
-        </Button>
-        <Button onClick={() => navigate('logs', logsIntent)}>查看日志</Button>
-        <Button onClick={() => void load()}>刷新状态</Button>
-      </div>
+      <Panel
+        title="推荐下一步"
+        subtitle="默认只保留最常走的排查路径，其他低频接管动作都后置到“修复与材料”。"
+      >
+        <div className="list-stack">
+          <div className="list-card">
+            <div className="list-card-title">
+              <strong>先看平台连接状态</strong>
+              <Pill tone={unhealthyPlatforms.length === 0 ? 'good' : 'warn'}>
+                {platforms.length > 0 ? `${connectedPlatforms}/${platforms.length}` : '暂无平台'}
+              </Pill>
+            </div>
+            <p>先看平台是否连通、最近更新时间和错误信息，再决定是否继续做深检。</p>
+            <div className="meta-line">
+              <span>{unhealthyPlatforms.length === 0 ? '当前没有异常平台' : `异常平台 ${unhealthyPlatforms.length} 个`}</span>
+              <span>{platforms[0]?.updatedAt ? formatTimestamp(platforms[0].updatedAt) : '尚无平台更新时间'}</span>
+            </div>
+            <Toolbar>
+              <Button kind="primary" onClick={() => setActiveTab('delivery')}>打开平台与远端</Button>
+              <Button onClick={() => navigate('logs', logsIntent)}>查看日志</Button>
+            </Toolbar>
+          </div>
 
+          <div className="list-card">
+            <div className="list-card-title">
+              <strong>再看远端投递作业</strong>
+              <Pill tone={remoteJobs.length === 0 ? 'neutral' : failingRemoteJobs.length > 0 ? 'warn' : 'good'}>
+                {remoteJobs.length > 0 ? `${remoteJobs.length} 个` : '本地优先'}
+              </Pill>
+            </div>
+            <p>把依赖 gateway 的作业单独拉出来看，更容易判断异常是在作业本身还是在消息链路。</p>
+            <div className="meta-line">
+              <span>{failingRemoteJobs.length > 0 ? `${failingRemoteJobs.length} 个作业异常` : '当前没有交付失败'}</span>
+              <span>{remoteJobs[0]?.nextRunAt ? `下次 ${formatTimestamp(remoteJobs[0].nextRunAt)}` : '暂无远端调度'}</span>
+            </div>
+            <Toolbar>
+              <Button kind="primary" onClick={() => setActiveTab('delivery')}>查看远端作业</Button>
+              <Button onClick={() => navigate('cron')}>进入 Cron 页</Button>
+            </Toolbar>
+          </div>
+
+          <div className="list-card">
+            <div className="list-card-title">
+              <strong>修复与诊断输出放到后面集中处理</strong>
+              <Pill tone={warnings.length > 0 ? 'warn' : 'good'}>
+                {warnings.length > 0 ? `${warnings.length} 条提醒` : '当前稳定'}
+              </Pill>
+            </div>
+            <p>Service 接管、CLI 诊断、状态文件和原始输出都已经收进修复层，不再默认铺满页面。</p>
+            <div className="meta-line">
+              <span>{diagnostic ? (diagnostic.success ? '最近诊断成功' : '最近诊断失败') : '暂未执行诊断'}</span>
+              <span>{lastActionLabel ?? '尚无最近动作'}</span>
+            </div>
+            <Toolbar>
+              <Button kind="primary" onClick={() => setActiveTab('repair')}>打开修复与材料</Button>
+              <Button onClick={() => navigate('diagnostics', diagnosticsIntent)}>进入诊断页</Button>
+            </Toolbar>
+          </div>
+
+          <div className="list-card">
+            <div className="list-card-title">
+              <strong>最后再核对上下游配置</strong>
+              <Pill tone={data.config.contextEngine ? 'good' : 'warn'}>
+                {data.config.contextEngine || '未配置'}
+              </Pill>
+            </div>
+            <p>gateway 不只是一个进程，还要看 provider、context engine、tools、skills 和投递配置是不是一起对上。</p>
+            <div className="meta-line">
+              <span>{data.config.modelProvider || 'provider 未配置'}</span>
+              <span>{data.config.modelDefault || 'model 未配置'}</span>
+            </div>
+            <Toolbar>
+              <Button kind="primary" onClick={() => navigate('config', configIntent)}>核对配置</Button>
+              <Button onClick={() => navigate('extensions', extensionsIntent)}>核对扩展</Button>
+            </Toolbar>
+          </div>
+        </div>
+      </Panel>
+    </div>
+  );
+
+  const deliverySection = (
+    <div className="two-column wide-left">
+      <Panel title="平台连接" subtitle="按平台看连接状态、最后更新时间和错误信息。">
+        {platforms.length ? (
+          <div className="list-stack">
+            {platforms.map((platform) => (
+              <div className="list-card" key={platform.name}>
+                <div className="list-card-title">
+                  <strong>{platform.name}</strong>
+                  <Pill tone={platformTone(platform.state)}>
+                    {platform.state}
+                  </Pill>
+                </div>
+                <p>{platform.errorMessage || '当前没有额外错误信息。'}</p>
+                <div className="meta-line">
+                  <span>{platform.name}</span>
+                  <span>{formatTimestamp(platform.updatedAt)}</span>
+                </div>
+                <Toolbar>
+                  <Button
+                    onClick={() => navigate('logs', buildLogsDrilldownIntent(relaySeed, {
+                      description: `查看平台 ${platform.name} 关联的网关日志。`,
+                      logName: 'gateway.error',
+                      contains: platform.name,
+                      limit: '160',
+                    }))}
+                  >
+                    查看日志
+                  </Button>
+                  <Button
+                    onClick={() => navigate('diagnostics', buildDiagnosticsDrilldownIntent(relaySeed, {
+                      description: `围绕平台 ${platform.name} 继续做网关深检。`,
+                      suggestedCommand: 'gateway-status-deep',
+                      logName: 'gateway.error',
+                    }))}
+                  >
+                    继续诊断
+                  </Button>
+                </Toolbar>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="暂无平台状态" description="启动并配置消息平台后，这里会显示各平台连接状态。" />
+        )}
+      </Panel>
+
+      <Panel title="远端投递作业" subtitle="把依赖 gateway 的 cron 作业拉出来看，更容易判断异常究竟是作业问题还是网关问题。">
+        {remoteJobs.length ? (
+          <div className="list-stack">
+            {remoteJobs.map((job) => (
+              <div className="list-card" key={job.id}>
+                <div className="list-card-title">
+                  <strong>{job.name}</strong>
+                  <div className="pill-row">
+                    <Pill tone={cronTone(job)}>{job.state}</Pill>
+                    <Pill tone="warn">{job.deliver}</Pill>
+                  </div>
+                </div>
+                <p>{job.lastDeliveryError || job.lastError || truncate(job.prompt || '无 prompt', 132)}</p>
+                <div className="meta-line">
+                  <span>{job.id}</span>
+                  <span>下次 {formatTimestamp(job.nextRunAt)}</span>
+                  <span>最近 {formatTimestamp(job.lastRunAt)}</span>
+                </div>
+                <Toolbar>
+                  <Button
+                    onClick={() => navigate('logs', buildLogsDrilldownIntent(relaySeed, {
+                      description: `查看远端作业 ${job.name} 的交付日志。`,
+                      logName: job.lastDeliveryError || job.lastError ? 'gateway.error' : 'gateway',
+                      contains: job.id,
+                      limit: '160',
+                    }))}
+                  >
+                    查看日志
+                  </Button>
+                  <Button onClick={() => navigate('logs', logsIntent)}>查看网关总日志</Button>
+                </Toolbar>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="暂无远端作业" description="当前 profile 还没有依赖 gateway 的 delivery 作业，或者所有作业都走本地交付。" />
+        )}
+      </Panel>
+    </div>
+  );
+
+  const repairSection = (
+    <>
       <div className="overview-grid">
         <OverviewCard
           title="Service 接管"
@@ -332,8 +524,8 @@ export function GatewayPage({ notify, profile, navigate, pageIntent, consumePage
           meta="先看 gateway_state.json 和 logs，再判断是 service、平台接入还是远端 delivery 本身出了问题。"
           actions={(
             <Toolbar>
-              <Button onClick={() => void openInFinder(gatewayStatePath, 'gateway_state.json', true)} disabled={runningCommand !== null}>定位状态文件</Button>
-              <Button onClick={() => void openInFinder(logsDir, 'logs 目录')} disabled={runningCommand !== null}>打开日志目录</Button>
+              <Button onClick={() => void openInFinder(gatewayStatePath, 'gateway_state.json', true)} disabled={runningCommand !== null || !installation.gatewayStateExists}>定位状态文件</Button>
+              <Button onClick={() => void openInFinder(logsDir, 'logs 目录')} disabled={runningCommand !== null || !installation.logsDirExists}>打开日志目录</Button>
               <Button onClick={() => navigate('logs', logsIntent)}>进入日志页</Button>
               <Button onClick={() => navigate('cron')}>进入 Cron 页</Button>
             </Toolbar>
@@ -353,6 +545,131 @@ export function GatewayPage({ notify, profile, navigate, pageIntent, consumePage
         />
       </div>
 
+      <Panel
+        title="网关诊断工作台"
+        subtitle="只保留 CLI 诊断链路。服务启停和材料入口已经收敛到修复层顶部，不再在别的区域重复露出。"
+      >
+        <div className="workbench-grid">
+          {GATEWAY_DIAGNOSTIC_COMMANDS.map((item) => (
+            <section className="action-card" key={item.key}>
+              <div className="action-card-header">
+                <div>
+                  <p className="eyebrow">CLI</p>
+                  <h3 className="action-card-title">{item.label}</h3>
+                </div>
+                <Pill tone={item.key.includes('deep') ? 'warn' : item.kind === 'primary' ? 'good' : 'neutral'}>
+                  {item.key}
+                </Pill>
+              </div>
+              <p className="action-card-copy">{item.description}</p>
+              <p className="helper-text">{item.cli}</p>
+              <Toolbar>
+                <Button
+                  kind={item.kind}
+                  onClick={() => void runDiagnostic(item.key)}
+                  disabled={runningCommand !== null}
+                >
+                  {runningCommand === `diagnostic:${item.key}` ? `${item.label}…` : `执行 ${item.label}`}
+                </Button>
+                <Button onClick={() => navigate(item.relatedPage, item.relatedPage === 'logs' ? logsIntent : item.relatedPage === 'config' ? configIntent : undefined)}>进入相关页</Button>
+              </Toolbar>
+            </section>
+          ))}
+        </div>
+      </Panel>
+
+      <Panel
+        title="CLI 诊断输出"
+        subtitle="这里保留 Hermes 原生命令结果，方便你对照页面摘要和真实命令输出。"
+        aside={lastCommand ? (
+          <Toolbar>
+            <Button onClick={() => navigate(lastCommand.relatedPage)}>进入相关页</Button>
+          </Toolbar>
+        ) : undefined}
+      >
+        {diagnostic ? (
+          <div className="result-stack">
+            <div className="detail-list compact">
+              <KeyValueRow label="命令类型" value={lastActionLabel ?? lastCommand?.label ?? '网关动作'} />
+              <KeyValueRow label="命令" value={diagnostic.command} />
+              <KeyValueRow label="退出码" value={diagnostic.exitCode} />
+              <KeyValueRow
+                label="结果"
+                value={<Pill tone={diagnostic.success ? 'good' : 'bad'}>{diagnostic.success ? '成功' : '失败'}</Pill>}
+              />
+            </div>
+            <pre className="code-block">{diagnostic.stdout || 'stdout 为空'}</pre>
+            {diagnostic.stderr ? <pre className="code-block">{diagnostic.stderr}</pre> : null}
+          </div>
+        ) : (
+          <EmptyState title="暂无诊断输出" description="点击上方任一网关动作或诊断命令后，这里会展示 Hermes 的原始输出。" />
+        )}
+      </Panel>
+    </>
+  );
+
+  return (
+    <div className="page-stack">
+      <div className="stat-cards">
+        <StatCard
+          label="Gateway"
+          value={gatewayRunning ? '运行中' : '待启动'}
+          meta={gatewayRunning ? `PID ${gateway?.pid ?? '—'} · ${gateway?.activeAgents ?? 0} 个活跃 Agent` : '当前还没有看到运行中的 gateway 状态。'}
+          tone={gatewayRunning ? 'running' : 'warning'}
+        />
+        <StatCard
+          label="Platforms"
+          value={platforms.length > 0 ? `${connectedPlatforms}/${platforms.length}` : '暂无平台'}
+          meta={unhealthyPlatforms.length === 0 ? '当前没有明显的平台连接异常。' : `异常平台 ${unhealthyPlatforms.length} 个`}
+          tone={unhealthyPlatforms.length === 0 ? 'running' : 'warning'}
+        />
+        <StatCard
+          label="Delivery"
+          value={remoteJobs.length > 0 ? `${remoteJobs.length} 个远端作业` : '本地优先'}
+          meta={failingRemoteJobs.length > 0 ? `${failingRemoteJobs.length} 个作业已有交付异常。` : '暂未发现远端投递失败。'}
+          tone={failingRemoteJobs.length > 0 ? 'warning' : 'running'}
+        />
+        <StatCard
+          label="Context"
+          value={data.config.contextEngine || '未配置'}
+          meta={`${data.config.modelProvider || 'provider 未配置'} / ${data.config.modelDefault || 'model 未配置'}`}
+          tone={data.config.contextEngine ? 'running' : 'warning'}
+        />
+        <StatCard
+          label="State File"
+          value={installation.gatewayStateExists ? 'gateway_state.json 已就绪' : '状态文件缺失'}
+          meta={gatewayStatePath}
+          tone={installation.gatewayStateExists ? 'running' : 'warning'}
+        />
+        <StatCard
+          label="Runtime"
+          value={gateway?.updatedAt ? formatTimestamp(gateway.updatedAt) : '尚无更新时间'}
+          meta={`restart_requested ${String(gateway?.restartRequested ?? false)} · logs ${logsDir}`}
+        />
+      </div>
+
+      <Panel
+        title="网关编排台"
+        subtitle="先看常用总览里的当前判断和推荐动作，平台细节与修复材料都已经后置。"
+        aside={(
+          <Toolbar>
+            <Button kind="primary" onClick={() => void runAction(gatewayRunning ? 'restart' : 'start')} disabled={runningCommand !== null || !installation.binaryFound}>
+              {gatewayRunning ? '重启 Gateway' : '启动 Gateway'}
+            </Button>
+            <Button onClick={() => void runDiagnostic('gateway-status')} disabled={runningCommand !== null || !installation.binaryFound}>
+              网关状态
+            </Button>
+            <Button onClick={() => void load()} disabled={runningCommand !== null}>
+              刷新状态
+            </Button>
+          </Toolbar>
+        )}
+      >
+        <p className="helper-text">
+          默认顺序：先看“常用总览”的链路判断，再去“平台与远端”核对平台或作业，最后才进入“修复与材料”处理 service 接管和原始输出。
+        </p>
+      </Panel>
+
       {investigation ? (
         <ContextBanner
           label="Session Drilldown"
@@ -369,218 +686,31 @@ export function GatewayPage({ notify, profile, navigate, pageIntent, consumePage
               <Button kind="primary" onClick={() => void runDiagnostic('gateway-status')} disabled={runningCommand !== null}>
                 刷新网关状态
               </Button>
+              <Button onClick={() => setActiveTab('repair')}>打开修复层</Button>
               <Button onClick={() => setInvestigation(null)}>清除上下文</Button>
               <Button onClick={() => navigate('logs', logsIntent)}>进入日志页</Button>
-              <Button onClick={() => navigate('diagnostics', diagnosticsIntent)}>进入诊断页</Button>
-              <Button onClick={() => navigate('extensions', extensionsIntent)}>进入扩展页</Button>
             </Toolbar>
           )}
         />
       ) : null}
 
-      <div className="two-column wide-left">
-        <Panel
-          title="运行健康"
-          subtitle="把 Hermes gateway 的运行态、平台连接和作业依赖放在一起看，方便先判断问题大概在哪一层。"
-        >
-          <div className="health-grid">
-            <section className="health-card">
-              <div className="health-card-header">
-                <strong>Service State</strong>
-                <Pill tone={gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
-                  {gateway?.gatewayState ?? '未检测到'}
-                </Pill>
-              </div>
-              <p>PID {gateway?.pid ?? '—'} · 更新时间 {formatTimestamp(gateway?.updatedAt)} · restart_requested {String(gateway?.restartRequested ?? false)}</p>
-            </section>
-            <section className="health-card">
-              <div className="health-card-header">
-                <strong>Platform Connectivity</strong>
-                <Pill tone={unhealthyPlatforms.length === 0 ? 'good' : 'bad'}>
-                  {platforms.length ? `${connectedPlatforms}/${platforms.length} 已连接` : '暂无平台'}
-                </Pill>
-              </div>
-              <p>{unhealthyPlatforms.length === 0 ? '当前没有明显平台异常。' : `异常平台：${unhealthyPlatforms.map((item) => item.name).join('、')}`}</p>
-            </section>
-            <section className="health-card">
-              <div className="health-card-header">
-                <strong>Delivery Dependency</strong>
-                <Pill tone={remoteJobs.length === 0 || gateway?.gatewayState === 'running' ? 'good' : 'warn'}>
-                  {remoteJobs.length ? `${remoteJobs.length} 个远端作业` : '本地优先'}
-                </Pill>
-              </div>
-              <p>{failingRemoteJobs.length === 0 ? '当前没有明显的远端交付失败。' : `${failingRemoteJobs.length} 个远端作业已经出现交付异常。`}</p>
-            </section>
-            <section className="health-card">
-              <div className="health-card-header">
-                <strong>Runtime Composition</strong>
-                <Pill tone={data.config.contextEngine ? 'good' : 'warn'}>
-                  {data.config.contextEngine || '未配置'}
-                </Pill>
-              </div>
-              <p>{data.config.modelProvider || '未配置 provider'} / {data.config.modelDefault || '未配置 model'} · Memory {data.config.memoryProvider || 'builtin-file'}</p>
-            </section>
-          </div>
-          {warnings.length > 0 ? (
-            <div className="warning-stack">
-              {warnings.map((warning) => (
-                <div className="warning-item" key={warning}>
-                  {warning}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <EmptyState title="网关状态稳定" description="当前没有看到明显的网关结构性风险，可以继续看平台细节或远端作业映射。" />
-          )}
-        </Panel>
-
-        <Panel
-          title="网关诊断工作台"
-          subtitle="只保留 CLI 诊断链路。服务启停和材料入口已经收敛到页面顶部，不再在这里重复露出。"
-        >
-          <div className="workbench-grid">
-            {GATEWAY_DIAGNOSTIC_COMMANDS.map((item) => (
-              <section className="action-card" key={item.key}>
-                <div className="action-card-header">
-                  <div>
-                    <p className="eyebrow">CLI</p>
-                    <h3 className="action-card-title">{item.label}</h3>
-                  </div>
-                  <Pill tone={item.key.includes('deep') ? 'warn' : item.kind === 'primary' ? 'good' : 'neutral'}>
-                    {item.key}
-                  </Pill>
-                </div>
-                <p className="action-card-copy">{item.description}</p>
-                <p className="helper-text">{item.cli}</p>
-                <Toolbar>
-                  <Button
-                    kind={item.kind}
-                    onClick={() => void runDiagnostic(item.key)}
-                    disabled={runningCommand !== null}
-                  >
-                    {runningCommand === `diagnostic:${item.key}` ? `${item.label}…` : `执行 ${item.label}`}
-                  </Button>
-                  <Button onClick={() => navigate(item.relatedPage, item.relatedPage === 'logs' ? logsIntent : item.relatedPage === 'config' ? configIntent : undefined)}>进入相关页</Button>
-                </Toolbar>
-              </section>
-            ))}
-          </div>
-        </Panel>
+      <div className="tab-bar">
+        {GATEWAY_TABS.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            className={`tab ${activeTab === tab.key ? 'active' : ''}`}
+            onClick={() => setActiveTab(tab.key)}
+            title={tab.hint}
+          >
+            {tab.label}
+            {tab.key === 'delivery' && (unhealthyPlatforms.length > 0 || failingRemoteJobs.length > 0) ? <span className="tab-dirty-dot" /> : null}
+            {tab.key === 'repair' && (warnings.length > 0 || (diagnostic && !diagnostic.success)) ? <span className="tab-dirty-dot" /> : null}
+          </button>
+        ))}
       </div>
 
-      <div className="two-column wide-left">
-        <Panel title="平台连接" subtitle="按平台看连接状态、最后更新时间和错误信息。">
-          {platforms.length ? (
-            <div className="list-stack">
-              {platforms.map((platform) => (
-                <div className="list-card" key={platform.name}>
-                  <div className="list-card-title">
-                    <strong>{platform.name}</strong>
-                    <Pill tone={platformTone(platform.state)}>
-                      {platform.state}
-                    </Pill>
-                  </div>
-                  <p>{platform.errorMessage || '当前没有额外错误信息。'}</p>
-                  <div className="meta-line">
-                    <span>{platform.name}</span>
-                    <span>{formatTimestamp(platform.updatedAt)}</span>
-                  </div>
-                  <Toolbar>
-                    <Button
-                      onClick={() => navigate('logs', buildLogsDrilldownIntent(relaySeed, {
-                        description: `查看平台 ${platform.name} 关联的网关日志。`,
-                        logName: 'gateway.error',
-                        contains: platform.name,
-                        limit: '160',
-                      }))}
-                    >
-                      查看日志
-                    </Button>
-                    <Button
-                      onClick={() => navigate('diagnostics', buildDiagnosticsDrilldownIntent(relaySeed, {
-                        description: `围绕平台 ${platform.name} 继续做网关深检。`,
-                        suggestedCommand: 'gateway-status-deep',
-                        logName: 'gateway.error',
-                      }))}
-                    >
-                      继续诊断
-                    </Button>
-                  </Toolbar>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <EmptyState title="暂无平台状态" description="启动并配置消息平台后，这里会显示各平台连接状态。" />
-          )}
-        </Panel>
-
-        <Panel title="远端投递作业" subtitle="把依赖 gateway 的 cron 作业拉出来看，更容易判断异常究竟是作业问题还是网关问题。">
-          {remoteJobs.length ? (
-            <div className="list-stack">
-              {remoteJobs.map((job) => (
-                <div className="list-card" key={job.id}>
-                  <div className="list-card-title">
-                    <strong>{job.name}</strong>
-                    <div className="pill-row">
-                      <Pill tone={cronTone(job)}>{job.state}</Pill>
-                      <Pill tone="warn">{job.deliver}</Pill>
-                    </div>
-                  </div>
-                  <p>{job.lastDeliveryError || job.lastError || truncate(job.prompt || '无 prompt', 132)}</p>
-                  <div className="meta-line">
-                    <span>{job.id}</span>
-                    <span>下次 {formatTimestamp(job.nextRunAt)}</span>
-                    <span>最近 {formatTimestamp(job.lastRunAt)}</span>
-                  </div>
-                  <Toolbar>
-                    <Button
-                      onClick={() => navigate('logs', buildLogsDrilldownIntent(relaySeed, {
-                        description: `查看远端作业 ${job.name} 的交付日志。`,
-                        logName: job.lastDeliveryError || job.lastError ? 'gateway.error' : 'gateway',
-                        contains: job.id,
-                        limit: '160',
-                      }))}
-                    >
-                      查看日志
-                    </Button>
-                    <Button onClick={() => navigate('logs', logsIntent)}>查看网关总日志</Button>
-                  </Toolbar>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <EmptyState title="暂无远端作业" description="当前 profile 还没有依赖 gateway 的 delivery 作业，或者所有作业都走本地交付。" />
-          )}
-        </Panel>
-      </div>
-
-      <Panel
-        title="CLI 诊断输出"
-        subtitle="这里保留 Hermes 原生命令结果，方便你对照页面摘要和真实命令输出。"
-        aside={lastCommand ? (
-          <Toolbar>
-            <Button onClick={() => navigate(lastCommand.relatedPage)}>进入相关页</Button>
-          </Toolbar>
-        ) : undefined}
-      >
-        {diagnostic ? (
-          <div className="result-stack">
-              <div className="detail-list compact">
-                <KeyValueRow label="命令类型" value={lastActionLabel ?? lastCommand?.label ?? '网关动作'} />
-                <KeyValueRow label="命令" value={diagnostic.command} />
-                <KeyValueRow label="退出码" value={diagnostic.exitCode} />
-                <KeyValueRow
-                label="结果"
-                value={<Pill tone={diagnostic.success ? 'good' : 'bad'}>{diagnostic.success ? '成功' : '失败'}</Pill>}
-              />
-            </div>
-            <pre className="code-block">{diagnostic.stdout || 'stdout 为空'}</pre>
-            {diagnostic.stderr ? <pre className="code-block">{diagnostic.stderr}</pre> : null}
-          </div>
-        ) : (
-          <EmptyState title="暂无诊断输出" description="点击上方任一网关动作或诊断命令后，这里会展示 Hermes 的原始输出。" />
-        )}
-      </Panel>
+      {activeTab === 'overview' ? overviewSection : activeTab === 'delivery' ? deliverySection : repairSection}
     </div>
   );
 }
