@@ -58,23 +58,25 @@ export function renderTopbar(el) {
           </span>
         `).join('')}
       </div>
-      <div class="profile-switcher">
-        <span>实例</span>
-        <select class="select-input" id="topbar-profile-select" ${state.loadingProfiles || !state.profiles ? 'disabled' : ''}>
-          ${(state.profiles?.profiles ?? []).map((item) => `
-            <option value="${item.name}" ${item.name === state.selectedProfile ? 'selected' : ''}>
-              ${item.name}${item.isActive ? ' · 当前默认' : ''}
-            </option>
-          `).join('')}
-        </select>
-      </div>
-      <div class="toolbar shell-toolbar">
-        <button type="button" class="button button-secondary" id="topbar-refresh-profiles" ${state.loadingProfiles ? 'disabled' : ''}>
-          ${state.loadingProfiles ? '刷新中…' : '刷新实例列表'}
-        </button>
-        <button type="button" class="button button-secondary" id="topbar-refresh-shell" ${shellBusy ? 'disabled' : ''}>
-          ${shellBusy ? '同步中…' : '刷新状态'}
-        </button>
+      <div class="topbar-controls">
+        <label class="profile-switcher">
+          <span>实例</span>
+          <select class="select-input" id="topbar-profile-select" ${state.loadingProfiles || !state.profiles ? 'disabled' : ''}>
+            ${(state.profiles?.profiles ?? []).map((item) => `
+              <option value="${item.name}" ${item.name === state.selectedProfile ? 'selected' : ''}>
+                ${item.name}${item.isActive ? ' · 当前默认' : ''}
+              </option>
+            `).join('')}
+          </select>
+        </label>
+        <div class="toolbar shell-toolbar">
+          <button type="button" class="button button-secondary" id="topbar-refresh-profiles" ${state.loadingProfiles ? 'disabled' : ''}>
+            ${state.loadingProfiles ? '刷新中…' : '刷新实例列表'}
+          </button>
+          <button type="button" class="button button-secondary" id="topbar-refresh-shell" ${shellBusy ? 'disabled' : ''}>
+            ${shellBusy ? '同步中…' : '刷新状态'}
+          </button>
+        </div>
       </div>
     </div>
   `;

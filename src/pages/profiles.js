@@ -36,6 +36,14 @@ function infoTipHtml(content) {
   `;
 }
 
+function detailTabHtml(activeKey, key, label) {
+  return `
+    <button type="button" class="tab ${activeKey === key ? 'active' : ''}" data-profile-view="${key}">
+      ${escapeHtml(label)}
+    </button>
+  `;
+}
+
 function uniqueNames(items) {
   return Array.from(new Set(items.filter(Boolean)));
 }
@@ -1005,6 +1013,21 @@ function renderPage(view) {
     return;
   }
 
+  const detailView = view.detailView || 'focus';
+  const detailContent = detailView === 'runtime'
+    ? renderRuntimeSection(view)
+    : detailView === 'compare'
+      ? renderCompareSection(view)
+      : detailView === 'ops'
+        ? `
+          <div class="page-stack">
+            ${renderLifecycleSection(view)}
+            ${renderAliasSection(view)}
+            ${renderDangerAndOutput(view)}
+          </div>
+        `
+        : renderWorkbench(view);
+
   view.page.innerHTML = `
     <div class="page-header">
       <div class="panel-title-row">
@@ -1014,17 +1037,16 @@ function renderPage(view) {
       <p class="page-desc">围绕实例切换、安装接管、导入导出、alias 和运行态差异做桌面闭环，不改 Hermes 本体。</p>
     </div>
 
-    ${renderFleetCards(view)}
-
     <div class="two-column wide-left">
       ${renderProfileRail(view)}
       <div class="page-stack">
-        ${renderWorkbench(view)}
-        ${renderRuntimeSection(view)}
-        ${renderCompareSection(view)}
-        ${renderLifecycleSection(view)}
-        ${renderAliasSection(view)}
-        ${renderDangerAndOutput(view)}
+        <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
+          ${detailTabHtml(detailView, 'focus', '当前实例')}
+          ${detailTabHtml(detailView, 'runtime', '运行态')}
+          ${detailTabHtml(detailView, 'compare', '实例对照')}
+          ${detailTabHtml(detailView, 'ops', '生命周期')}
+        </div>
+        ${detailContent}
       </div>
     </div>
   `;
@@ -1483,6 +1505,17 @@ function bindEvents(view) {
   const deleteConfirmInput = view.page.querySelector('#profiles-delete-confirm');
   const compareSelect = view.page.querySelector('#profiles-compare-select');
 
+  view.page.querySelectorAll('[data-profile-view]').forEach((element) => {
+    element.onclick = () => {
+      const nextView = element.getAttribute('data-profile-view');
+      if (!nextView || nextView === view.detailView) {
+        return;
+      }
+      view.detailView = nextView;
+      renderPage(view);
+    };
+  });
+
   if (createNameInput) {
     createNameInput.oninput = (event) => {
       view.createName = event.target.value;
@@ -1555,6 +1588,7 @@ function bindEvents(view) {
   if (compareSelect) {
     compareSelect.onchange = (event) => {
       view.compareName = event.target.value || null;
+      view.detailView = 'compare';
       renderPage(view);
     };
   }
@@ -1582,6 +1616,7 @@ function bindEvents(view) {
           return;
         case 'select-profile':
           view.selectedName = element.getAttribute('data-name');
+          view.detailView = 'focus';
           renderPage(view);
           return;
         case 'refresh-selected-runtime':
@@ -1781,6 +1816,7 @@ export async function render() {
     importArchive: '',
     importName: '',
     lastResult: null,
+    detailView: 'focus',
     loading: true,
     loadingRuntimeNames: [],
     noAlias: false,

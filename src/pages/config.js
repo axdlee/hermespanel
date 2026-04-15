@@ -141,6 +141,14 @@ function investigationPrimaryAction(view) {
   }
 }
 
+function surfaceTabHtml(activeKey, key, label) {
+  return `
+    <button type="button" class="tab ${activeKey === key ? 'active' : ''}" data-config-surface="${key}">
+      ${escapeHtml(label)}
+    </button>
+  `;
+}
+
 function workspaceSectionFromFocus(focus) {
   switch (focus) {
     case 'model':
@@ -286,80 +294,8 @@ function renderPage(view) {
     rawKind: view.investigation?.focus === 'memory' ? 'memory' : 'tools',
     query: view.investigation?.focus === 'toolsets' ? data.summary.toolsets.join(' ') : '',
   });
-
-  view.page.innerHTML = `
-    <div class="page-header page-header-compact">
-      <div class="panel-title-row">
-        <h1 class="page-title">配置中心</h1>
-        ${infoTipHtml('优先在客户端内直接完成模型、通道、toolsets、记忆和凭证接管；历史迁移动作被收进侧栏，不再抢主操作区。')}
-      </div>
-      <p class="page-desc">先在这里完成配置接管，再去运行页验证闭环。</p>
-    </div>
-
-    ${view.investigation ? `
-      <div class="context-banner context-banner-compact">
-        <div class="context-banner-header">
-          <div class="context-banner-copy">
-            <span class="context-banner-label">Drilldown</span>
-            <strong class="context-banner-title">${escapeHtml(view.investigation.headline)}</strong>
-            <p class="context-banner-description">${escapeHtml(view.investigation.description)}</p>
-          </div>
-          <div class="context-banner-meta">
-            ${view.investigation.focus ? pillHtml(view.investigation.focus, 'warn') : ''}
-            ${view.investigation.suggestedCommand ? pillHtml(view.investigation.suggestedCommand, 'neutral') : ''}
-            ${view.investigation.context?.source ? pillHtml(view.investigation.context.source, 'neutral') : ''}
-          </div>
-        </div>
-        <div class="context-banner-actions toolbar">
-          ${view.investigation.suggestedCommand
-            ? buttonHtml({
-                action: 'run-intent-diagnostic',
-                label: '执行建议体检',
-                kind: 'primary',
-                disabled: Boolean(view.runningDiagnostic),
-              })
-            : ''}
-          ${investigationPrimaryAction(view)}
-          ${buttonHtml({ action: 'clear-investigation', label: '清除上下文' })}
-        </div>
-      </div>
-    ` : ''}
-
-    <div class="stat-cards stat-cards-4">
-      <section class="stat-card">
-        <div class="stat-card-header">
-          <span class="stat-card-label">模型</span>
-          ${statusDotHtml(data.summary.modelDefault && data.summary.modelProvider ? 'running' : 'warning')}
-        </div>
-        <div class="stat-card-value">${escapeHtml(data.summary.modelDefault || '待配置')}</div>
-        <div class="stat-card-meta">${escapeHtml(data.summary.modelProvider || 'provider 未配置')}</div>
-      </section>
-      <section class="stat-card">
-        <div class="stat-card-header">
-          <span class="stat-card-label">终端</span>
-          ${statusDotHtml(data.summary.terminalBackend ? 'running' : 'warning')}
-        </div>
-        <div class="stat-card-value">${escapeHtml(data.summary.terminalBackend || '未配置')}</div>
-        <div class="stat-card-meta">${escapeHtml(data.summary.terminalCwd || '当前未声明工作目录')}</div>
-      </section>
-      <section class="stat-card">
-        <div class="stat-card-header">
-          <span class="stat-card-label">能力集 / 工具</span>
-          ${statusDotHtml(enabledTools > 0 ? 'running' : 'warning')}
-        </div>
-        <div class="stat-card-value">${escapeHtml(`${data.summary.toolsets.length} / ${enabledTools}`)}</div>
-        <div class="stat-card-meta">${escapeHtml(`声明的能力集 / 运行态启用工具（总数 ${totalTools}）`)}</div>
-      </section>
-      <section class="stat-card">
-        <div class="stat-card-header">
-          <span class="stat-card-label">网关 / 记忆</span>
-          ${statusDotHtml(data.summary.memoryEnabled ? 'running' : 'warning')}
-        </div>
-        <div class="stat-card-value">${escapeHtml(snapshot?.gateway?.gatewayState || '未检测到')}</div>
-        <div class="stat-card-meta">${escapeHtml(`${data.summary.memoryProvider || 'builtin-file'} · 插件 ${pluginTotal} 个 · 远端作业 ${remoteJobs.length} 个`)}</div>
-      </section>
-    </div>
-
+  const surfaceView = view.surfaceView || 'workspace';
+  const workspaceContent = `
     <div class="quick-actions">
       ${buttonHtml({ action: 'refresh', label: view.refreshing ? '同步中…' : '重新读取', kind: 'primary', disabled: view.refreshing })}
       ${buttonHtml({ action: 'diagnostic-config-check', label: view.runningDiagnostic === 'config-check' ? '配置体检…' : '配置体检', disabled: actionBusy })}
@@ -447,6 +383,42 @@ function renderPage(view) {
         </div>
       </div>
     </section>
+  `;
+  const verifyContent = `
+    <div class="stat-cards stat-cards-4">
+      <section class="stat-card">
+        <div class="stat-card-header">
+          <span class="stat-card-label">模型</span>
+          ${statusDotHtml(data.summary.modelDefault && data.summary.modelProvider ? 'running' : 'warning')}
+        </div>
+        <div class="stat-card-value">${escapeHtml(data.summary.modelDefault || '待配置')}</div>
+        <div class="stat-card-meta">${escapeHtml(data.summary.modelProvider || 'provider 未配置')}</div>
+      </section>
+      <section class="stat-card">
+        <div class="stat-card-header">
+          <span class="stat-card-label">终端</span>
+          ${statusDotHtml(data.summary.terminalBackend ? 'running' : 'warning')}
+        </div>
+        <div class="stat-card-value">${escapeHtml(data.summary.terminalBackend || '未配置')}</div>
+        <div class="stat-card-meta">${escapeHtml(data.summary.terminalCwd || '当前未声明工作目录')}</div>
+      </section>
+      <section class="stat-card">
+        <div class="stat-card-header">
+          <span class="stat-card-label">能力集 / 工具</span>
+          ${statusDotHtml(enabledTools > 0 ? 'running' : 'warning')}
+        </div>
+        <div class="stat-card-value">${escapeHtml(`${data.summary.toolsets.length} / ${enabledTools}`)}</div>
+        <div class="stat-card-meta">${escapeHtml(`声明的能力集 / 运行态启用工具（总数 ${totalTools}）`)}</div>
+      </section>
+      <section class="stat-card">
+        <div class="stat-card-header">
+          <span class="stat-card-label">网关 / 记忆</span>
+          ${statusDotHtml(data.summary.memoryEnabled ? 'running' : 'warning')}
+        </div>
+        <div class="stat-card-value">${escapeHtml(snapshot?.gateway?.gatewayState || '未检测到')}</div>
+        <div class="stat-card-meta">${escapeHtml(`${data.summary.memoryProvider || 'builtin-file'} · 插件 ${pluginTotal} 个 · 远端作业 ${remoteJobs.length} 个`)}</div>
+      </section>
+    </div>
 
     <div class="workspace-bottom-grid workspace-bottom-grid-dense">
       <section class="config-section">
@@ -500,6 +472,53 @@ function renderPage(view) {
         </div>
       </section>
     </div>
+  `;
+  const surfaceContent = surfaceView === 'verify' ? verifyContent : workspaceContent;
+
+  view.page.innerHTML = `
+    <div class="page-header page-header-compact">
+      <div class="panel-title-row">
+        <h1 class="page-title">配置中心</h1>
+        ${infoTipHtml('优先在客户端内直接完成模型、通道、toolsets、记忆和凭证接管；历史迁移动作被收进侧栏，不再抢主操作区。')}
+      </div>
+      <p class="page-desc">先在这里完成配置接管，再去运行页验证闭环。</p>
+    </div>
+
+    ${view.investigation ? `
+      <div class="context-banner context-banner-compact">
+        <div class="context-banner-header">
+          <div class="context-banner-copy">
+            <span class="context-banner-label">Drilldown</span>
+            <strong class="context-banner-title">${escapeHtml(view.investigation.headline)}</strong>
+            <p class="context-banner-description">${escapeHtml(view.investigation.description)}</p>
+          </div>
+          <div class="context-banner-meta">
+            ${view.investigation.focus ? pillHtml(view.investigation.focus, 'warn') : ''}
+            ${view.investigation.suggestedCommand ? pillHtml(view.investigation.suggestedCommand, 'neutral') : ''}
+            ${view.investigation.context?.source ? pillHtml(view.investigation.context.source, 'neutral') : ''}
+          </div>
+        </div>
+        <div class="context-banner-actions toolbar">
+          ${view.investigation.suggestedCommand
+            ? buttonHtml({
+                action: 'run-intent-diagnostic',
+                label: '执行建议体检',
+                kind: 'primary',
+                disabled: Boolean(view.runningDiagnostic),
+              })
+            : ''}
+          ${investigationPrimaryAction(view)}
+          ${buttonHtml({ action: 'clear-investigation', label: '清除上下文' })}
+        </div>
+      </div>
+    ` : ''}
+
+    <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
+      ${surfaceTabHtml(surfaceView, 'workspace', '主工作台')}
+      ${surfaceTabHtml(surfaceView, 'verify', '验证与闭环')}
+    </div>
+
+    ${surfaceContent}
   `;
 
   bindEvents(view);
@@ -899,6 +918,7 @@ function syncWithPanelState(view) {
   const nextIntent = getPageIntent('config');
   if (nextIntent) {
     view.investigation = nextIntent;
+    view.surfaceView = 'workspace';
     if (nextIntent.focus === 'credentials') {
       view.editorTab = 'credentials';
     } else if (nextIntent.focus) {
@@ -915,6 +935,17 @@ function syncWithPanelState(view) {
 }
 
 function bindEvents(view) {
+  view.page.querySelectorAll('[data-config-surface]').forEach((element) => {
+    element.onclick = () => {
+      const nextView = element.getAttribute('data-config-surface');
+      if (!nextView || nextView === view.surfaceView) {
+        return;
+      }
+      view.surfaceView = nextView;
+      renderPage(view);
+    };
+  });
+
   const configEditor = view.page.querySelector('[data-editor="config"]');
   const envEditor = view.page.querySelector('[data-editor="env"]');
 
@@ -1551,6 +1582,7 @@ export async function render() {
     runningDiagnostic: null,
     saving: null,
     skills: [],
+    surfaceView: 'workspace',
     skillDirBulkInput: '',
     skillDirInput: '',
     showCompatibilityActions: false,

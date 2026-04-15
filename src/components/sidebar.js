@@ -51,6 +51,13 @@ function gatewayLabel(state) {
   return 'Gateway 未检测';
 }
 
+let expandedGroupLabel = null;
+let lastActivePage = null;
+
+function activeGroupForPage(activePage) {
+  return NAV_GROUPS.find((group) => group.items.some((item) => item.key === activePage)) ?? NAV_GROUPS[0];
+}
+
 export function renderSidebar(el) {
   const state = getPanelState();
   const activeProfile = state.profiles?.activeProfile ?? 'default';
@@ -61,6 +68,11 @@ export function renderSidebar(el) {
   const envReady = viewedProfile?.envExists ?? false;
   const profileMode = state.selectedProfile === activeProfile ? '默认实例' : '浏览实例';
   const modelLabel = viewedProfile?.modelDefault ?? state.shellDashboard?.config?.modelDefault ?? '模型待配置';
+  const activeGroup = activeGroupForPage(state.activePage);
+  if (!expandedGroupLabel || lastActivePage !== state.activePage) {
+    expandedGroupLabel = activeGroup.label;
+  }
+  lastActivePage = state.activePage;
 
   el.className = `sidebar ${state.sidebarCollapsed ? 'sidebar-collapsed' : ''}`;
   el.innerHTML = `
@@ -77,23 +89,32 @@ export function renderSidebar(el) {
 
     <div class="sidebar-scroller">
       ${NAV_GROUPS.map((group) => `
-        <section class="sidebar-section">
-          <div class="sidebar-section-label">${group.label}</div>
-          <nav class="sidebar-nav">
-            ${group.items.map((item) => `
-              <button
-                type="button"
-                class="nav-item ${state.activePage === item.key ? 'active' : ''}"
-                data-page="${item.key}"
-                title="${item.label}"
-              >
-                <span class="nav-item-icon">${ICONS[item.icon] ?? ''}</span>
-                <span class="nav-item-copy">
-                  <strong>${item.label}</strong>
-                </span>
-              </button>
-            `).join('')}
-          </nav>
+        <section class="sidebar-section ${expandedGroupLabel === group.label ? 'sidebar-section-open' : 'sidebar-section-collapsed'}">
+          <button type="button" class="sidebar-section-trigger" data-group="${group.label}">
+            <span class="sidebar-section-head">
+              <span class="sidebar-section-label">${group.label}</span>
+              <span class="sidebar-section-meta">${group.items.map((item) => item.label).join(' / ')}</span>
+            </span>
+            <span class="sidebar-section-count">${group.items.length}</span>
+          </button>
+          ${expandedGroupLabel === group.label ? `
+            <nav class="sidebar-nav">
+              ${group.items.map((item) => `
+                <button
+                  type="button"
+                  class="nav-item ${state.activePage === item.key ? 'active' : ''}"
+                  data-page="${item.key}"
+                  title="${item.label}"
+                >
+                  <span class="nav-item-icon">${ICONS[item.icon] ?? ''}</span>
+                  <span class="nav-item-copy">
+                    <strong>${item.label}</strong>
+                    <small>${item.eyebrow}</small>
+                  </span>
+                </button>
+              `).join('')}
+            </nav>
+          ` : ''}
         </section>
       `).join('')}
     </div>
@@ -130,13 +151,29 @@ export function renderSidebar(el) {
     toggleSidebar();
   });
 
+  el.querySelectorAll('[data-group]').forEach((node) => {
+    node.addEventListener('click', () => {
+      expandedGroupLabel = node.getAttribute('data-group');
+      renderSidebar(el);
+    });
+  });
+
   el.querySelectorAll('[data-page]').forEach((node) => {
     node.addEventListener('click', () => {
-      navigate(node.getAttribute('data-page'));
+      const nextPage = node.getAttribute('data-page');
+      const nextGroup = NAV_GROUPS.find((group) => group.items.some((item) => item.key === nextPage));
+      if (nextGroup) {
+        expandedGroupLabel = nextGroup.label;
+      }
+      navigate(nextPage);
     });
   });
 
   el.querySelector('#sidebar-make-active')?.addEventListener('click', () => {
     void makeSelectedProfileActive();
+  });
+
+  el.querySelector('.sidebar-section-open')?.scrollIntoView({
+    block: 'nearest',
   });
 }

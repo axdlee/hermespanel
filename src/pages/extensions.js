@@ -111,6 +111,14 @@ function createPluginReadmeDraft(detail) {
   };
 }
 
+function surfaceTabHtml(activeKey, key, label) {
+  return `
+    <button type="button" class="tab ${activeKey === key ? 'active' : ''}" data-extensions-surface="${key}">
+      ${escapeHtml(label)}
+    </button>
+  `;
+}
+
 function parsePluginManifestList(value) {
   const seen = new Set();
   const result = [];
@@ -207,41 +215,10 @@ function renderPage(view) {
     : view.workbenchTab === 'plugins'
       ? renderPluginsWorkbench(view, state)
       : view.workbenchTab === 'skills'
-        ? renderSkillsWorkbench(view, state)
-        : renderRuntimeWorkbench(view, state);
-
-  view.page.innerHTML = `
-    <div class="page-header page-header-compact">
-      <div class="panel-title-row">
-        <h1 class="page-title">扩展能力台</h1>
-        ${infoTipHtml('这里聚焦真正可操作的 Tools、Skills、Plugins 和 Memory Provider 闭环，不再让介绍文案占据主区。')}
-      </div>
-      <p class="page-desc">Tools、Plugins、Skills、Provider 闭环治理。</p>
-    </div>
-
-    ${view.investigation ? `
-      <div class="context-banner context-banner-compact">
-        <div class="context-banner-header">
-          <div class="context-banner-copy">
-            <span class="context-banner-label">Drilldown</span>
-            <strong class="context-banner-title">${escapeHtml(view.investigation.headline)}</strong>
-            <p class="context-banner-description">${escapeHtml(view.investigation.description)}</p>
-          </div>
-          <div class="context-banner-meta">
-            ${pillHtml(view.investigation.rawKind || 'tools', 'neutral')}
-            ${view.investigation.selectedPlatform ? pillHtml(view.investigation.selectedPlatform, 'warn') : ''}
-            ${(view.investigation.context?.toolNames ?? []).slice(0, 2).map((item) => pillHtml(item, 'neutral')).join('')}
-          </div>
-        </div>
-        <div class="context-banner-actions toolbar">
-          ${buttonHtml({ action: 'clear-investigation', label: '清除上下文' })}
-          ${buttonHtml({ action: 'goto-logs', label: '进入日志页' })}
-          ${buttonHtml({ action: 'goto-diagnostics', label: '进入诊断页' })}
-          ${buttonHtml({ action: 'goto-config', label: '进入配置页' })}
-        </div>
-      </div>
-    ` : ''}
-
+      ? renderSkillsWorkbench(view, state)
+      : renderRuntimeWorkbench(view, state);
+  const surfaceView = view.surfaceView || 'workbench';
+  const overviewContent = `
     <div class="stat-cards stat-cards-4">
       <section class="stat-card">
         <div class="stat-card-header">
@@ -290,7 +267,8 @@ function renderPage(view) {
       ${buttonHtml({ action: 'goto-memory', label: '查看 Memory' })}
       ${buttonHtml({ action: 'goto-logs', label: '查看日志' })}
     </div>
-
+  `;
+  const workbenchContent = `
     <section class="config-section">
       <div class="config-section-header">
         <div>
@@ -312,6 +290,47 @@ function renderPage(view) {
         </div>
       </div>
     </section>
+  `;
+  const surfaceContent = surfaceView === 'overview' ? overviewContent : workbenchContent;
+
+  view.page.innerHTML = `
+    <div class="page-header page-header-compact">
+      <div class="panel-title-row">
+        <h1 class="page-title">扩展能力台</h1>
+        ${infoTipHtml('这里聚焦真正可操作的 Tools、Skills、Plugins 和 Memory Provider 闭环，不再让介绍文案占据主区。')}
+      </div>
+      <p class="page-desc">Tools、Plugins、Skills、Provider 闭环治理。</p>
+    </div>
+
+    ${view.investigation ? `
+      <div class="context-banner context-banner-compact">
+        <div class="context-banner-header">
+          <div class="context-banner-copy">
+            <span class="context-banner-label">Drilldown</span>
+            <strong class="context-banner-title">${escapeHtml(view.investigation.headline)}</strong>
+            <p class="context-banner-description">${escapeHtml(view.investigation.description)}</p>
+          </div>
+          <div class="context-banner-meta">
+            ${pillHtml(view.investigation.rawKind || 'tools', 'neutral')}
+            ${view.investigation.selectedPlatform ? pillHtml(view.investigation.selectedPlatform, 'warn') : ''}
+            ${(view.investigation.context?.toolNames ?? []).slice(0, 2).map((item) => pillHtml(item, 'neutral')).join('')}
+          </div>
+        </div>
+        <div class="context-banner-actions toolbar">
+          ${buttonHtml({ action: 'clear-investigation', label: '清除上下文' })}
+          ${buttonHtml({ action: 'goto-logs', label: '进入日志页' })}
+          ${buttonHtml({ action: 'goto-diagnostics', label: '进入诊断页' })}
+          ${buttonHtml({ action: 'goto-config', label: '进入配置页' })}
+        </div>
+      </div>
+    ` : ''}
+
+    <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
+      ${surfaceTabHtml(surfaceView, 'workbench', '主工作台')}
+      ${surfaceTabHtml(surfaceView, 'overview', '概况与捷径')}
+    </div>
+
+    ${surfaceContent}
   `;
 
   bindEvents(view);
@@ -1034,6 +1053,7 @@ function syncWithPanelState(view) {
   const nextIntent = getPageIntent('extensions');
   if (nextIntent) {
     view.investigation = nextIntent;
+    view.surfaceView = 'workbench';
     view.rawKind = nextIntent.rawKind ?? view.rawKind;
     view.workbenchTab = nextIntent.rawKind ? 'runtime' : view.workbenchTab;
     view.query = nextIntent.query ?? view.query;
@@ -1061,6 +1081,17 @@ function syncWithPanelState(view) {
 }
 
 function bindEvents(view) {
+  view.page.querySelectorAll('[data-extensions-surface]').forEach((element) => {
+    element.onclick = () => {
+      const nextView = element.getAttribute('data-extensions-surface');
+      if (!nextView || nextView === view.surfaceView) {
+        return;
+      }
+      view.surfaceView = nextView;
+      renderPage(view);
+    };
+  });
+
   const toolInput = view.page.querySelector('#extensions-tool-input');
   const toolPreview = view.page.querySelector('#extensions-tool-preview');
   const pluginInput = view.page.querySelector('#extensions-plugin-input');
@@ -1601,12 +1632,14 @@ export async function render() {
     selectedPlatform: '',
     skills: [],
     sourceFilter: 'all',
+    surfaceView: 'workbench',
     toolNamesInput: '',
     unsubscribe: null,
     workbenchTab: 'tools',
   };
 
   if (activeView.investigation) {
+    activeView.surfaceView = 'workbench';
     activeView.rawKind = activeView.investigation.rawKind ?? activeView.rawKind;
     activeView.query = activeView.investigation.query ?? activeView.query;
     activeView.sourceFilter = activeView.investigation.sourceFilter ?? activeView.sourceFilter;
