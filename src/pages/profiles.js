@@ -60,6 +60,14 @@ function opsTabHtml(activeKey, key, label) {
   `;
 }
 
+function subviewTabHtml(attrName, activeKey, key, label) {
+  return `
+    <button type="button" class="tab ${activeKey === key ? 'active' : ''}" ${attrName}="${key}">
+      ${escapeHtml(label)}
+    </button>
+  `;
+}
+
 function launcherCardHtml({ action, kicker, title, meta, tone = 'neutral', attrs = {} }) {
   const attrString = Object.entries(attrs)
     .filter(([, value]) => value !== undefined && value !== null && value !== false)
@@ -391,7 +399,7 @@ function renderProfileRail(view) {
       <div class="config-section-header">
         <div>
           <h2 class="config-section-title">实例列表</h2>
-          <p class="config-section-desc">左侧选实例，右侧做接管、迁移和运行态对照。</p>
+          <p class="config-section-desc">选择实例并查看状态。</p>
         </div>
         <div class="toolbar">
           ${buttonHtml({ action: 'refresh-fleet', label: view.refreshing ? '同步中…' : '刷新列表', kind: 'primary', disabled: view.refreshing || Boolean(view.runningAction) })}
@@ -455,24 +463,25 @@ function renderFocusSurface(view) {
   const readyProfiles = items.filter((item) => item.envExists && item.soulExists).length;
   const runtimeReady = items.filter((item) => Boolean(view.runtimeBundles[item.name])).length;
   const focusReady = Boolean(selected && bundle && warnings.length === 0);
+  const focusSubview = view.focusSubview || 'status';
   const focusTitle = !selected
-    ? '先选择一个实例，再继续治理'
+    ? '选择一个实例'
     : loading && !bundle
       ? `${selected.name} 正在读取运行态`
       : error && !bundle
-        ? `${selected.name} 的运行态读取失败了`
+        ? `${selected.name} 运行态读取失败`
         : warnings.length > 0
-          ? `${selected.name} 还有一些关键提醒待处理`
-          : `${selected.name} 已经适合继续工作`;
+          ? `${selected.name} 需要处理`
+          : `${selected.name} 可继续使用`;
   const focusDescription = !selected
-    ? '默认层只保留实例选择、最高频入口和当前边界。列表、对照和维护动作已经后置。'
+    ? '先选择要查看的实例。'
     : loading && !bundle
-      ? '正在同步 config、extensions、cron、gateway 和 installation 快照，默认层先只保留最必要的入口。'
-      : error && !bundle
-        ? '先处理运行态读取错误，再进入实例台看更细的配置、日志或维护动作。'
-        : warnings.length > 0
-          ? '默认层只帮你判断哪里先处理。完整实例详情、多实例对照和生命周期动作都继续放到二三级页面。'
-          : '默认层只保留最常用的去向。更深的实例列表、对照和危险操作都已经继续下沉。';
+      ? '正在同步实例快照。'
+    : error && !bundle
+        ? '请先处理读取错误。'
+          : warnings.length > 0
+            ? '有提醒需要处理。'
+            : '实例状态正常。';
   const readinessValue = !selected
     ? '未选择'
     : loading && !bundle
@@ -487,36 +496,197 @@ function renderFocusSurface(view) {
     : selected.envExists && selected.soulExists
       ? '基础齐备'
       : `${Number(!selected.envExists) + Number(!selected.soulExists)} 项缺口`;
-  const signalCards = [
+  const nextStep = !selected
+    ? {
+      title: '先选一个实例',
+      detail: '先确定当前要查看的实例。',
+    }
+    : loading && !bundle
+      ? {
+        title: '等待运行态同步',
+        detail: '正在拉取实例快照。',
+      }
+      : error && !bundle
+        ? {
+          title: '先处理读取失败',
+          detail: error,
+        }
+        : warnings.length > 0
+          ? {
+            title: '处理提醒',
+            detail: warnings[0],
+          }
+          : !bundle?.config.summary.modelDefault
+            ? {
+              title: '补模型链路',
+              detail: '先把 Provider、默认模型和凭证链路配齐。',
+            }
+            : bundle.dashboard.gateway?.gatewayState !== 'running'
+              ? {
+                title: '检查消息链路',
+                detail: '模型已就绪，但 Gateway 还没完全进入 running。',
+              }
+              : {
+                title: '进入实例台',
+                detail: '当前实例主链路基本稳定。',
+              };
+  const focusSignals = [
     {
       label: '当前实例',
-      meta: selected ? `${selected.isActive ? '当前默认' : '浏览实例'} · ${selected.aliases.length} 个 Alias` : '先从这里选定一个工作实例',
+      meta: selected ? `${selected.isActive ? '当前默认' : '正在浏览'} · ${selected.aliases.length} 个 Alias` : '先从这里选定一个工作实例',
       value: selected?.name || '未选择',
     },
     {
       label: '就绪判断',
-      meta: selected && bundle ? `${enabledToolCount(bundle.extensions)}/${totalToolCount(bundle.extensions)} tools · ${bundle.extensions.plugins.installedCount} 个插件` : '运行态还没完整进入页面',
+      meta: selected && bundle ? `${enabledToolCount(bundle.extensions)}/${totalToolCount(bundle.extensions)} 个工具已接入 · ${bundle.extensions.plugins.installedCount} 个插件` : '运行态还没完整进入页面',
       value: readinessValue,
     },
     {
-      label: '模型链路',
-      meta: selected && bundle ? `${bundle.config.summary.modelProvider || 'provider 未配置'} · ${bundle.config.summary.terminalBackend || 'backend 未配置'}` : '进入配置页后继续补齐',
-      value: selected && bundle ? (bundle.config.summary.modelDefault || '待配置') : '待配置',
-    },
-    {
-      label: '基础材料',
-      meta: selected ? `.env ${selected.envExists ? 'ok' : 'missing'} · SOUL ${selected.soulExists ? 'ok' : 'missing'}` : '先选实例后再判断',
-      value: materialValue,
+      label: '建议操作',
+      meta: nextStep.detail,
+      value: nextStep.title,
     },
   ];
+  const focusSubviewMeta = focusSubview === 'routes'
+    ? {
+      title: '常用入口',
+      desc: '打开最常用的工作台。',
+      pill: '入口',
+    }
+    : focusSubview === 'more'
+      ? {
+        title: '更多信息',
+        desc: '查看补充资料。',
+        pill: '更多',
+      }
+      : {
+        title: '状态',
+        desc: '查看当前实例摘要。',
+        pill: '状态',
+      };
+  const focusSubviewContent = focusSubview === 'routes'
+    ? `
+      <div class="dashboard-jump-grid">
+        ${launcherCardHtml({
+          action: 'goto-config',
+          kicker: '配置',
+          title: selected && bundle?.config.summary.modelDefault ? '继续调模型与凭证' : '先补模型与凭证',
+          meta: selected && bundle
+            ? `${bundle.config.summary.modelProvider || 'provider 未配置'} / ${bundle.config.summary.modelDefault || 'model 未配置'}`
+            : '继续补模型、provider 和凭证链路',
+          tone: selected && bundle && bundle.config.summary.modelDefault ? 'good' : 'warn',
+        })}
+        ${launcherCardHtml({
+          action: 'goto-gateway',
+          kicker: '通道',
+          title: '看 Gateway 与消息链路',
+          meta: selected && bundle
+            ? `${bundle.dashboard.gateway?.gatewayState || 'unknown'} · ${remoteJobCount(bundle)} 个远端作业`
+            : '继续核对平台、Gateway 和远端投递',
+          tone: selected && bundle && bundle.dashboard.gateway?.gatewayState === 'running' ? 'good' : 'warn',
+        })}
+        ${launcherCardHtml({
+          action: 'goto-extensions',
+          kicker: '能力',
+          title: '看技能、插件和记忆',
+          meta: selected && bundle
+            ? `${bundle.extensions.plugins.installedCount} 个插件 · memory ${bundle.config.summary.memoryProvider || 'builtin-file'}`
+            : '继续核对技能、插件和记忆链路',
+          tone: selected && bundle ? 'neutral' : 'warn',
+        })}
+        ${launcherCardHtml({
+          action: 'goto-logs',
+          kicker: '排查',
+          title: '看日志与诊断',
+          meta: selected && warnings.length > 0 ? warnings[0] : '进入日志与诊断继续排查',
+          tone: warnings.length > 0 ? 'warn' : 'neutral',
+        })}
+      </div>
+    `
+    : focusSubview === 'more'
+      ? `
+        ${warnings.length > 0
+          ? `<div class="warning-stack">${warnings.slice(0, 3).map((item) => `<div class="warning-item">${escapeHtml(item)}</div>`).join('')}</div>`
+          : ''}
+        <div class="detail-list compact ${warnings.length > 0 ? 'top-gap' : ''}">
+          ${(selected && bundle
+            ? [
+              { label: 'Provider / 模型', value: `${bundle.config.summary.modelProvider || 'provider 未配置'} / ${bundle.config.summary.modelDefault || 'model 未配置'}` },
+              { label: 'Toolsets', value: toolsetLabel(bundle) },
+              { label: '材料', value: `${selected.skillCount} 技能 · ${selected.aliases.length} Alias · ${materialValue}` },
+              { label: '关键文件', value: `${installation?.configExists ? 'config' : 'config?'} · ${installation?.envExists ? '.env' : '.env?'} · ${installation?.logsDirExists ? 'logs' : 'logs?'}` },
+            ]
+            : [
+              { label: '默认实例', value: defaultProfile },
+              { label: '基础齐备', value: `${readyProfiles}/${items.length || 0}` },
+              { label: '运行态缓存', value: `${runtimeReady}/${items.length || 0}` },
+              { label: '结构缺口', value: structuralGaps === 0 ? '已收敛' : `${structuralGaps} 个` },
+            ])
+          .map((item) => `
+            <div class="key-value-row">
+              <span>${escapeHtml(item.label)}</span>
+              <strong>${escapeHtml(item.value)}</strong>
+            </div>
+          `).join('')}
+        </div>
+      `
+      : `
+        <div class="compact-overview-grid compact-overview-grid-dense">
+          <section class="shell-card shell-card-dense">
+            <div class="shell-card-header">
+              <strong>当前选择</strong>
+              ${selected ? pillHtml(selected.isActive ? '默认实例' : '普通实例', selected.isActive ? 'good' : 'neutral') : pillHtml('未选择', 'warn')}
+            </div>
+            <label class="field-stack">
+              <span>实例</span>
+              <select class="select-input" id="profiles-focus-select" ${items.length === 0 ? 'disabled' : ''}>
+                ${
+                  items.length
+                    ? items.map((item) => `
+                      <option value="${escapeHtml(item.name)}" ${item.name === selected?.name ? 'selected' : ''}>
+                        ${escapeHtml(item.name)}${item.isActive ? ' · 当前默认' : ''}
+                      </option>
+                    `).join('')
+                    : '<option value="">暂无实例</option>'
+                }
+              </select>
+            </label>
+            <p class="shell-card-copy">${escapeHtml(selected ? selected.homePath : '先选择一个 Hermes profile，再继续往下治理。')}</p>
+            <div class="toolbar">
+              ${buttonHtml({ action: 'open-profile-surface', label: '进入实例台', kind: 'primary', disabled: !selected, attrs: { 'data-surface': 'workspace' } })}
+              ${buttonHtml({ action: 'open-profile-surface', label: '进入维护区', disabled: !selected, attrs: { 'data-surface': 'maintain' } })}
+              ${buttonHtml({ action: 'goto-diagnostics', label: '系统诊断', disabled: !selected })}
+            </div>
+          </section>
+          <section class="shell-card shell-card-dense shell-card-muted">
+            <div class="shell-card-header">
+              <strong>当前边界</strong>
+              ${pillHtml(selected && bundle && warnings.length === 0 ? '偏稳定' : '需要关注', selected && bundle && warnings.length === 0 ? 'good' : 'warn')}
+            </div>
+            ${selected && bundle
+              ? keyValueRowsHtml([
+                { label: '模型链路', value: bundle.config.summary.modelDefault || '默认模型待配置' },
+                { label: 'Gateway', value: bundle.dashboard.gateway?.gatewayState || 'unknown' },
+                { label: '基础材料', value: materialValue },
+                { label: '建议操作', value: nextStep.title },
+              ])
+              : keyValueRowsHtml([
+                { label: '默认实例', value: defaultProfile },
+                { label: '运行态缓存', value: `${runtimeReady}/${items.length || 0}` },
+                { label: '结构缺口', value: structuralGaps === 0 ? '已收敛' : `${structuralGaps} 个` },
+                { label: '建议操作', value: '先选择实例' },
+              ])}
+            ${warnings.length > 0 ? `<div class="warning-stack top-gap">${warnings.slice(0, 2).map((item) => `<div class="warning-item">${escapeHtml(item)}</div>`).join('')}</div>` : ''}
+          </section>
+        </div>
+      `;
 
   return `
     <div class="page-header page-header-compact">
       <div class="panel-title-row">
         <h1 class="page-title">Profile 管理</h1>
-        ${infoTipHtml('默认页只保留实例选择、主判断和最常用入口。实例列表、运行细节、多实例对照和维护动作已经继续下沉。')}
       </div>
-      <p class="page-desc">让小白先看懂“该选谁、先去哪”，让进阶用户继续进入实例台和维护区。</p>
+      <p class="page-desc">多实例选择、查看与维护。</p>
     </div>
 
     ${renderSurfaceTabs(view)}
@@ -540,11 +710,11 @@ function renderFocusSurface(view) {
       <section class="summary-mini-card">
         <span class="summary-mini-label">当前状态</span>
         <strong class="summary-mini-value">${escapeHtml(readinessValue)}</strong>
-        <span class="summary-mini-meta">${escapeHtml(selected ? `围绕 ${selected.name} 继续治理` : '先选定一个实例，再看下一步')}</span>
+        <span class="summary-mini-meta">${escapeHtml(selected ? `当前实例 ${selected.name}` : '尚未选择实例')}</span>
       </section>
     </section>
 
-    <section class="dashboard-focus-shell">
+    <section class="dashboard-focus-shell dashboard-focus-shell-single">
       <section class="dashboard-focus-card dashboard-focus-card-${focusReady ? 'good' : 'warn'}">
         <div class="dashboard-focus-head">
           <div class="dashboard-focus-copy">
@@ -560,7 +730,7 @@ function renderFocusSurface(view) {
           </div>
         </div>
         <div class="dashboard-signal-grid">
-          ${signalCards.map((item) => `
+          ${focusSignals.map((item) => `
             <section class="dashboard-signal-card">
               <span class="dashboard-signal-label">${escapeHtml(item.label)}</span>
               <strong class="dashboard-signal-value">${escapeHtml(item.value)}</strong>
@@ -579,128 +749,26 @@ function renderFocusSurface(view) {
           ${buttonHtml({ action: 'open-home', label: '打开目录', disabled: !selected || Boolean(view.runningAction) })}
         </div>
       </section>
-
-      <aside class="dashboard-jump-panel">
-        <div class="workspace-main-header">
-          <div>
-            <strong>继续去哪里</strong>
-            <p class="workspace-main-copy">这里只保留最常用的 4 个去向，其他治理动作继续放进实例台和维护区。</p>
-          </div>
-          ${pillHtml('常用 4 项', 'neutral')}
-        </div>
-        <div class="dashboard-jump-grid">
-          ${launcherCardHtml({
-            action: 'goto-config',
-            kicker: '配置',
-            title: '模型与凭证',
-            meta: selected && bundle
-              ? `${bundle.config.summary.modelProvider || 'provider 未配置'} / ${bundle.config.summary.modelDefault || 'model 未配置'}`
-              : '继续补模型、provider 和凭证链路',
-            tone: selected && bundle && bundle.config.summary.modelDefault ? 'good' : 'warn',
-          })}
-          ${launcherCardHtml({
-            action: 'goto-gateway',
-            kicker: '通道',
-            title: 'Gateway 与消息链路',
-            meta: selected && bundle
-              ? `${bundle.dashboard.gateway?.gatewayState || 'unknown'} · ${remoteJobCount(bundle)} 个远端作业`
-              : '继续核对平台、Gateway 和远端投递',
-            tone: selected && bundle && bundle.dashboard.gateway?.gatewayState === 'running' ? 'good' : 'warn',
-          })}
-          ${launcherCardHtml({
-            action: 'goto-extensions',
-            kicker: '能力',
-            title: '扩展与能力面',
-            meta: selected && bundle
-              ? `${enabledToolCount(bundle.extensions)}/${totalToolCount(bundle.extensions)} tools · ${bundle.extensions.plugins.installedCount} 个插件`
-              : '继续核对 tools、skills 和 plugins',
-          })}
-          ${launcherCardHtml({
-            action: 'goto-logs',
-            kicker: '排障',
-            title: '日志与诊断',
-            meta: selected && warnings.length > 0 ? warnings[0] : '进入日志与诊断继续排查',
-            tone: warnings.length > 0 ? 'warn' : 'neutral',
-          })}
-        </div>
-      </aside>
     </section>
 
     <section class="config-section">
-      <div class="config-section-header">
+      <div class="workspace-main-header">
         <div>
-          <h2 class="config-section-title">切换实例</h2>
-          <p class="config-section-desc">默认层不再直接铺开长列表，只保留一个轻量选择器和两个深入入口。</p>
+          <strong>${escapeHtml(focusSubviewMeta.title)}</strong>
+          <p class="workspace-main-copy">${escapeHtml(focusSubviewMeta.desc)}</p>
         </div>
         <div class="toolbar">
-          ${buttonHtml({ action: 'refresh-fleet', label: view.refreshing ? '同步中…' : '刷新列表', kind: 'primary', disabled: view.refreshing || Boolean(view.runningAction) })}
+          ${pillHtml(focusSubviewMeta.pill, 'neutral')}
+          ${buttonHtml({ action: 'refresh-fleet', label: view.refreshing ? '同步中…' : '刷新', kind: 'primary', disabled: view.refreshing || Boolean(view.runningAction) })}
         </div>
       </div>
-      <div class="compact-overview-grid compact-overview-grid-dense">
-        <section class="shell-card shell-card-dense">
-          <div class="shell-card-header">
-            <strong>当前选择</strong>
-            ${selected ? pillHtml(selected.isActive ? '默认实例' : '普通实例', selected.isActive ? 'good' : 'neutral') : pillHtml('未选择', 'warn')}
-          </div>
-          <label class="field-stack">
-            <span>实例</span>
-            <select class="select-input" id="profiles-focus-select" ${items.length === 0 ? 'disabled' : ''}>
-              ${
-                items.length
-                  ? items.map((item) => `
-                    <option value="${escapeHtml(item.name)}" ${item.name === selected?.name ? 'selected' : ''}>
-                      ${escapeHtml(item.name)}${item.isActive ? ' · 当前默认' : ''}
-                    </option>
-                  `).join('')
-                  : '<option value="">暂无实例</option>'
-              }
-            </select>
-          </label>
-          <p class="shell-card-copy">${escapeHtml(selected ? `${selected.homePath}` : '先选择一个 Hermes profile，再进入实例台或维护区继续治理。')}</p>
-          <div class="toolbar">
-            ${buttonHtml({ action: 'open-profile-surface', label: '实例台', kind: 'primary', disabled: !selected, attrs: { 'data-surface': 'workspace' } })}
-            ${buttonHtml({ action: 'open-profile-surface', label: '维护区', disabled: !selected, attrs: { 'data-surface': 'maintain' } })}
-            ${buttonHtml({ action: 'goto-diagnostics', label: '系统诊断', disabled: !selected })}
-          </div>
-        </section>
-        <section class="shell-card shell-card-dense shell-card-muted">
-          <div class="shell-card-header">
-            <strong>当前只保留这些边界</strong>
-            ${pillHtml(selected && bundle && warnings.length === 0 ? '偏稳定' : '需要关注', selected && bundle && warnings.length === 0 ? 'good' : 'warn')}
-          </div>
-          ${
-            selected && bundle
-              ? `
-                ${keyValueRowsHtml([
-                  { label: 'Provider / 模型', value: `${bundle.config.summary.modelProvider || 'provider 未配置'} / ${bundle.config.summary.modelDefault || 'model 未配置'}` },
-                  { label: 'Toolsets', value: toolsetLabel(bundle) },
-                  { label: '自动化', value: `${bundle.cron.jobs.length} 个 Cron / ${remoteJobCount(bundle)} 个远端作业` },
-                  { label: '下一步', value: warnings.length > 0 ? '先看实例台或日志页' : '继续进入实例台深入查看' },
-                ])}
-                ${
-                  warnings.length > 0
-                    ? `<div class="warning-stack top-gap">${warnings.slice(0, 2).map((item) => `<div class="warning-item">${escapeHtml(item)}</div>`).join('')}</div>`
-                    : ''
-                }
-              `
-              : error && selected
-                ? `
-                  <p class="shell-card-copy">${escapeHtml(error)}</p>
-                  ${keyValueRowsHtml([
-                    { label: '当前实例', value: selected.name },
-                    { label: '下一步', value: '先刷新实例，或直接进入日志与诊断' },
-                  ])}
-                `
-                : `
-                  <p class="shell-card-copy">运行态还没完整进入页面时，这里只保留方向边界，不提前把长列表和维护表单都堆出来。</p>
-                  ${keyValueRowsHtml([
-                    { label: '默认实例', value: defaultProfile },
-                    { label: '运行态缓存', value: `${runtimeReady}/${items.length || 0}` },
-                    { label: '下一步', value: '先选择实例，再进入实例台' },
-                  ])}
-                `
-          }
-        </section>
+      <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
+        ${subviewTabHtml('data-profile-focus-view', focusSubview, 'status', '状态')}
+        ${subviewTabHtml('data-profile-focus-view', focusSubview, 'routes', '去处理')}
+        ${subviewTabHtml('data-profile-focus-view', focusSubview, 'more', '更多')}
+      </div>
+      <div class="top-gap">
+        ${focusSubviewContent}
       </div>
     </section>
   `;
@@ -713,13 +781,146 @@ function renderWorkbench(view) {
   const warnings = selected && bundle ? runtimeHealthWarnings(selected, bundle) : [];
   const loading = runtimeLoading(view, selected?.name);
   const error = runtimeError(view, selected?.name);
+  const workbenchSubview = view.workbenchSubview || 'status';
+  const nextStep = !selected
+    ? {
+      title: '先选实例',
+      detail: '先从左侧实例列表选择实例。',
+    }
+    : loading && !bundle
+      ? {
+        title: '等待实例同步',
+        detail: '运行态快照还在读取中，稍后会自动补齐。',
+      }
+      : error && !bundle
+        ? {
+          title: '先处理读取失败',
+          detail: error,
+        }
+        : warnings.length > 0
+          ? {
+            title: '处理提醒',
+            detail: warnings[0],
+          }
+          : bundle?.dashboard.gateway?.gatewayState !== 'running'
+          ? {
+            title: '检查 Gateway',
+            detail: '模型链路基本就绪，优先确认网关和消息链路。',
+          }
+              : {
+                title: '按需深入',
+                detail: '当前实例主链路已较稳定。',
+              };
+  const workbenchSubviewMeta = workbenchSubview === 'routes'
+    ? {
+      title: '常用入口',
+      desc: '打开最常用的工作台。',
+      pill: '入口',
+    }
+    : workbenchSubview === 'more'
+      ? {
+        title: '更多信息',
+        desc: '查看补充资料。',
+        pill: '更多',
+      }
+      : {
+        title: '当前状态',
+        desc: '查看当前实例摘要。',
+        pill: '状态',
+      };
+  const workbenchSubviewContent = workbenchSubview === 'routes'
+    ? `
+      <div class="dashboard-jump-grid">
+        ${launcherCardHtml({
+          action: 'goto-config-model',
+          kicker: '配置',
+          title: '模型与 Provider',
+          meta: bundle ? `${bundle.config.summary.modelProvider || 'provider 未配置'} / ${bundle.config.summary.modelDefault || 'model 未配置'}` : '继续补模型、provider 和默认链路',
+          tone: bundle?.config.summary.modelDefault ? 'good' : 'warn',
+        })}
+        ${launcherCardHtml({
+          action: 'goto-gateway',
+          kicker: '通道',
+          title: 'Gateway 与消息链路',
+          meta: bundle ? `${bundle.dashboard.gateway?.gatewayState || 'unknown'} · ${remoteJobCount(bundle)} 个远端作业` : '继续核对 Gateway 和远端投递',
+          tone: bundle?.dashboard.gateway?.gatewayState === 'running' ? 'good' : 'warn',
+        })}
+        ${launcherCardHtml({
+          action: 'goto-extensions',
+          kicker: '能力',
+          title: '插件、技能与记忆',
+          meta: bundle ? `${bundle.extensions.plugins.installedCount} 个插件 · ${enabledToolCount(bundle.extensions)} 个工具启用` : '继续核对能力面',
+          tone: bundle ? 'neutral' : 'warn',
+        })}
+        ${profileViewCardHtml({
+          key: 'runtime',
+          kicker: '运行',
+          title: '进入运行信号页',
+          meta: '把更细的运行态、材料和诊断继续拆到下一层看',
+          tone: warnings.length > 0 ? 'warn' : 'neutral',
+        })}
+      </div>
+    `
+    : workbenchSubview === 'more'
+      ? `
+        ${warnings.length > 0
+          ? `<div class="warning-stack">${warnings.slice(0, 3).map((item) => `<div class="warning-item">${escapeHtml(item)}</div>`).join('')}</div>`
+          : ''}
+        <div class="detail-list compact ${warnings.length > 0 ? 'top-gap' : ''}">
+          ${(selected && bundle
+            ? [
+              { label: '关键文件', value: `${installation?.configExists ? 'config' : 'config?'} · ${installation?.envExists ? '.env' : '.env?'} · ${installation?.logsDirExists ? 'logs' : 'logs?'}` },
+              { label: '自动化', value: `${bundle.cron.jobs.length} 个 Cron / ${remoteJobCount(bundle)} 个远端作业` },
+              { label: '记忆', value: bundle.config.summary.memoryEnabled ? (bundle.config.summary.memoryProvider || 'builtin-file') : '已关闭' },
+              { label: '目录', value: selected.homePath },
+            ]
+            : [
+              { label: '当前实例', value: selected?.name || '未选择' },
+              { label: '状态', value: error || '运行态还没完整进入页面' },
+              { label: '建议操作', value: '先刷新实例或切换到其他实例' },
+            ])
+          .map((item) => `
+            <div class="key-value-row">
+              <span>${escapeHtml(item.label)}</span>
+              <strong>${escapeHtml(item.value)}</strong>
+            </div>
+          `).join('')}
+        </div>
+        <div class="toolbar top-gap">
+          ${buttonHtml({ action: 'goto-logs', label: '进入日志页', disabled: !selected })}
+          ${buttonHtml({ action: 'goto-diagnostics', label: '进入诊断页', disabled: !selected })}
+          ${buttonHtml({ action: 'open-profile-surface', label: '去维护区', disabled: !selected, attrs: { 'data-surface': 'maintain' } })}
+        </div>
+      `
+      : `
+        <div class="detail-list compact">
+          ${(selected && bundle
+            ? [
+              { label: 'Provider / 模型', value: `${bundle.config.summary.modelProvider || 'provider 未配置'} / ${bundle.config.summary.modelDefault || 'model 未配置'}` },
+              { label: 'Toolsets', value: toolsetLabel(bundle) },
+              { label: '材料', value: `${selected.skillCount} 技能 · ${selected.aliases.length} Alias · ${selected.envExists ? '.env ok' : '.env missing'}` },
+              { label: '建议操作', value: nextStep.title },
+            ]
+            : [
+              { label: '当前实例', value: selected?.name || '未选择' },
+              { label: '运行态', value: loading ? '读取中' : error || '待同步' },
+              { label: '建议操作', value: nextStep.title },
+            ])
+          .map((item) => `
+            <div class="key-value-row">
+              <span>${escapeHtml(item.label)}</span>
+              <strong>${escapeHtml(item.value)}</strong>
+            </div>
+          `).join('')}
+        </div>
+      `;
 
   return `
     <section class="config-section">
       <div class="config-section-header">
         <div>
           <h2 class="config-section-title">当前实例工作台</h2>
-          <p class="config-section-desc">默认只保留当前实例最常用的治理入口，其他低频操作继续下沉到运行态和维护页。</p>
+          <p class="config-section-desc">当前实例的常用操作。</p>
         </div>
         <div class="toolbar">
           ${buttonHtml({ action: 'refresh-selected-runtime', label: loading ? '刷新中…' : '刷新实例', kind: 'primary', disabled: !selected || loading || Boolean(view.runningAction) })}
@@ -760,42 +961,43 @@ function renderWorkbench(view) {
               loading && !bundle
                 ? emptyStateHtml('正在读取实例运行态', 'dashboard / config / extensions / cron / installation 快照会一起同步。')
                 : error && !bundle
-                ? emptyStateHtml('实例运行态读取失败', error)
+                  ? emptyStateHtml('实例运行态读取失败', error)
                   : `
-                    <div class="dashboard-focus-shell top-gap">
+                    <div class="dashboard-focus-shell dashboard-focus-shell-single top-gap">
                       <section class="dashboard-focus-card dashboard-focus-card-${warnings.length === 0 ? 'good' : 'warn'}">
                         <div class="dashboard-focus-head">
                           <div class="dashboard-focus-copy">
                             <span class="dashboard-focus-kicker">${selected.isActive ? '当前默认实例' : '实例工作台'}</span>
                             <h2 class="dashboard-focus-title">${escapeHtml(selected.name)}</h2>
-                            <p class="dashboard-focus-desc">当前页只保留最常用的治理入口。运行态细节、实例对照和生命周期动作继续收进次级页签。</p>
+                            <p class="dashboard-focus-desc">当前实例的常用治理入口。</p>
                           </div>
                           <div class="dashboard-focus-pills">
                             ${selected.isDefault ? pillHtml('default', 'neutral') : ''}
                             ${selected.isActive ? pillHtml('active', 'good') : pillHtml('浏览实例', 'neutral')}
                             ${pillHtml(selected.gatewayState || 'gateway unknown', platformTone(selected.gatewayState))}
+                            ${warnings.length > 0 ? pillHtml(`${warnings.length} 条提醒`, 'warn') : pillHtml('当前稳定', 'good')}
                           </div>
                         </div>
                         <div class="dashboard-signal-grid">
                           <section class="dashboard-signal-card">
-                            <span class="dashboard-signal-label">模型</span>
+                            <span class="dashboard-signal-label">当前实例</span>
+                            <strong class="dashboard-signal-value">${escapeHtml(selected.name)}</strong>
+                            <span class="dashboard-signal-meta">${escapeHtml(selected.isActive ? '当前默认实例' : '正在浏览的实例')}</span>
+                          </section>
+                          <section class="dashboard-signal-card">
+                            <span class="dashboard-signal-label">模型链路</span>
                             <strong class="dashboard-signal-value">${escapeHtml(bundle.config.summary.modelDefault || '待配置')}</strong>
                             <span class="dashboard-signal-meta">${escapeHtml(bundle.config.summary.modelProvider || 'provider 未配置')}</span>
                           </section>
                           <section class="dashboard-signal-card">
-                            <span class="dashboard-signal-label">能力面</span>
-                            <strong class="dashboard-signal-value">${escapeHtml(toolsetLabel(bundle))}</strong>
+                            <span class="dashboard-signal-label">当前状态</span>
+                            <strong class="dashboard-signal-value">${escapeHtml(warnings.length === 0 ? '可继续工作' : `${warnings.length} 条提醒`)}</strong>
                             <span class="dashboard-signal-meta">${escapeHtml(`${enabledToolCount(bundle.extensions)} 个工具 · ${bundle.extensions.plugins.installedCount} 个插件`)}</span>
                           </section>
                           <section class="dashboard-signal-card">
-                            <span class="dashboard-signal-label">实例材料</span>
-                            <strong class="dashboard-signal-value">${escapeHtml(`${selected.skillCount} 技能 / ${selected.aliases.length} Alias`)}</strong>
-                            <span class="dashboard-signal-meta">${escapeHtml(selected.aliasPath || selected.homePath)}</span>
-                          </section>
-                          <section class="dashboard-signal-card">
-                            <span class="dashboard-signal-label">运行提醒</span>
-                            <strong class="dashboard-signal-value">${escapeHtml(String(warnings.length))}</strong>
-                            <span class="dashboard-signal-meta">${escapeHtml(`${remoteJobCount(bundle)} 个远端作业 · ${bundle.cron.jobs.length} 个 cron`)}</span>
+                            <span class="dashboard-signal-label">建议操作</span>
+                            <strong class="dashboard-signal-value">${escapeHtml(nextStep.title)}</strong>
+                            <span class="dashboard-signal-meta">${escapeHtml(nextStep.detail)}</span>
                           </section>
                         </div>
                         <div class="dashboard-focus-actions">
@@ -809,60 +1011,24 @@ function renderWorkbench(view) {
                           ${buttonHtml({ action: 'open-home', label: '打开目录', disabled: Boolean(view.runningAction) })}
                         </div>
                       </section>
-
-                      <aside class="dashboard-jump-panel">
-                        <div class="workspace-main-header">
-                          <div>
-                            <strong>继续治理</strong>
-                            <p class="workspace-main-copy">常用入口直接放这里，低频维护继续放进“维护”页签。</p>
-                          </div>
-                          ${pillHtml('高频 4 项', 'neutral')}
-                        </div>
-                        <div class="dashboard-jump-grid">
-                          ${launcherCardHtml({
-                            action: 'goto-gateway',
-                            kicker: '运行',
-                            title: 'Gateway 工作台',
-                            meta: `${bundle.dashboard.gateway?.gatewayState || 'unknown'} · ${bundle.dashboard.gateway?.activeAgents ?? 0} 个活跃 Agent`,
-                            tone: bundle.dashboard.gateway?.gatewayState === 'running' ? 'good' : 'warn',
-                          })}
-                          ${launcherCardHtml({
-                            action: 'goto-extensions',
-                            kicker: '能力',
-                            title: '插件 / 技能 / 记忆',
-                            meta: `${bundle.extensions.plugins.installedCount} 个插件 · memory ${bundle.config.summary.memoryProvider || 'builtin-file'}`,
-                          })}
-                          ${launcherCardHtml({
-                            action: 'goto-logs',
-                            kicker: '排障',
-                            title: '日志与诊断',
-                            meta: warnings[0] || '进入日志与诊断继续排查',
-                            tone: warnings.length > 0 ? 'warn' : 'neutral',
-                          })}
-                          ${profileViewCardHtml({
-                            key: 'runtime',
-                            kicker: '深入',
-                            title: '运行态与对照',
-                            meta: '查看完整运行信号或继续做多实例对照',
-                          })}
-                        </div>
-                      </aside>
                     </div>
 
                     <section class="workspace-main-card dashboard-quiet-card">
                       <div class="workspace-main-header">
                         <div>
-                          <strong>当前只保留这些摘要</strong>
-                          <p class="workspace-main-copy">模型、Toolsets、Gateway、Alias 这些高频摘要仍然可见；更深的文件、回执和迁移动作已经下沉。</p>
+                          <strong>${escapeHtml(workbenchSubviewMeta.title)}</strong>
+                          <p class="workspace-main-copy">${escapeHtml(workbenchSubviewMeta.desc)}</p>
                         </div>
-                        ${pillHtml(warnings.length === 0 ? '当前稳定' : `${warnings.length} 条提醒`, warnings.length === 0 ? 'good' : 'warn')}
+                        ${pillHtml(workbenchSubviewMeta.pill, 'neutral')}
                       </div>
-                      ${keyValueRowsHtml([
-                        { label: 'Provider / 模型', value: `${bundle.config.summary.modelProvider || 'provider 未配置'} / ${bundle.config.summary.modelDefault || 'model 未配置'}` },
-                        { label: 'Toolsets', value: toolsetLabel(bundle) },
-                        { label: '关键文件', value: `${installation?.configExists ? 'config' : 'config?'} · ${installation?.envExists ? '.env' : '.env?'} · ${installation?.logsDirExists ? 'logs' : 'logs?'}` },
-                        { label: '下一步', value: warnings.length > 0 ? '先看运行态或日志页' : '可继续做对照或维护' },
-                      ])}
+                      <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
+                        ${subviewTabHtml('data-profile-workbench-view', workbenchSubview, 'status', '状态')}
+                        ${subviewTabHtml('data-profile-workbench-view', workbenchSubview, 'routes', '去处理')}
+                        ${subviewTabHtml('data-profile-workbench-view', workbenchSubview, 'more', '更多')}
+                      </div>
+                      <div class="top-gap">
+                        ${workbenchSubviewContent}
+                      </div>
                     </section>
                   `
             }
@@ -1313,9 +1479,8 @@ function renderWorkspaceSurface(view) {
     <div class="page-header page-header-compact">
       <div class="panel-title-row">
         <h1 class="page-title">Profile 实例台</h1>
-        ${infoTipHtml('这里是实例列表、实例详情、运行信号和实例对照的二级页。默认入口层不会再同时展开这些内容。')}
       </div>
-      <p class="page-desc">需要具体看某个实例的目录、运行态或多实例差异时，再进入这里。</p>
+      <p class="page-desc">实例详情、运行信号与实例对照。</p>
     </div>
 
     ${renderSurfaceTabs(view)}
@@ -1347,9 +1512,8 @@ function renderMaintenanceSurface(view) {
     <div class="page-header page-header-compact">
       <div class="panel-title-row">
         <h1 class="page-title">Profile 维护区</h1>
-        ${infoTipHtml('创建、导入导出、Alias 和危险操作都收在这里，不再在默认层直接摊开。')}
       </div>
-      <p class="page-desc">低频但必要的生命周期动作继续保留，只是不再和常用入口抢同一屏。</p>
+      <p class="page-desc">创建、导入导出、Alias 与维护操作。</p>
     </div>
 
     ${renderSurfaceTabs(view)}
@@ -1915,6 +2079,30 @@ function bindEvents(view) {
     };
   });
 
+  view.page.querySelectorAll('[data-profile-focus-view]').forEach((element) => {
+    element.onclick = () => {
+      const nextView = element.getAttribute('data-profile-focus-view');
+      if (!nextView || nextView === view.focusSubview) {
+        return;
+      }
+      view.focusSubview = nextView;
+      view.surfaceView = 'focus';
+      renderPage(view);
+    };
+  });
+
+  view.page.querySelectorAll('[data-profile-workbench-view]').forEach((element) => {
+    element.onclick = () => {
+      const nextView = element.getAttribute('data-profile-workbench-view');
+      if (!nextView || nextView === view.workbenchSubview) {
+        return;
+      }
+      view.workbenchSubview = nextView;
+      view.surfaceView = 'workspace';
+      renderPage(view);
+    };
+  });
+
   if (focusSelect) {
     focusSelect.onchange = (event) => {
       view.selectedName = event.target.value || null;
@@ -2232,6 +2420,7 @@ export async function render() {
     destroyed: false,
     error: null,
     exportOutput: '',
+    focusSubview: 'status',
     importArchive: '',
     importName: '',
     lastResult: null,
@@ -2252,6 +2441,7 @@ export async function render() {
     selectedName: getPanelState().selectedProfile,
     surfaceView: 'focus',
     unsubscribe: null,
+    workbenchSubview: 'status',
     cloneFrom: currentProfilesSnapshot()?.activeProfile ?? 'default',
   };
 

@@ -27,6 +27,29 @@ const EMPTY_PLUGIN_CREATE_DRAFT = {
   overwrite: false,
 };
 
+const PLUGIN_WORKSPACE_GROUPS = [
+  {
+    key: 'catalog',
+    label: '目录',
+    description: '筛选插件并选择目标。',
+  },
+  {
+    key: 'target',
+    label: '目标',
+    description: '查看当前插件的状态、凭证和操作。',
+  },
+  {
+    key: 'provider',
+    label: 'Provider',
+    description: '切换 Provider 并查看凭证。',
+  },
+  {
+    key: 'local',
+    label: '本地接入',
+    description: '导入本地插件或创建空白骨架。',
+  },
+];
+
 function countCategories(items) {
   const counts = new Map();
   items.forEach((item) => {
@@ -419,7 +442,7 @@ function findMatchingRuntimePluginName(runtimePlugins, pluginName) {
 
 function pluginLifecycleSummary(focus) {
   if (!focus.name) {
-    return '等待选择治理目标';
+    return '等待选择目标';
   }
   if (focus.installed && focus.catalogItem) {
     return '目录态与运行态均已接入';
@@ -430,7 +453,7 @@ function pluginLifecycleSummary(focus) {
   if (focus.catalogItem) {
     return '目录已接入，尚未安装到运行态';
   }
-  return '等待纳入治理';
+  return '等待加入当前目标';
 }
 
 export function resolvePluginGovernanceTarget(view, state) {
@@ -1081,14 +1104,14 @@ function renderPluginCards(view, state, focus) {
                     <strong class="plugin-tile-name">${escapeHtml(item)}</strong>
                     <div class="plugin-tile-badges">
                       ${pillHtml('已安装', 'good')}
-                      ${focused ? pillHtml('治理中', 'good') : ''}
+                      ${focused ? pillHtml('当前目标', 'good') : ''}
                       ${providerOption ? pillHtml(providerOption.selected ? '当前 Provider' : '可设为 Provider', statusTone) : ''}
                     </div>
                   </div>
                 </div>
                 <span class="plugin-status-dot plugin-status-enabled" title="已安装"></span>
               </div>
-              <p class="plugin-tile-desc">当前只有运行态，还没拿到本地 manifest。先选为治理目标，再在上方集中做启停、更新和本地接管。</p>
+              <p class="plugin-tile-desc">当前只有运行态，还没有本地 manifest。选中后可在上方执行启停、更新和本地接入。</p>
               <div class="plugin-tile-meta">
                 <span>运行态插件</span>
                 <span>manifest 缺失</span>
@@ -1097,7 +1120,7 @@ function renderPluginCards(view, state, focus) {
               <div class="plugin-tile-actions">
                 ${buttonHtml({
                   action: 'plugin-fill',
-                  label: focused ? '治理中' : '设为治理目标',
+                  label: focused ? '当前目标' : '设为当前目标',
                   kind: focused ? 'secondary' : 'primary',
                   attrs: { 'data-name': item },
                 })}
@@ -1108,7 +1131,7 @@ function renderPluginCards(view, state, focus) {
                   attrs: { 'data-name': item },
                 })}
               </div>
-              <p class="plugin-tile-hint">更多操作统一收进上方“当前治理目标”。</p>
+              <p class="plugin-tile-hint">更多操作请在上方“当前目标”里处理。</p>
             </article>
           `;
         }).join('')}
@@ -1139,7 +1162,7 @@ function renderPluginCards(view, state, focus) {
                   <div class="plugin-tile-badges">
                     ${pillHtml(categoryLabel(item.category), 'neutral')}
                     ${pillHtml(pluginInstallLabel(item.installed), item.installed ? 'good' : 'neutral')}
-                    ${focused ? pillHtml('治理中', 'good') : ''}
+                    ${focused ? pillHtml('当前目标', 'good') : ''}
                     ${item.requiresEnv.length ? pillHtml(`${item.requiresEnv.length} 个 ENV`, 'warn') : ''}
                     ${providerOption ? pillHtml(providerOption.selected ? '当前 Provider' : '可设为 Provider', providerOption.selected ? 'good' : 'neutral') : ''}
                   </div>
@@ -1162,7 +1185,7 @@ function renderPluginCards(view, state, focus) {
             <div class="plugin-tile-actions">
               ${buttonHtml({
                 action: 'plugin-fill',
-                label: focused ? '治理中' : '设为治理目标',
+                label: focused ? '当前目标' : '设为当前目标',
                 kind: focused ? 'secondary' : 'primary',
                 attrs: { 'data-name': item.name },
               })}
@@ -1175,10 +1198,187 @@ function renderPluginCards(view, state, focus) {
                 attrs: { 'data-name': item.name },
               })}
             </div>
-            <p class="plugin-tile-hint">${escapeHtml(item.requiresEnv.length ? '凭证、Provider、manifest、README 都在当前治理目标里继续处理。' : '目录、Provider 和文档接管都统一收进当前治理目标。')}</p>
+            <p class="plugin-tile-hint">${escapeHtml(item.requiresEnv.length ? '凭证、Provider、manifest 和 README 都可在“当前目标”里处理。' : '目录、Provider 和文档都可在“当前目标”里处理。')}</p>
           </article>
         `;
       }).join('')}
+    </div>
+  `;
+}
+
+function resolvePluginWorkspaceGroup(activeKey) {
+  return PLUGIN_WORKSPACE_GROUPS.find((group) => group.key === activeKey) ?? PLUGIN_WORKSPACE_GROUPS[0];
+}
+
+function renderPluginWorkspaceTabs(activeKey) {
+  return `
+    <div class="tab-bar tab-bar-dense">
+      ${PLUGIN_WORKSPACE_GROUPS.map((group) => `
+        <button
+          type="button"
+          class="tab ${group.key === activeKey ? 'active' : ''}"
+          data-action="focus-plugin-workspace-section"
+          data-section="${escapeHtml(group.key)}"
+        >
+          ${escapeHtml(group.label)}
+        </button>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderPluginCatalogWorkspace(view, state, focus) {
+  return `
+    <section class="panel panel-nested">
+      <div class="workspace-main-header">
+        <div>
+          <strong>插件目录</strong>
+          <p class="workspace-main-copy">筛选插件并选择当前目标。</p>
+        </div>
+        <div class="pill-row">
+          ${pillHtml(`${state.filteredPluginCatalog.length || state.filteredRuntimePlugins.length} 项`, 'neutral')}
+          ${focus?.name ? pillHtml(`当前 ${focus.name}`, 'good') : pillHtml('等待目标', 'warn')}
+        </div>
+      </div>
+      <div class="selection-chip-grid">
+        ${buttonHtml({ action: 'set-plugin-filter', label: '全部插件', className: `selection-chip${view.pluginFilter === 'all' ? ' selection-chip-active' : ''}`, attrs: { 'data-filter': 'all' } })}
+        ${buttonHtml({ action: 'set-plugin-filter', label: '仅已安装', className: `selection-chip${view.pluginFilter === 'installed' ? ' selection-chip-active' : ''}`, attrs: { 'data-filter': 'installed' } })}
+        ${buttonHtml({ action: 'set-plugin-filter', label: '需要凭证', className: `selection-chip${view.pluginFilter === 'requires-env' ? ' selection-chip-active' : ''}`, attrs: { 'data-filter': 'requires-env' } })}
+        ${buttonHtml({ action: 'set-plugin-filter', label: '包含依赖', className: `selection-chip${view.pluginFilter === 'dependencies' ? ' selection-chip-active' : ''}`, attrs: { 'data-filter': 'dependencies' } })}
+      </div>
+      <div class="workspace-list-scroll top-gap">
+        ${renderPluginCards(view, state, focus)}
+      </div>
+    </section>
+  `;
+}
+
+function renderPluginProviderWorkspace(view, state) {
+  const providerPluginCount = state.providerOptions.filter((item) => item.mode === 'plugin').length;
+
+  return `
+    <div class="page-stack">
+      ${renderProviderPresetStrip(view, state)}
+      <section class="workspace-main-card">
+        <div class="workspace-main-header">
+          <div>
+            <h2 class="config-section-title">当前 Provider 入口</h2>
+            <p class="config-section-desc">在这里切换 Provider 并查看相关入口。</p>
+          </div>
+          ${pillHtml(state.providerAligned ? '已对齐' : '待对齐', state.providerAligned ? 'good' : 'warn')}
+        </div>
+        ${keyValueRowsHtml([
+          { label: '当前配置', value: providerDisplayLabel(state.configuredProviderDisplay) },
+          { label: '运行态', value: view.extensions.memoryRuntime.provider || '未读取' },
+          { label: '可切换插件', value: String(providerPluginCount) },
+          { label: '提示', value: view.extensions.plugins.installHint || '如缺凭证，再回配置中心补变量。' },
+        ])}
+        <div class="toolbar top-gap">
+          ${buttonHtml({
+            action: 'provider-apply',
+            label: state.configuredProviderDisplay === 'builtin-file' ? '当前内置' : '切回内置',
+            kind: state.configuredProviderDisplay === 'builtin-file' ? 'secondary' : 'primary',
+            disabled: Boolean(view.runningAction) || !view.configDocs || state.configuredProviderDisplay === 'builtin-file',
+            attrs: { 'data-provider-mode': 'builtin', 'data-provider-name': '' },
+          })}
+          ${buttonHtml({ action: 'goto-config-credentials', label: '去配凭证' })}
+          ${buttonHtml({ action: 'goto-memory', label: '查看 Memory' })}
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function renderPluginLocalWorkspace(view) {
+  const importDraft = view.pluginImportDraft ?? clonePluginImportDraft();
+  const createDraft = view.pluginCreateDraft ?? clonePluginCreateDraft();
+  const lastCreated = view.lastCreatedPlugin;
+  const lastImported = view.lastImportedPlugin;
+
+  return `
+    <div class="page-stack">
+      <section class="workspace-main-card">
+        <div class="workspace-main-header">
+          <div>
+            <h2 class="config-section-title">导入现成目录</h2>
+            <p class="workspace-main-copy">填写路径后可直接导入本地插件目录。</p>
+          </div>
+          ${lastImported ? pillHtml(`导入 ${lastImported.copiedFiles} 个文件`, 'good') : pillHtml(importDraft.category || '自动归类', 'neutral')}
+        </div>
+        <div class="form-grid">
+          <label class="field-stack">
+            <span>源路径</span>
+            <input class="search-input" id="extensions-plugin-import-source" value="${escapeHtml(importDraft.sourcePath)}" placeholder="~/Downloads/byterover 或 /tmp/demo/plugin.yaml" ${view.runningAction ? 'disabled' : ''}>
+          </label>
+          <label class="field-stack">
+            <span>归档分类</span>
+            <input class="search-input" id="extensions-plugin-import-category" value="${escapeHtml(importDraft.category)}" placeholder="留空沿用源分类，否则归入 imported" ${view.runningAction ? 'disabled' : ''}>
+          </label>
+        </div>
+        <div class="checkbox-row top-gap">
+          <label>
+            <input type="checkbox" id="extensions-plugin-import-overwrite" ${importDraft.overwrite ? 'checked' : ''} ${view.runningAction ? 'disabled' : ''}>
+            覆盖同名目录
+          </label>
+        </div>
+        ${lastImported ? `
+          <div class="top-gap">
+            ${keyValueRowsHtml([
+              { label: '最近导入', value: lastImported.imported.name },
+              { label: '来源', value: lastImported.sourcePath },
+              { label: '目标', value: lastImported.targetDirectory },
+            ])}
+          </div>
+        ` : ''}
+        <div class="toolbar top-gap">
+          ${buttonHtml({ action: 'plugin-import-local', label: view.runningAction === 'plugin:import-local' ? '导入中…' : '导入目录', kind: 'primary', disabled: Boolean(view.runningAction) || !importDraft.sourcePath.trim() })}
+          ${buttonHtml({ action: 'plugin-import-reset', label: '清空', disabled: Boolean(view.runningAction) })}
+          ${buttonHtml({ action: 'open-plugin-root', label: '打开插件目录', disabled: Boolean(view.runningAction) })}
+        </div>
+      </section>
+
+      <section class="workspace-main-card">
+        <div class="workspace-main-header">
+          <div>
+            <h2 class="config-section-title">新建最小骨架</h2>
+            <p class="workspace-main-copy">填写名称、分类和描述后即可创建。</p>
+          </div>
+          ${lastCreated ? pillHtml(lastCreated.created.category, 'good') : pillHtml(createDraft.category || 'custom', 'neutral')}
+        </div>
+        <div class="form-grid">
+          <label class="field-stack">
+            <span>插件名称</span>
+            <input class="search-input" id="extensions-plugin-create-name" value="${escapeHtml(createDraft.name)}" placeholder="Release Memory" ${view.runningAction ? 'disabled' : ''}>
+          </label>
+          <label class="field-stack">
+            <span>分类</span>
+            <input class="search-input" id="extensions-plugin-create-category" value="${escapeHtml(createDraft.category)}" placeholder="custom / memory / channel" ${view.runningAction ? 'disabled' : ''}>
+          </label>
+        </div>
+        <label class="field-stack top-gap">
+          <span>描述</span>
+          <input class="search-input" id="extensions-plugin-create-description" value="${escapeHtml(createDraft.description)}" placeholder="一句话描述插件用途" ${view.runningAction ? 'disabled' : ''}>
+        </label>
+        <div class="checkbox-row top-gap">
+          <label>
+            <input type="checkbox" id="extensions-plugin-create-overwrite" ${createDraft.overwrite ? 'checked' : ''} ${view.runningAction ? 'disabled' : ''}>
+            覆盖同名目录
+          </label>
+        </div>
+        ${lastCreated ? `
+          <div class="top-gap">
+            ${keyValueRowsHtml([
+              { label: '最近新建', value: lastCreated.created.name },
+              { label: '分类', value: lastCreated.created.category },
+              { label: '目标', value: lastCreated.targetDirectory },
+            ])}
+          </div>
+        ` : ''}
+        <div class="toolbar top-gap">
+          ${buttonHtml({ action: 'plugin-create-local', label: view.runningAction === 'plugin:create-local' ? '创建中…' : '新建插件', kind: 'primary', disabled: Boolean(view.runningAction) || !createDraft.name.trim() })}
+          ${buttonHtml({ action: 'plugin-create-reset', label: '清空', disabled: Boolean(view.runningAction) })}
+        </div>
+      </section>
     </div>
   `;
 }
@@ -1196,10 +1396,7 @@ function renderPluginTargetWorkbench(view, state, focus) {
       <div class="shell-card-header plugin-focus-head">
         <div class="plugin-focus-title-wrap">
           <div>
-            <div class="panel-title-row">
-              <strong>当前治理目标</strong>
-              ${infoTipHtml('生命周期动作集中在这里执行，目录卡只保留轻量治理入口，避免同一批动作在页面上反复出现。')}
-            </div>
+            <strong>当前目标</strong>
             <p class="shell-card-copy">安装、启停、Provider 和 manifest 编辑都在这里闭环。</p>
           </div>
           ${focus.name ? `
@@ -1241,7 +1438,7 @@ function renderPluginTargetWorkbench(view, state, focus) {
       ` : ''}
       ${focus.name ? `
         <div class="plugin-signal-grid top-gap">
-          ${renderPluginSignalCard('状态', focus.installed ? '已纳入治理' : '等待安装', focus.lifecycleSummary, focus.installed ? 'good' : 'warn')}
+          ${renderPluginSignalCard('状态', focus.installed ? '已安装' : '等待安装', focus.lifecycleSummary, focus.installed ? 'good' : 'warn')}
           ${renderPluginSignalCard(
             '凭证',
             focus.catalogItem?.requiresEnv.length
@@ -1370,7 +1567,7 @@ function renderPluginTargetWorkbench(view, state, focus) {
         </div>
       ` : `
         <div class="top-gap">
-          ${emptyStateHtml('还没选治理目标', '从下方目录卡点“设为治理目标”，或者直接输入 owner/repo / 插件名。')}
+          ${emptyStateHtml('还没选插件', '从目录里选择一个插件，或直接输入名称。')}
         </div>
       `}
     </section>
@@ -1385,10 +1582,7 @@ function renderProviderPresetStrip(view, state) {
   return `
     <section class="preset-strip">
       <div class="preset-strip-header">
-        <div class="panel-title-row">
-          <strong>Provider 预设</strong>
-          ${infoTipHtml('这里会直接写回 config.yaml 里的 memory 配置，用客户端接管大部分 provider 切换，不再依赖 hermes memory setup。')}
-        </div>
+        <strong>Provider 预设</strong>
         <div class="pill-row">
           ${pillHtml(state.configuredProviderDisplay, state.providerAligned ? 'good' : 'warn')}
           ${pillHtml(`可切换 ${state.providerOptions.filter((item) => item.mode === 'plugin').length} 个`, 'neutral')}
@@ -1495,8 +1689,8 @@ export function renderWorkbenchRail(view, state) {
     return `
       <div class="workspace-rail-header">
         <div>
-          <strong>平台治理摘要</strong>
-          <p class="workspace-main-copy">默认直接接管 <code>toolsets / platform_toolsets</code>，运行态清单只作为对照面。</p>
+          <strong>平台摘要</strong>
+          <p class="workspace-main-copy">查看当前平台的能力接入状态。</p>
         </div>
         ${pillHtml(state.currentPlatform ? state.currentPlatform.displayName : '未选择', state.currentPlatform ? 'good' : 'warn')}
       </div>
@@ -1534,7 +1728,7 @@ export function renderWorkbenchRail(view, state) {
       <div class="workspace-rail-header">
         <div>
           <strong>插件接管摘要</strong>
-          <p class="workspace-main-copy">安装、启停和 provider 切换都先在当前页闭环，配置中心退到次级位。</p>
+          <p class="workspace-main-copy">在当前页完成安装、启停和 Provider 切换。</p>
         </div>
         ${pillHtml(`${state.pluginInstalledCount}/${state.pluginAvailableCount || state.pluginInstalledCount}`, state.pluginInstalledCount > 0 ? 'good' : 'warn')}
       </div>
@@ -1544,7 +1738,7 @@ export function renderWorkbenchRail(view, state) {
           <strong>${escapeHtml(String(state.pluginInstalledCount))}</strong>
         </div>
         <div class="key-value-row">
-          <span>可治理目录</span>
+          <span>本地目录</span>
           <strong>${escapeHtml(String(state.pluginAvailableCount || 0))}</strong>
         </div>
         <div class="key-value-row">
@@ -1589,7 +1783,7 @@ export function renderWorkbenchRail(view, state) {
       <div class="workspace-rail-header">
         <div>
           <strong>技能来源摘要</strong>
-          <p class="workspace-main-copy">区分目录态、安装态和 source/trust，默认先走本页与 Skills 页闭环。</p>
+          <p class="workspace-main-copy">查看目录、安装状态和来源信息。</p>
         </div>
         ${pillHtml(`${state.runtimeSkills.length} 项`, state.runtimeSkills.length > 0 ? 'good' : 'warn')}
       </div>
@@ -1630,7 +1824,7 @@ export function renderWorkbenchRail(view, state) {
     <div class="workspace-rail-header">
       <div>
         <strong>运行态闭环</strong>
-        <p class="workspace-main-copy">这里集中看提醒、最近动作回执和原始输出对照。</p>
+        <p class="workspace-main-copy">这里集中查看提醒和最近结果。</p>
       </div>
       ${pillHtml(state.warnings.length === 0 ? '稳定' : `${state.warnings.length} 条提醒`, state.warnings.length === 0 ? 'good' : 'warn')}
     </div>
@@ -1650,37 +1844,24 @@ export function renderToolsWorkbench(view, state, runningToolBatchEnable, runnin
   return `
     <div class="page-stack">
       <section class="panel panel-nested">
-        <div class="workspace-summary-strip workspace-summary-strip-dense">
-          <section class="summary-mini-card">
-            <span class="summary-mini-label">当前平台</span>
-            <strong class="summary-mini-value">${escapeHtml(state.currentPlatform?.displayName || '未选择')}</strong>
-            <span class="summary-mini-meta">当前结构化治理目标</span>
-          </section>
-          <section class="summary-mini-card">
-            <span class="summary-mini-label">运行态启用</span>
-            <strong class="summary-mini-value">${escapeHtml(`${state.currentPlatformMetrics.enabled}/${state.currentPlatformMetrics.total}`)}</strong>
-            <span class="summary-mini-meta">Hermes 运行时上报的已启用数</span>
-          </section>
-          <section class="summary-mini-card">
-            <span class="summary-mini-label">平台绑定</span>
-            <strong class="summary-mini-value">${escapeHtml(String(state.currentPlatformBindingToolsets.length))}</strong>
-            <span class="summary-mini-meta">当前平台写入到 <code>platform_toolsets</code> 的能力数</span>
-          </section>
-          <section class="summary-mini-card">
-            <span class="summary-mini-label">顶层能力</span>
-            <strong class="summary-mini-value">${escapeHtml(String(state.workspaceToolsets.length))}</strong>
-            <span class="summary-mini-meta"><code>toolsets</code> 里的总能力数</span>
-          </section>
+        <div class="workspace-main-header">
+          <div>
+            <strong>工具</strong>
+            <p class="workspace-main-copy">查看当前平台的工具接入状态并执行批量操作。</p>
+          </div>
+          <div class="pill-row">
+            ${pillHtml(state.currentPlatform?.displayName || '未选择平台', state.currentPlatform ? 'good' : 'warn')}
+            ${pillHtml(`${state.currentPlatformMetrics.enabled}/${state.currentPlatformMetrics.total}`, state.currentPlatformMetrics.enabled > 0 ? 'good' : 'warn')}
+            ${pillHtml(`${state.currentPlatformBindingToolsets.length} 平台绑定`, state.currentPlatformBindingToolsets.length ? 'neutral' : 'warn')}
+            ${pillHtml(`${state.workspaceToolsets.length} 顶层能力`, state.workspaceToolsets.length ? 'neutral' : 'warn')}
+          </div>
         </div>
         <div class="compact-overview-grid compact-overview-grid-dense tool-governance-grid">
           <section class="shell-card shell-card-dense tool-governance-shell">
             <div class="shell-card-header">
               <div>
-                <div class="panel-title-row">
-                  <strong>当前平台治理</strong>
-                  ${infoTipHtml('这里默认直接写回 config.yaml 里的 `toolsets` 和 `platform_toolsets`。运行态工具清单仍保留在下方做对照，但主动作不再优先依赖 Hermes CLI。')}
-                </div>
-                <p class="shell-card-copy">把平台能力暴露、顶层 toolsets 和批量接入动作收在一张主卡里，减少页面跳转。</p>
+                <strong>当前平台</strong>
+                <p class="shell-card-copy">平台能力、顶层 Toolsets 和批量操作都集中在这里。</p>
               </div>
               <div class="toolbar">
                 <select class="select-input" id="extensions-platform-select" ${!view.extensions.toolInventory.length || view.runningAction ? 'disabled' : ''}>
@@ -1703,7 +1884,7 @@ export function renderToolsWorkbench(view, state, runningToolBatchEnable, runnin
                 <section class="tool-signal-card">
                   <span class="tool-signal-label">运行态启用</span>
                   <strong class="tool-signal-value">${escapeHtml(previewList(state.currentPlatformRuntimeEnabledNames, '无启用项'))}</strong>
-                  <span class="tool-signal-meta">只作为运行对照，不再是主配置入口</span>
+                  <span class="tool-signal-meta">这里只显示运行状态</span>
                 </section>
                 <section class="tool-signal-card">
                   <span class="tool-signal-label">顶层覆盖</span>
@@ -1735,16 +1916,13 @@ export function renderToolsWorkbench(view, state, runningToolBatchEnable, runnin
                 })}
                 ${buttonHtml({ action: 'goto-config-toolsets', label: '能力集配置' })}
               </div>
-            ` : emptyStateHtml('暂无平台可治理', '当前还没有从 Hermes tools 解析出可操作的平台。')}
+            ` : emptyStateHtml('暂无平台', '当前还没有读取到可操作的平台。')}
           </section>
           <section class="shell-card shell-card-dense shell-card-muted tool-governance-shell">
             <div class="shell-card-header">
               <div>
-                <div class="panel-title-row">
-                  <strong>能力暴露对照</strong>
-                  ${infoTipHtml('这里专门用来收纳“运行态与配置态是否一致”这类提醒，避免大段说明文案挤占主操作区。')}
-                </div>
-                <p class="shell-card-copy">把差异提示、顶层缺口和平台外遗留能力都收纳在副卡里。</p>
+                <strong>能力对照</strong>
+                <p class="shell-card-copy">查看配置和运行态之间的差异。</p>
               </div>
               ${pillHtml(
                 state.currentPlatformMissingTopLevel.length || state.currentPlatformRuntimeOnly.length || state.currentPlatformBindingOnly.length
@@ -1785,173 +1963,35 @@ export function renderToolsWorkbench(view, state, runningToolBatchEnable, runnin
 }
 
 export function renderPluginsWorkbench(view, state) {
-  const importDraft = view.pluginImportDraft ?? clonePluginImportDraft();
-  const createDraft = view.pluginCreateDraft ?? clonePluginCreateDraft();
-  const lastCreated = view.lastCreatedPlugin;
-  const lastImported = view.lastImportedPlugin;
   const focus = resolvePluginGovernanceTarget(view, state);
+  const activeGroup = resolvePluginWorkspaceGroup(view.pluginWorkspaceSection);
+  const workspaceBody = activeGroup.key === 'catalog'
+    ? renderPluginCatalogWorkspace(view, state, focus)
+    : activeGroup.key === 'provider'
+      ? renderPluginProviderWorkspace(view, state)
+      : activeGroup.key === 'local'
+        ? renderPluginLocalWorkspace(view)
+        : renderPluginTargetWorkbench(view, state, focus);
+
   return `
     <div class="page-stack">
       <section class="panel panel-nested">
-        <div class="workspace-summary-strip workspace-summary-strip-dense">
-          <section class="summary-mini-card">
-            <span class="summary-mini-label">已安装</span>
-            <strong class="summary-mini-value">${escapeHtml(String(state.pluginInstalledCount))}</strong>
-            <span class="summary-mini-meta">运行态已识别的插件</span>
-          </section>
-          <section class="summary-mini-card">
-            <span class="summary-mini-label">需凭证</span>
-            <strong class="summary-mini-value">${escapeHtml(String(state.pluginEnvRequiredCount))}</strong>
-            <span class="summary-mini-meta">manifest 声明了 requires_env</span>
-          </section>
-          <section class="summary-mini-card">
-            <span class="summary-mini-label">有依赖</span>
-            <strong class="summary-mini-value">${escapeHtml(String(state.pluginDependencyCount))}</strong>
-            <span class="summary-mini-meta">需要 pip 或外部依赖检查</span>
-          </section>
-          <section class="summary-mini-card">
-            <span class="summary-mini-label">Provider</span>
-            <strong class="summary-mini-value">${escapeHtml(providerDisplayLabel(state.configuredProviderDisplay))}</strong>
-            <span class="summary-mini-meta">${escapeHtml(`运行 ${view.extensions.memoryRuntime.provider}`)}</span>
-          </section>
-        </div>
         <div class="workspace-main-header">
           <div>
-            <strong>插件治理</strong>
-            <p class="workspace-main-copy">导入、创建、安装、Provider 和 manifest 接管都收进一个工作台。</p>
+            <strong>插件</strong>
+            <p class="workspace-main-copy">目录、目标、Provider 和本地接入分开显示。</p>
           </div>
           <div class="toolbar">
-            ${buttonHtml({ action: 'goto-config-credentials', label: '凭证页' })}
+            ${pillHtml(`${state.pluginInstalledCount} 已安装`, state.pluginInstalledCount ? 'good' : 'warn')}
+            ${pillHtml(`${state.pluginEnvRequiredCount} 需凭证`, state.pluginEnvRequiredCount ? 'warn' : 'neutral')}
+            ${pillHtml(providerDisplayLabel(state.configuredProviderDisplay), 'neutral')}
+            ${pillHtml(focus.name || '等待目标', focus.name ? 'good' : 'warn')}
             ${buttonHtml({ action: 'refresh', label: '刷新运行态', disabled: Boolean(view.runningAction) })}
           </div>
         </div>
-        ${renderProviderPresetStrip(view, state)}
-        <div class="compact-overview-grid compact-overview-grid-dense top-gap">
-          <section class="shell-card shell-card-dense">
-            <div class="shell-card-header">
-              <div>
-                <div class="panel-title-row">
-                  <strong>本地目录接入</strong>
-                  ${infoTipHtml('优先在客户端内完成本地闭环：导入已有插件目录，或直接生成新的 plugin 骨架，不再把你甩回 Hermes CLI。')}
-                </div>
-                <p class="shell-card-copy">先接入目录，再继续安装、编辑 manifest 和切 Provider。</p>
-              </div>
-              ${lastCreated
-                ? pillHtml(`新建 ${lastCreated.createdFiles} 个文件`, 'good')
-                : lastImported
-                  ? pillHtml(`导入 ${lastImported.copiedFiles} 个文件`, 'good')
-                  : pillHtml('local scaffold', 'neutral')}
-            </div>
-            <div class="control-card-grid control-card-grid-dense top-gap">
-              <article class="action-card">
-                <div class="action-card-header">
-                  <div>
-                    <h3 class="action-card-title">导入目录</h3>
-                    <p class="action-card-copy">接管已有插件目录。</p>
-                  </div>
-                  ${lastImported ? pillHtml(lastImported.imported.category, 'good') : pillHtml(importDraft.category || '自动归类', 'neutral')}
-                </div>
-                <div class="form-grid">
-                  <label class="field-stack">
-                    <span>源路径</span>
-                    <input class="search-input" id="extensions-plugin-import-source" value="${escapeHtml(importDraft.sourcePath)}" placeholder="~/Downloads/byterover 或 /tmp/demo/plugin.yaml" ${view.runningAction ? 'disabled' : ''}>
-                  </label>
-                  <label class="field-stack">
-                    <span>归档分类</span>
-                    <input class="search-input" id="extensions-plugin-import-category" value="${escapeHtml(importDraft.category)}" placeholder="留空沿用源分类，否则归入 imported" ${view.runningAction ? 'disabled' : ''}>
-                  </label>
-                </div>
-                <div class="checkbox-row top-gap">
-                  <label>
-                    <input type="checkbox" id="extensions-plugin-import-overwrite" ${importDraft.overwrite ? 'checked' : ''} ${view.runningAction ? 'disabled' : ''}>
-                    覆盖同名目录
-                  </label>
-                </div>
-                ${lastImported ? `
-                  <div class="top-gap">
-                    ${keyValueRowsHtml([
-                      { label: '最近导入', value: lastImported.imported.name },
-                      { label: '来源', value: lastImported.sourcePath },
-                      { label: '目标', value: lastImported.targetDirectory },
-                    ])}
-                  </div>
-                ` : ''}
-                <div class="toolbar top-gap">
-                  ${buttonHtml({ action: 'plugin-import-local', label: view.runningAction === 'plugin:import-local' ? '导入中…' : '导入目录', kind: 'primary', disabled: Boolean(view.runningAction) || !importDraft.sourcePath.trim() })}
-                  ${buttonHtml({ action: 'plugin-import-reset', label: '清空', disabled: Boolean(view.runningAction) })}
-                </div>
-              </article>
-              <article class="action-card">
-                <div class="action-card-header">
-                  <div>
-                    <h3 class="action-card-title">新建骨架</h3>
-                    <p class="action-card-copy">生成最小本地插件骨架。</p>
-                  </div>
-                  ${lastCreated ? pillHtml(lastCreated.created.category, 'good') : pillHtml(createDraft.category || 'custom', 'neutral')}
-                </div>
-                <div class="form-grid">
-                  <label class="field-stack">
-                    <span>插件名称</span>
-                    <input class="search-input" id="extensions-plugin-create-name" value="${escapeHtml(createDraft.name)}" placeholder="Release Memory" ${view.runningAction ? 'disabled' : ''}>
-                  </label>
-                  <label class="field-stack">
-                    <span>分类</span>
-                    <input class="search-input" id="extensions-plugin-create-category" value="${escapeHtml(createDraft.category)}" placeholder="custom / memory / channel" ${view.runningAction ? 'disabled' : ''}>
-                  </label>
-                </div>
-                <label class="field-stack top-gap">
-                  <span>描述</span>
-                  <input class="search-input" id="extensions-plugin-create-description" value="${escapeHtml(createDraft.description)}" placeholder="一句话描述插件用途" ${view.runningAction ? 'disabled' : ''}>
-                </label>
-                <div class="checkbox-row top-gap">
-                  <label>
-                    <input type="checkbox" id="extensions-plugin-create-overwrite" ${createDraft.overwrite ? 'checked' : ''} ${view.runningAction ? 'disabled' : ''}>
-                    覆盖同名目录
-                  </label>
-                </div>
-                ${lastCreated ? `
-                  <div class="top-gap">
-                    ${keyValueRowsHtml([
-                      { label: '最近新建', value: lastCreated.created.name },
-                      { label: '分类', value: lastCreated.created.category },
-                      { label: '目标', value: lastCreated.targetDirectory },
-                    ])}
-                  </div>
-                ` : ''}
-                <div class="toolbar top-gap">
-                  ${buttonHtml({ action: 'plugin-create-local', label: view.runningAction === 'plugin:create-local' ? '创建中…' : '新建插件', kind: 'primary', disabled: Boolean(view.runningAction) || !createDraft.name.trim() })}
-                  ${buttonHtml({ action: 'plugin-create-reset', label: '清空', disabled: Boolean(view.runningAction) })}
-                </div>
-              </article>
-            </div>
-            <div class="toolbar top-gap">
-              ${buttonHtml({ action: 'open-plugin-root', label: '打开插件目录', disabled: Boolean(view.runningAction) })}
-            </div>
-          </section>
-          ${renderPluginTargetWorkbench(view, state, focus)}
-        </div>
-        <div class="selection-chip-grid top-gap">
-          ${buttonHtml({ action: 'set-plugin-filter', label: '全部插件', className: `selection-chip${view.pluginFilter === 'all' ? ' selection-chip-active' : ''}`, attrs: { 'data-filter': 'all' } })}
-          ${buttonHtml({ action: 'set-plugin-filter', label: '仅已安装', className: `selection-chip${view.pluginFilter === 'installed' ? ' selection-chip-active' : ''}`, attrs: { 'data-filter': 'installed' } })}
-          ${buttonHtml({ action: 'set-plugin-filter', label: '需要凭证', className: `selection-chip${view.pluginFilter === 'requires-env' ? ' selection-chip-active' : ''}`, attrs: { 'data-filter': 'requires-env' } })}
-          ${buttonHtml({ action: 'set-plugin-filter', label: '包含依赖', className: `selection-chip${view.pluginFilter === 'dependencies' ? ' selection-chip-active' : ''}`, attrs: { 'data-filter': 'dependencies' } })}
-        </div>
+        ${renderPluginWorkspaceTabs(activeGroup.key)}
       </section>
-      <section class="panel panel-nested">
-        <div class="workspace-main-header">
-          <div>
-            <strong>插件目录</strong>
-            <p class="workspace-main-copy">卡片只保留筛选、状态和主动作。</p>
-          </div>
-          <div class="pill-row">
-            ${pillHtml(`${state.filteredPluginCatalog.length || state.filteredRuntimePlugins.length} 项`, 'neutral')}
-            ${view.pluginQuery.trim() ? pillHtml(`关键词 ${view.pluginQuery.trim()}`, 'warn') : ''}
-          </div>
-        </div>
-        <div class="workspace-list-scroll">
-          ${renderPluginCards(view, state, focus)}
-        </div>
-      </section>
+      ${workspaceBody}
     </div>
   `;
 }
@@ -1960,34 +2000,15 @@ export function renderSkillsWorkbench(view, state) {
   return `
     <div class="page-stack">
       <section class="panel panel-nested">
-        <div class="workspace-summary-strip workspace-summary-strip-dense">
-          <section class="summary-mini-card">
-            <span class="summary-mini-label">运行态技能</span>
-            <strong class="summary-mini-value">${escapeHtml(String(state.runtimeSkills.length))}</strong>
-            <span class="summary-mini-meta">source / trust 已被 Hermes 识别</span>
-          </section>
-          <section class="summary-mini-card">
-            <span class="summary-mini-label">内置 / 本地</span>
-            <strong class="summary-mini-value">${escapeHtml(`${state.sourceBuiltinCount} / ${state.sourceLocalCount}`)}</strong>
-            <span class="summary-mini-meta">和本地目录 ${view.skills.length} 个对照</span>
-          </section>
-          <section class="summary-mini-card">
-            <span class="summary-mini-label">Top 分类</span>
-            <strong class="summary-mini-value">${escapeHtml(state.categoryCounts[0]?.name || '—')}</strong>
-            <span class="summary-mini-meta">${escapeHtml(state.categoryCounts.slice(0, 2).map((item) => `${item.name} ${item.count}`).join(' · ') || '暂无分类')}</span>
-          </section>
-          <section class="summary-mini-card">
-            <span class="summary-mini-label">筛选结果</span>
-            <strong class="summary-mini-value">${escapeHtml(String(state.filteredSkills.length))}</strong>
-            <span class="summary-mini-meta">${escapeHtml(view.sourceFilter === 'all' ? '全部来源' : view.sourceFilter)}${view.query.trim() ? ` · ${view.query.trim()}` : ''}</span>
-          </section>
-        </div>
         <div class="workspace-main-header">
           <div>
             <strong>技能安装态</strong>
-            <p class="workspace-main-copy">这里专注运行态 source/trust，不再重复技能目录页的文件视图。</p>
+            <p class="workspace-main-copy">这里查看运行态来源和信任状态。</p>
           </div>
           <div class="toolbar">
+            ${pillHtml(`${state.runtimeSkills.length} 运行态`, 'neutral')}
+            ${pillHtml(`${state.sourceBuiltinCount}/${state.sourceLocalCount} 内置/本地`, 'neutral')}
+            ${pillHtml(`${state.filteredSkills.length} 命中`, 'neutral')}
             <input class="search-input" id="extensions-skill-search" placeholder="搜索技能名、分类、source、trust">
             <select class="select-input" id="extensions-source-filter">
               ${state.sourceOptions.map((item) => `
@@ -2065,16 +2086,16 @@ export function renderRuntimeWorkbench(view, state) {
         <div class="workspace-main-header">
           <div>
             <strong>最近动作回执</strong>
-            <p class="workspace-main-copy">保留最后一次治理动作的原始结果，只作为回执与排障参考。</p>
+            <p class="workspace-main-copy">显示最近一次操作结果。</p>
           </div>
         </div>
-        ${commandResultHtml(view.lastResult, '尚未执行治理动作', '执行 tools / plugins / provider 相关动作后，这里会保留原始输出。')}
+        ${commandResultHtml(view.lastResult, '尚未执行操作', '执行 tools / plugins / provider 相关动作后，这里会显示最近结果。')}
       </section>
       <section class="panel panel-nested">
         <div class="workspace-main-header">
           <div>
             <strong>运行态原始对照</strong>
-            <p class="workspace-main-copy">只在需要时对照 raw 输出，不让它抢占主工作区。</p>
+            <p class="workspace-main-copy">需要时再查看 raw 输出。</p>
           </div>
           <div class="toolbar">
             ${buttonHtml({ action: 'raw-tools', label: 'Tools', kind: view.rawKind === 'tools' ? 'primary' : 'secondary' })}

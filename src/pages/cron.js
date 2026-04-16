@@ -517,10 +517,10 @@ function renderFocusSurface(view, state) {
         ? `${selectedJob.name} 已经可以继续使用`
         : '自动化调度已经基本成形';
   const focusDescription = !state.jobs.length
-    ? '默认层先只告诉你该从哪里开始。完整列表、编辑器、输出和删除确认都继续收进工作台。'
+    ? '先创建第一条自动化作业。'
     : state.warnings.length > 0
-      ? '默认层只保留判断和入口。作业列表、筛选器、编辑器和危险动作继续下沉到工作台。'
-      : '当前调度链路已经比较稳定。默认层不再直接堆满 jobs 列表、筛选器和编辑表单。';
+      ? '请先处理当前提醒。'
+      : '调度链路状态正常。';
   const selectedPreview = selectedJob
     ? truncate(selectedJob.prompt || selectedJob.script || '无 prompt', 72)
     : '先从工作台中选择一条作业，或直接新建第一条自动化。';
@@ -534,9 +534,8 @@ function renderFocusSurface(view, state) {
     <div class="page-header page-header-compact">
       <div class="panel-title-row">
         <h1 class="page-title">定时任务</h1>
-        ${infoTipHtml('默认页只保留调度链路判断和最常用入口。作业列表、筛选器、编辑器和输出已经继续下沉到工作台。')}
       </div>
-      <p class="page-desc">让新手先看懂“调度能不能跑、下一步去哪里”，让进阶用户再进入完整工作台。</p>
+      <p class="page-desc">自动化作业、投递与运行状态。</p>
     </div>
 
     ${renderSurfaceTabs(view)}
@@ -611,8 +610,8 @@ function renderFocusSurface(view, state) {
       <aside class="dashboard-jump-panel">
         <div class="workspace-main-header">
           <div>
-            <strong>继续去哪里</strong>
-            <p class="workspace-main-copy">默认层只留 4 个高频入口，列表筛选和编辑表单继续放到工作台。</p>
+            <strong>常用入口</strong>
+            <p class="workspace-main-copy">打开最常用的 4 个工作区。</p>
           </div>
           ${pillHtml('常用 4 项', 'neutral')}
         </div>
@@ -654,7 +653,7 @@ function renderFocusSurface(view, state) {
       <div class="config-section-header">
         <div>
           <h2 class="config-section-title">当前边界</h2>
-          <p class="config-section-desc">默认层只保留选中作业和系统边界，不再把 jobs 列表、筛选器和编辑器全部压到第一屏。</p>
+          <p class="config-section-desc">当前作业与系统摘要。</p>
         </div>
         <div class="toolbar">
           ${buttonHtml({ action: 'refresh', label: view.refreshing ? '同步中…' : '刷新', kind: 'primary', disabled: view.refreshing || Boolean(view.runningAction) })}
@@ -681,7 +680,7 @@ function renderFocusSurface(view, state) {
                 <p class="shell-card-copy">当前还没有选中的作业。进入工作台后可以筛选、选择、编辑或立即触发作业。</p>
                 ${keyValueRowsHtml([
                   { label: '作业总数', value: String(state.jobs.length) },
-                  { label: '下一步', value: state.jobs.length === 0 ? '先创建第一条作业' : '进入工作台后选中一条作业' },
+                  { label: '建议操作', value: state.jobs.length === 0 ? '先创建第一条作业' : '进入工作台后选中一条作业' },
                 ])}
               `
           }
@@ -695,7 +694,7 @@ function renderFocusSurface(view, state) {
             { label: 'jobs.json', value: view.snapshot.jobsPath || '—' },
             { label: 'Gateway', value: view.dashboard.gateway?.gatewayState ?? '未检测到' },
             { label: '记忆 Provider', value: view.dashboard.config.memoryProvider || 'builtin-file' },
-            { label: '下一步', value: state.warnings.length > 0 ? '先看诊断或 Gateway' : '进入工作台继续细看作业' },
+            { label: '建议操作', value: state.warnings.length > 0 ? '先看诊断或 Gateway' : '进入工作台继续细看作业' },
           ])}
           ${
             state.warnings.length > 0
@@ -720,7 +719,6 @@ function renderWorkbenchSurface(view, state) {
     <div class="page-header page-header-compact">
       <div class="panel-title-row">
         <h1 class="page-title">定时任务工作台</h1>
-        ${infoTipHtml('完整的作业列表、筛选器、编辑器、最近输出和删除确认继续放在这里。默认入口层只保留调度判断和去向。')}
       </div>
       <p class="page-desc">需要具体看作业列表、筛选、编辑或立即触发时，再进入这层。</p>
     </div>

@@ -224,20 +224,20 @@ function renderPage(view) {
     }
     : view.logName.startsWith('gateway')
       ? {
-        description: '你现在看的就是网关侧日志，下一步更适合继续去 Gateway 或诊断页。',
+        description: '当前正在查看 Gateway 侧日志。',
         kicker: '网关排障',
         title: '当前正在盯 Gateway 运行链路',
         tone: 'warn',
       }
       : view.contains
         ? {
-          description: '日志已经被关键词收窄，默认层只保留最常用去向和预设。',
+          description: '日志已经按关键词收窄。',
           kicker: '继续排障',
           title: `围绕「${view.contains}」继续下钻`,
           tone: 'good',
         }
         : {
-          description: '默认层只放最常用预设和下一步。完整控制台、过滤器和日志流继续留在下一层。',
+          description: '先用预设或进入控制台。',
           kicker: '先收窄范围',
           title: '先用预设或进入控制台',
           tone: 'good',
@@ -268,9 +268,8 @@ function renderPage(view) {
     <div class="page-header page-header-compact">
       <div class="panel-title-row">
         <h1 class="page-title">日志查看</h1>
-        ${infoTipHtml('默认层只保留最常用预设、边界和下一步。完整控制台、过滤器和日志流继续收进下一层。')}
       </div>
-      <p class="page-desc">让日志页先给判断和去向，而不是一上来就把所有控制项和联动模块全部堆出来。</p>
+      <p class="page-desc">日志预览、预设与控制台。</p>
     </div>
 
     <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
@@ -350,15 +349,15 @@ function renderPage(view) {
     <section class="config-section dashboard-quiet-card">
       <div class="config-section-header">
         <div>
-          <h2 class="config-section-title">当前只保留这些边界</h2>
-          <p class="config-section-desc">默认页不再放一整排摘要卡和完整联动栏，只保留真正需要立刻知道的信息。</p>
+          <h2 class="config-section-title">概览</h2>
+          <p class="config-section-desc">当前日志与建议操作。</p>
         </div>
       </div>
       ${keyValueRowsHtml([
         { label: '日志目录', value: logsDir || '—' },
         { label: '当前文件', value: view.data?.filePath || '—' },
         { label: '当前实例', value: view.profile },
-        { label: '下一步', value: view.logName.startsWith('gateway') ? '优先去 Gateway 或诊断页继续看' : currentDiagnostic },
+        { label: '建议操作', value: view.logName.startsWith('gateway') ? '优先去 Gateway 或诊断页继续看' : currentDiagnostic },
       ])}
     </section>
   `;
@@ -442,7 +441,7 @@ function renderPage(view) {
         <div class="list-stack">
           <div class="list-card">
             <div class="list-card-title">
-              <strong>下一步诊断</strong>
+              <strong>关联诊断</strong>
               ${pillHtml('推荐', 'good')}
             </div>
             <p>结合当前日志标签与过滤条件，优先去诊断页跑更贴近的封装诊断。</p>

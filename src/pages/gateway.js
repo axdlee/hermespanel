@@ -42,7 +42,6 @@ import {
   renderPlatformsWorkspace,
   renderRuntimeWorkspace,
   splitLineValues,
-  tokenPreview,
 } from './gateway-workbench';
 import { infoTipHtml } from './workbench-helpers';
 
@@ -76,6 +75,14 @@ function surfaceTabHtml(activeKey, key, label) {
   `;
 }
 
+function subviewTabHtml(attrName, activeKey, key, label) {
+  return `
+    <button type="button" class="tab ${activeKey === key ? 'active' : ''}" ${attrName}="${key}">
+      ${escapeHtml(label)}
+    </button>
+  `;
+}
+
 function platformFocusIdFromName(platformName) {
   const normalized = String(platformName || '').trim().toLowerCase();
   return PLATFORM_WORKSPACE_PRESETS.find((item) => item.id === normalized || item.runtimeName === normalized)?.id || null;
@@ -86,7 +93,6 @@ function renderSkeleton(view) {
     <div class="page-header page-header-compact">
       <div class="panel-title-row">
         <h1 class="page-title">网关控制</h1>
-        ${infoTipHtml('这页只做 Gateway Service、会话策略和平台链路接管；模型与通道凭证继续走客户端内的专属工作台，不再依赖 gateway setup。')}
       </div>
       <p class="page-desc">正在同步 Service 与平台链路。</p>
     </div>
@@ -180,6 +186,9 @@ function renderPage(view) {
   });
   const warnings = [];
   const gatewayDraft = view.gatewayDraft ?? cloneGatewayWorkspace(config.gatewayWorkspace);
+  const gatewayDirty = gatewayWorkspaceDirty(view);
+  const envDirty = envWorkspaceDirty(view);
+  const workspaceDirty = gatewayDirty || envDirty;
   const configuredPlatforms = countConfiguredPlatformDrafts(envDraft);
 
   if (!installation.binaryFound) {
@@ -203,47 +212,159 @@ function renderPage(view) {
   if (configuredPlatforms === 0) {
     warnings.push('当前还没有配置任何消息通道，Gateway 启动后也不会接到外部消息。');
   }
-  if (envWorkspaceDirty(view)) {
+  if (gatewayDirty) {
+    warnings.push('策略工作台还有未保存的草稿，建议先保存再继续验证。');
+  }
+  if (envDirty) {
     warnings.push('平台连接工作台还有未保存的通道草稿。');
   }
 
   const surfaceView = view.surfaceView || 'focus';
+  const focusSection = view.focusSection || 'status';
+  const nextStep = !gatewayDraft.hermesGatewayToken.trim()
+    ? {
+      title: '补网关钥匙',
+      detail: '先写入 Gateway Token，再做启动和闭环验证。',
+    }
+    : configuredPlatforms === 0
+      ? {
+        title: '接消息平台',
+        detail: '至少接入一个消息入口，否则 Gateway 跑起来也接不到消息。',
+      }
+      : workspaceDirty
+        ? {
+          title: '先保存草稿',
+          detail: '当前有未保存改动，先保存后再启动或排障会更稳妥。',
+        }
+        : !gatewayRunning
+          ? {
+            title: '启动验证',
+            detail: '配置已基本齐备，接下来启动 Gateway。',
+          }
+          : warnings.length > 0
+            ? {
+              title: '处理提醒',
+              detail: warnings[0],
+            }
+            : {
+              title: '按需细调',
+              detail: '当前主链路基本稳定，按需进入工作台继续细调策略或平台。',
+            };
+  const focusSectionMeta = focusSection === 'actions'
+    ? { title: '常用入口', desc: '打开最常用的工作区。', pill: '入口' }
+    : focusSection === 'details'
+      ? { title: '更多信息', desc: '查看补充资料。', pill: '更多' }
+      : { title: '状态', desc: '查看当前 Gateway 摘要。', pill: '状态' };
+  const focusSectionContent = focusSection === 'actions'
+    ? `
+      <div class="dashboard-jump-grid">
+        ${launcherCardHtml({
+          action: 'open-gateway-workbench',
+          attrs: { 'data-tab': 'control' },
+          kicker: '策略',
+          title: gatewayDraft.hermesGatewayToken.trim() ? '细调会话策略' : '补网关钥匙',
+          meta: gatewayDraft.hermesGatewayToken.trim()
+            ? `${gatewayDraft.sessionResetMode} · ${gatewayDraft.unauthorizedDmBehavior}`
+            : '没写 Token 就还不能完整接管 Gateway',
+          tone: gatewayDraft.hermesGatewayToken.trim() ? 'good' : 'warn',
+        })}
+        ${launcherCardHtml({
+          action: 'open-gateway-workbench',
+          attrs: { 'data-tab': 'platforms' },
+          kicker: '平台',
+          title: configuredPlatforms === 0 ? '接消息平台' : '检查消息入口',
+          meta: configuredPlatforms === 0
+            ? '至少接一个入口再做闭环验证'
+            : `${connectedPlatforms}/${platforms.length || 0} 已连通`,
+          tone: configuredPlatforms === 0 || unhealthyPlatforms.length > 0 ? 'warn' : 'good',
+        })}
+        ${launcherCardHtml({
+          action: 'open-gateway-workbench',
+          attrs: { 'data-tab': 'jobs' },
+          kicker: '投递',
+          title: remoteJobs.length > 0 ? '检查远端投递' : '查看投递策略',
+          meta: remoteJobs.length > 0 ? `${remoteJobs.length} 个作业依赖 Gateway` : '当前以本地处理为主',
+          tone: failingRemoteJobs.length > 0 ? 'warn' : 'neutral',
+        })}
+        ${launcherCardHtml({
+          action: 'goto-logs',
+          kicker: '排查',
+          title: warnings.length > 0 ? '去排查提醒' : '看日志和诊断',
+          meta: warnings[0] || '进入日志或诊断页继续看原始输出',
+          tone: warnings.length > 0 ? 'warn' : 'neutral',
+        })}
+      </div>
+    `
+    : focusSection === 'details'
+      ? `
+        ${warnings.length > 0
+          ? `<div class="warning-stack">${warnings.slice(0, 3).map((warning) => `<div class="warning-item">${escapeHtml(warning)}</div>`).join('')}</div>`
+          : ''}
+        <div class="detail-list compact ${warnings.length > 0 ? 'top-gap' : ''}">
+          ${[
+            { label: '状态文件', value: installation.gatewayStateExists ? '已生成' : '还没生成' },
+            { label: '日志目录', value: installation.logsDirExists ? '已就绪' : '还没看到日志目录' },
+            { label: '远端投递', value: remoteJobs.length > 0 ? `${remoteJobs.length} 个远端作业` : '当前没有远端作业' },
+            { label: '待保存改动', value: workspaceDirty ? '有未保存草稿' : '当前已同步' },
+          ].map((item) => `
+            <div class="key-value-row">
+              <span>${escapeHtml(item.label)}</span>
+              <strong>${escapeHtml(item.value)}</strong>
+            </div>
+          `).join('')}
+        </div>
+        <div class="toolbar top-gap">
+          ${buttonHtml({ action: 'open-gateway-workbench', label: '进入工作台', attrs: { 'data-tab': 'control' } })}
+          ${buttonHtml({ action: 'goto-logs', label: '进入日志页' })}
+          ${buttonHtml({ action: 'goto-diagnostics', label: '进入诊断页' })}
+        </div>
+      `
+      : `
+        <div class="detail-list compact">
+          ${[
+            { label: '网关状态', value: gatewayRunning ? '已经接管' : '还没接管' },
+            { label: '消息入口', value: configuredPlatforms === 0 ? '还没有接入口' : `${connectedPlatforms}/${platforms.length || 0} 已连通` },
+            { label: '当前提醒', value: warnings[0] || '暂时没有新的阻塞提醒' },
+            { label: '建议操作', value: nextStep.title },
+          ].map((item) => `
+            <div class="key-value-row">
+              <span>${escapeHtml(item.label)}</span>
+              <strong>${escapeHtml(item.value)}</strong>
+            </div>
+          `).join('')}
+        </div>
+      `;
   const focusShell = `
-    <div class="dashboard-focus-shell">
+    <div class="dashboard-focus-shell dashboard-focus-shell-single">
       <section class="dashboard-focus-card dashboard-focus-card-${gatewayRunning && warnings.length === 0 ? 'good' : 'warn'}">
         <div class="dashboard-focus-head">
           <div class="dashboard-focus-copy">
             <span class="dashboard-focus-kicker">${gatewayRunning ? '已接管' : '待接管'}</span>
             <h2 class="dashboard-focus-title">${gatewayRunning ? 'Gateway 已经跑起来了' : '先让 Gateway 真正跑起来'}</h2>
-            <p class="dashboard-focus-desc">${gatewayRunning ? '默认层只保留状态、通道和下一步。策略、作业、诊断和原始输出继续沉到工作台标签里。' : '当前先补 Token、平台接入和会话策略，再启动服务做真实闭环验证。'}</p>
+            <p class="dashboard-focus-desc">${gatewayRunning ? '当前可以继续验证平台接入和投递链路。' : '先补网关钥匙、消息入口和策略，再启动服务。'}</p>
           </div>
           <div class="dashboard-focus-pills">
             ${pillHtml(gatewayRunning ? 'Gateway 运行中' : 'Gateway 待启动', gatewayRunning ? 'good' : 'warn')}
-            ${pillHtml(`${connectedPlatforms}/${platforms.length || 0} 平台已连`, connectedPlatforms > 0 ? 'good' : 'warn')}
-            ${pillHtml(`${remoteJobs.length} 个远端作业`, remoteJobs.length > 0 ? 'warn' : 'neutral')}
+            ${pillHtml(configuredPlatforms === 0 ? '还没接消息入口' : `${connectedPlatforms}/${platforms.length || 0} 入口已连`, connectedPlatforms > 0 ? 'good' : 'warn')}
+            ${pillHtml(warnings.length > 0 ? `${warnings.length} 条提醒` : '当前稳定', warnings.length > 0 ? 'warn' : 'good')}
           </div>
         </div>
         <div class="dashboard-signal-grid">
           <section class="dashboard-signal-card">
-            <span class="dashboard-signal-label">Gateway</span>
-            <strong class="dashboard-signal-value">${escapeHtml(gatewayRunning ? '运行中' : '待启动')}</strong>
-            <span class="dashboard-signal-meta">${escapeHtml(gatewayRunning ? `PID ${gateway?.pid ?? '—'} · ${gateway?.activeAgents ?? 0} 个活跃 Agent` : '当前还没有运行中的 Gateway 状态。')}</span>
+            <span class="dashboard-signal-label">网关</span>
+            <strong class="dashboard-signal-value">${escapeHtml(gatewayRunning ? '已经接管' : '还没接管')}</strong>
+            <span class="dashboard-signal-meta">${escapeHtml(gatewayRunning ? '现在可以继续验证平台接入和投递链路。' : '先补配置，再启动服务做一次真实验证。')}</span>
           </section>
           <section class="dashboard-signal-card">
-            <span class="dashboard-signal-label">平台</span>
-            <strong class="dashboard-signal-value">${escapeHtml(platforms.length ? `${connectedPlatforms}/${platforms.length}` : '暂无平台')}</strong>
-            <span class="dashboard-signal-meta">${escapeHtml(unhealthyPlatforms.length === 0 ? '当前没有明显的平台连接异常。' : `异常平台 ${unhealthyPlatforms.length} 个`)}</span>
+            <span class="dashboard-signal-label">消息入口</span>
+            <strong class="dashboard-signal-value">${escapeHtml(configuredPlatforms === 0 ? '还没接入口' : `${connectedPlatforms}/${platforms.length || 0} 已连通`)}</strong>
+            <span class="dashboard-signal-meta">${escapeHtml(unhealthyPlatforms.length === 0 ? '当前没有明显的平台连接异常。' : `还有 ${unhealthyPlatforms.length} 个入口异常或未就绪。`)}</span>
           </section>
-          <section class="dashboard-signal-card">
-            <span class="dashboard-signal-label">Remote Jobs</span>
-            <strong class="dashboard-signal-value">${escapeHtml(remoteJobs.length > 0 ? `${remoteJobs.length} 个` : '本地优先')}</strong>
-            <span class="dashboard-signal-meta">${escapeHtml(failingRemoteJobs.length > 0 ? `${failingRemoteJobs.length} 个作业投递异常` : '暂未发现远端投递失败。')}</span>
-          </section>
-          <section class="dashboard-signal-card">
-            <span class="dashboard-signal-label">Token</span>
-            <strong class="dashboard-signal-value">${escapeHtml(tokenPreview(gatewayDraft.hermesGatewayToken))}</strong>
-            <span class="dashboard-signal-meta">${escapeHtml(`${gatewayDraft.sessionResetMode} · reset ${gatewayDraft.resetTriggers.join(', ')}`)}</span>
-          </section>
+                          <section class="dashboard-signal-card">
+                            <span class="dashboard-signal-label">建议操作</span>
+                            <strong class="dashboard-signal-value">${escapeHtml(nextStep.title)}</strong>
+                            <span class="dashboard-signal-meta">${escapeHtml(nextStep.detail)}</span>
+                          </section>
         </div>
         <div class="dashboard-focus-actions">
           ${buttonHtml({ action: gatewayRunning ? 'gateway-restart' : 'gateway-start', label: gatewayRunning ? '重启 Gateway' : '启动 Gateway', kind: 'primary', disabled: Boolean(view.runningAction) || !installation.binaryFound })}
@@ -251,76 +372,26 @@ function renderPage(view) {
           ${buttonHtml({ action: 'refresh', label: view.refreshing ? '同步中…' : '刷新', disabled: Boolean(view.refreshing || view.savingGateway || view.savingEnv) })}
         </div>
       </section>
-
-      <aside class="dashboard-jump-panel">
-        <div class="workspace-main-header">
-          <div>
-            <strong>继续去哪里</strong>
-            <p class="workspace-main-copy">常用入口只保留四个，具体字段继续在工作台标签里展开。</p>
-          </div>
-          ${pillHtml('高频 4 项', 'neutral')}
-        </div>
-        <div class="dashboard-jump-grid">
-          ${launcherCardHtml({
-            action: 'open-gateway-workbench',
-            attrs: { 'data-tab': 'control' },
-            kicker: '策略',
-            title: '会话与 Token',
-            meta: `${gatewayDraft.sessionResetMode} · ${gatewayDraft.unauthorizedDmBehavior}`,
-            tone: gatewayDraft.hermesGatewayToken.trim() ? 'good' : 'warn',
-          })}
-          ${launcherCardHtml({
-            action: 'open-gateway-workbench',
-            attrs: { 'data-tab': 'platforms' },
-            kicker: '平台',
-            title: '通道接入',
-            meta: `${connectedPlatforms}/${platforms.length || 0} 已连通`,
-            tone: unhealthyPlatforms.length === 0 ? 'good' : 'warn',
-          })}
-          ${launcherCardHtml({
-            action: 'open-gateway-workbench',
-            attrs: { 'data-tab': 'jobs' },
-            kicker: '作业',
-            title: '远端投递',
-            meta: remoteJobs.length > 0 ? `${remoteJobs.length} 个远端作业` : '当前没有远端作业',
-            tone: failingRemoteJobs.length > 0 ? 'warn' : 'neutral',
-          })}
-          ${launcherCardHtml({
-            action: 'goto-logs',
-            kicker: '排障',
-            title: '日志与诊断',
-            meta: warnings[0] || '进入日志与诊断继续排查',
-            tone: warnings.length > 0 ? 'warn' : 'neutral',
-          })}
-        </div>
-      </aside>
     </div>
   `;
 
   const focusContent = `
     ${focusShell}
     <section class="config-section dashboard-quiet-card">
-      <div class="config-section-header">
+      <div class="workspace-main-header">
         <div>
-          <h2 class="config-section-title">当前只保留这些摘要</h2>
-          <p class="config-section-desc">默认页不再把策略编辑器、平台字段、作业与诊断一起铺开，只保留最需要先判断的信息。</p>
+          <strong>${escapeHtml(focusSectionMeta.title)}</strong>
+          <p class="workspace-main-copy">${escapeHtml(focusSectionMeta.desc)}</p>
         </div>
-        <div class="toolbar">
-          ${pillHtml(warnings.length > 0 ? `${warnings.length} 条提醒` : '当前稳定', warnings.length > 0 ? 'warn' : 'good')}
-        </div>
+        ${pillHtml(focusSectionMeta.pill, 'neutral')}
       </div>
-      <div class="detail-list compact">
-        ${[
-          { label: 'Gateway', value: gatewayRunning ? '运行中' : '待启动' },
-          { label: '通道接入', value: platforms.length ? `${connectedPlatforms}/${platforms.length} 已连通` : '还没有通道' },
-          { label: 'Token / Reset', value: `${tokenPreview(gatewayDraft.hermesGatewayToken)} · ${gatewayDraft.sessionResetMode}` },
-          { label: '下一步', value: !gatewayDraft.hermesGatewayToken.trim() ? '先补网关 Token' : !gatewayRunning ? '启动 Gateway 做闭环验证' : '按需进入工作台继续细调' },
-        ].map((item) => `
-          <div class="key-value-row">
-            <span>${escapeHtml(item.label)}</span>
-            <strong>${escapeHtml(item.value)}</strong>
-          </div>
-        `).join('')}
+      <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
+        ${subviewTabHtml('data-gateway-focus-section', focusSection, 'status', '状态')}
+        ${subviewTabHtml('data-gateway-focus-section', focusSection, 'actions', '去处理')}
+        ${subviewTabHtml('data-gateway-focus-section', focusSection, 'details', '更多')}
+      </div>
+      <div class="top-gap">
+        ${focusSectionContent}
       </div>
     </section>
   `;
@@ -367,7 +438,6 @@ function renderPage(view) {
     <div class="page-header page-header-compact">
       <div class="panel-title-row">
         <h1 class="page-title">网关控制</h1>
-        ${infoTipHtml('这一页不再重复铺陈介绍，也不再把高频配置藏到命令行；Service、策略和平台状态都放进一个紧凑工作台。')}
       </div>
       <p class="page-desc">Service、会话策略、平台链路。</p>
     </div>
@@ -768,6 +838,17 @@ function bindEvents(view, logsIntent) {
     };
   });
 
+  view.page.querySelectorAll('[data-gateway-focus-section]').forEach((element) => {
+    element.onclick = () => {
+      const nextSection = element.getAttribute('data-gateway-focus-section');
+      if (!nextSection || nextSection === view.focusSection) {
+        return;
+      }
+      view.focusSection = nextSection;
+      renderPage(view);
+    };
+  });
+
   view.page.querySelectorAll('[data-action]').forEach((element) => {
     element.onclick = async () => {
       const action = element.getAttribute('data-action');
@@ -967,6 +1048,7 @@ export async function render() {
     investigation: getPageIntent('gateway'),
     lastResult: null,
     loading: true,
+    focusSection: 'status',
     page,
     profile: getPanelState().selectedProfile,
     refreshing: false,

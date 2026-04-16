@@ -11,7 +11,7 @@
     "check": "npm run build && cargo test --manifest-path src-tauri/Cargo.toml",
     "preview": "vite preview --host 127.0.0.1 --port 1420",
     "tauri": "tauri",
-    "tauri:dev": "tauri dev",
+    "tauri:dev": "bash ./scripts/tauri-dev-clean.sh",
     "tauri:build": "tauri build",
     "tauri:build:debug": "tauri build --debug",
     "docs:capture:mac": "bash scripts/capture-macos-window.sh",

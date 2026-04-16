@@ -235,43 +235,43 @@ function renderPage(view) {
   const gatewayRunning = view.dashboard.gateway?.gatewayState === 'running';
   const focusState = !view.installation.binaryFound
     ? {
-      description: '先确认 Hermes 组件和基础环境，再继续接管插件、工具和 provider。',
+      description: '请先完成环境检查。',
       kicker: '先补底座',
-      title: '当前还不适合直接治理扩展',
+      title: '暂不可直接治理扩展',
       tone: 'warn',
     }
     : !state.providerAligned
       ? {
-        description: '配置态和运行态的 provider 没对上，优先把记忆链路对齐。',
+        description: '请先对齐记忆链路。',
         kicker: '先对齐记忆链路',
-        title: 'Memory Provider 还没真正闭环',
+        title: 'Memory Provider 未对齐',
         tone: 'warn',
       }
       : state.toolsEnabled === 0
         ? {
-          description: '能力面现在太空，先给当前平台接入真正会用到的工具。',
+          description: '请先启用常用工具。',
           kicker: '先接能力',
           title: '至少先启用一组常用工具',
           tone: 'warn',
         }
         : state.runtimeSkillMismatch
           ? {
-            description: '目录技能和运行技能数量不一致，建议先回技能层对齐。',
+            description: '请先回技能层核对运行态。',
             kicker: '先校对技能',
-            title: 'Skills 目录态与运行态有偏差',
+            title: '技能运行态有偏差',
             tone: 'warn',
           }
           : state.warnings.length > 0
             ? {
-              description: '主链路已经可用，但还存在一些需要你继续收口的提醒项。',
+              description: '有提醒需要处理。',
               kicker: '继续收口',
-              title: '扩展层已经能用，继续处理提醒',
+              title: '扩展层可用',
               tone: 'warn',
             }
             : {
-              description: '默认层只保留最常用入口。插件、技能、工具和原始运行态都收进下一层。',
+              description: '可以继续管理工具、插件与运行态。',
               kicker: '可以继续',
-              title: '当前扩展能力面已经比较稳',
+              title: '扩展能力面已就绪',
               tone: 'good',
             };
   const focusSignals = [
@@ -341,8 +341,8 @@ function renderPage(view) {
       <section class="dashboard-jump-panel">
         <div class="config-section-header">
           <div>
-            <h2 class="config-section-title">继续去哪里</h2>
-            <p class="config-section-desc">这里只露出 4 个高频入口，完整治理台继续收进下一层。</p>
+            <h2 class="config-section-title">常用入口</h2>
+            <p class="config-section-desc">打开最常用的 4 个工作区。</p>
           </div>
         </div>
         <div class="dashboard-jump-grid">
@@ -383,8 +383,8 @@ function renderPage(view) {
     <section class="config-section dashboard-quiet-card">
       <div class="config-section-header">
         <div>
-          <h2 class="config-section-title">当前只保留这些摘要</h2>
-          <p class="config-section-desc">默认页只给判断，不把插件编辑器、原始输出和批量操作直接摊开。</p>
+          <h2 class="config-section-title">概览</h2>
+          <p class="config-section-desc">当前状态与建议操作。</p>
         </div>
         <div class="toolbar">
           ${pillHtml(state.currentPlatform?.displayName || '未选择平台', state.currentPlatform ? 'good' : 'warn')}
@@ -394,7 +394,7 @@ function renderPage(view) {
         { label: '当前 Provider', value: state.configuredProviderDisplay === 'builtin-file' ? '内置文件' : state.configuredProviderDisplay },
         { label: '平台绑定', value: state.currentPlatformBindingToolsets.join(', ') || '当前平台还没有平台绑定' },
         { label: '目录插件', value: state.pluginAvailableCount ? `${state.pluginAvailableCount} 个` : '暂未发现' },
-        { label: '下一步', value: !state.providerAligned ? '优先去对齐 Memory Provider' : state.toolsEnabled === 0 ? '先接入至少一组常用工具' : state.runtimeSkillMismatch ? '回技能页核对目录与运行态' : '按需进入治理台继续接管' },
+        { label: '建议操作', value: !state.providerAligned ? '优先去对齐 Memory Provider' : state.toolsEnabled === 0 ? '先接入至少一组常用工具' : state.runtimeSkillMismatch ? '回技能页核对目录与运行态' : '按需进入治理台继续处理' },
       ])}
     </section>
   `;
@@ -481,9 +481,8 @@ function renderPage(view) {
     <div class="page-header page-header-compact">
       <div class="panel-title-row">
         <h1 class="page-title">扩展能力台</h1>
-        ${infoTipHtml('这里聚焦真正可操作的 Tools、Skills、Plugins 和 Memory Provider 闭环，不再让介绍文案占据主区。')}
       </div>
-      <p class="page-desc">Tools、Plugins、Skills、Provider 闭环治理。</p>
+      <p class="page-desc">工具、插件、技能与运行态治理。</p>
     </div>
 
     ${view.investigation ? `
@@ -1537,11 +1536,22 @@ function bindEvents(view) {
       switch (action) {
         case 'set-workbench-tab':
           view.workbenchTab = element.getAttribute('data-tab') || 'tools';
+          if (view.workbenchTab === 'plugins' && !view.pluginWorkspaceSection) {
+            view.pluginWorkspaceSection = 'catalog';
+          }
+          renderPage(view);
+          return;
+        case 'focus-plugin-workspace-section':
+          view.workbenchTab = 'plugins';
+          view.pluginWorkspaceSection = element.getAttribute('data-section') || 'catalog';
           renderPage(view);
           return;
         case 'open-extensions-workbench':
           view.surfaceView = 'workbench';
           view.workbenchTab = element.getAttribute('data-tab') || 'tools';
+          if (view.workbenchTab === 'plugins') {
+            view.pluginWorkspaceSection = element.getAttribute('data-section') || view.pluginWorkspaceSection || 'catalog';
+          }
           renderPage(view);
           return;
         case 'set-plugin-filter':
@@ -1621,6 +1631,8 @@ function bindEvents(view) {
           return;
         case 'plugin-fill':
           view.pluginNameInput = element.getAttribute('data-name') || '';
+          view.workbenchTab = 'plugins';
+          view.pluginWorkspaceSection = 'target';
           renderPage(view);
           return;
         case 'plugin-configure': {
@@ -1799,6 +1811,7 @@ export async function render() {
     pluginFilter: 'all',
     pluginCreateDraft: clonePluginCreateDraft(),
     pluginImportDraft: clonePluginImportDraft(),
+    pluginWorkspaceSection: 'catalog',
     pluginManifest: null,
     pluginManifestDraft: null,
     pluginManifestError: null,
@@ -1843,6 +1856,9 @@ export async function render() {
         : activeView.investigation.selectedPlatform || activeView.investigation.toolNames?.length
           ? 'tools'
           : activeView.workbenchTab;
+    if (activeView.investigation.pluginName) {
+      activeView.pluginWorkspaceSection = 'target';
+    }
     consumePageIntent();
   }
 

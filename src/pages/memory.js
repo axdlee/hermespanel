@@ -164,13 +164,13 @@ function renderFocusSurface(view, state) {
   const focusTitle = !view.items.length
     ? '先准备记忆槽位'
     : warnings.length > 0
-      ? `${currentLabel} 还有几处需要收口`
-      : `${currentLabel} 已经可以继续维护`;
+      ? `${currentLabel} 需要处理`
+      : `${currentLabel} 可继续维护`;
   const focusDescription = !view.items.length
-    ? '默认层先只保留记忆是否接入、当前槽位和下一步去向。完整编辑区与插件治理继续放到工作台。'
+    ? '先准备记忆槽位。'
     : warnings.length > 0
-      ? '默认层只帮你判断先处理 Provider、预算还是运行链路。编辑器、原始输出和插件动作继续下沉到工作台。'
-      : '当前记忆链路已经比较稳定。默认层不再直接展开槽位列表、编辑器、插件区和原始输出。';
+      ? '请先处理当前提醒。'
+      : '记忆链路状态正常。';
   const budgetLabel = budgetRemaining == null ? '无限制' : `剩余 ${budgetRemaining}`;
   const nextStep = warnings.length > 0 ? '先看工作台或诊断页' : '进入工作台继续编辑';
 
@@ -179,7 +179,7 @@ function renderFocusSurface(view, state) {
       <div class="panel-title-row">
         <h1 class="page-title">记忆工作台</h1>
       </div>
-      <p class="page-desc">默认页只保留记忆接入判断和高频入口，详细编辑与治理继续放到下一层。</p>
+      <p class="page-desc">记忆文件、Provider 与运行链路。</p>
     </div>
 
     ${renderSurfaceTabs(view)}
@@ -254,8 +254,8 @@ function renderFocusSurface(view, state) {
       <aside class="dashboard-jump-panel">
         <div class="workspace-main-header">
           <div>
-            <strong>继续去哪里</strong>
-            <p class="workspace-main-copy">默认层只保留 4 个高频入口，编辑器、插件治理和原始输出继续放到工作台。</p>
+            <strong>常用入口</strong>
+            <p class="workspace-main-copy">打开最常用的 4 个工作区。</p>
           </div>
           ${pillHtml('常用 4 项', 'neutral')}
         </div>
@@ -295,7 +295,7 @@ function renderFocusSurface(view, state) {
       <div class="config-section-header">
         <div>
           <h2 class="config-section-title">当前边界</h2>
-          <p class="config-section-desc">默认层只保留槽位选择和边界摘要，不再直接堆出编辑器与插件动作区。</p>
+          <p class="config-section-desc">当前槽位与系统摘要。</p>
         </div>
       </div>
       <div class="compact-overview-grid compact-overview-grid-dense">
@@ -321,7 +321,7 @@ function renderFocusSurface(view, state) {
           ${keyValueRowsHtml([
             { label: '路径', value: currentPath },
             { label: 'Provider', value: `${summary?.memoryProvider || 'builtin-file'} / ${runtimeProvider}` },
-            { label: '下一步', value: nextStep },
+            { label: '建议操作', value: nextStep },
           ])}
         </section>
         <section class="shell-card shell-card-dense shell-card-muted">

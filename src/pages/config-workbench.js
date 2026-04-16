@@ -1,4 +1,4 @@
-import { buttonHtml, escapeHtml, pillHtml } from './native-helpers';
+import { buttonHtml, escapeHtml, keyValueRowsHtml, pillHtml } from './native-helpers';
 import { infoTipHtml, shortcutCardHtml } from './workbench-helpers';
 
 const MODEL_PROVIDER_PRESETS = [
@@ -1004,30 +1004,42 @@ function modelGovernanceState(view, draft) {
   };
 }
 
-function renderModelSignalCard(label, value, meta, tone = 'neutral') {
+function controlSubviewTabHtml(attrName, activeKey, key, label) {
   return `
-    <section class="model-signal-card">
-      <span class="model-signal-label">${escapeHtml(label)}</span>
-      <strong class="model-signal-value">${escapeHtml(value)}</strong>
-      <span class="model-signal-meta model-signal-meta-${escapeHtml(tone)}">${escapeHtml(meta)}</span>
-    </section>
+    <button type="button" class="tab ${activeKey === key ? 'active' : ''}" ${attrName}="${key}">
+      ${escapeHtml(label)}
+    </button>
   `;
+}
+
+function resolveModelWorkspaceView(activeKey) {
+  return ['status', 'connect', 'detail'].includes(activeKey) ? activeKey : 'status';
+}
+
+function resolveToolsetWorkspaceView(activeKey) {
+  return ['status', 'presets', 'manual', 'platform'].includes(activeKey) ? activeKey : 'status';
 }
 
 function renderModelGovernanceWorkbench(view, draft) {
   const state = modelGovernanceState(view, draft);
   const endpointRecommendation = state.preset?.baseUrl || '';
+  const nextStep = !state.provider
+    ? '先选一个 Provider 预设'
+    : !state.model
+      ? '补默认模型'
+      : !state.envReady
+        ? '去补对应密钥'
+      : !state.contextEngine
+        ? '补上下文引擎'
+          : '可继续调整';
 
   return `
     <section class="shell-card shell-card-dense model-focus-card">
       <div class="shell-card-header model-focus-head">
         <div class="model-focus-title-wrap">
           <div>
-            <div class="panel-title-row">
-              <strong>模型接入治理</strong>
-              ${infoTipHtml('先看接入信号，再决定 provider、默认模型、endpoint 和上下文引擎。这样主链路会比散落在多个表单里更清楚。')}
-            </div>
-            <p class="shell-card-copy">先确认主链路能否保存，再下钻细调。</p>
+            <strong>模型设置</strong>
+            <p class="shell-card-copy">先把 Provider、默认模型和 Endpoint 配好。</p>
           </div>
           <div class="model-focus-title">
             <div class="model-focus-title-copy">
@@ -1043,34 +1055,12 @@ function renderModelGovernanceWorkbench(view, draft) {
         ${pillHtml(state.preset?.label || (state.provider ? 'Custom Provider' : '待选择'), state.provider ? 'good' : 'warn')}
       </div>
 
-      <div class="model-signal-grid">
-        ${renderModelSignalCard(
-          'Provider',
-          state.preset?.label || state.provider || '待配置',
-          state.preset?.copy || '建议先选一个可复用的 provider 预设，再继续补模型。',
-          state.provider ? 'good' : 'warn'
-        )}
-        ${renderModelSignalCard(
-          '凭证',
-          state.preset?.envLabel || '自定义校验',
-          state.preset
-            ? (state.envReady ? '当前密钥已就绪' : '还没补齐对应 API Key')
-            : '自定义 provider 需要你自行确认凭证变量',
-          state.envReady ? 'good' : 'warn'
-        )}
-        ${renderModelSignalCard(
-          'Endpoint',
-          state.endpointMode,
-          state.baseUrl || endpointRecommendation || '保持 provider 默认端点',
-          state.endpointMode === '自定义 Endpoint' ? 'warn' : 'good'
-        )}
-        ${renderModelSignalCard(
-          '上下文',
-          state.contextEngine || '未配置',
-          state.contextEngine ? '当前会写入 context.engine' : '建议先补一个明确的上下文引擎',
-          state.contextEngine ? 'good' : 'warn'
-        )}
-      </div>
+      ${keyValueRowsHtml([
+        { label: '当前 Provider', value: state.preset?.label || state.provider || '待配置' },
+        { label: '默认模型', value: state.model || '还没选默认模型' },
+        { label: 'Endpoint', value: state.baseUrl || endpointRecommendation || '跟随 Provider 默认值' },
+        { label: '建议', value: nextStep },
+      ])}
 
       <div class="model-chip-row top-gap">
         ${CONTEXT_ENGINE_PRESETS.map((preset) => buttonHtml({
@@ -1125,6 +1115,188 @@ function renderModelGovernanceWorkbench(view, draft) {
   `;
 }
 
+function renderModelStatusWorkbench(view, draft) {
+  const state = modelGovernanceState(view, draft);
+  const nextStep = !state.provider
+    ? '先选一个 Provider 预设'
+    : !state.model
+      ? '补默认模型'
+      : !state.envReady
+        ? '去凭证页补密钥'
+      : !state.contextEngine
+        ? '补上下文引擎'
+          : '主链路已就绪';
+
+  return `
+    <section class="shell-card shell-card-dense">
+      <div class="workspace-main-header">
+        <div>
+          <strong>当前状态</strong>
+          <p class="workspace-main-copy">先确认 Provider、模型和 Endpoint 是否齐全。</p>
+        </div>
+        ${pillHtml(state.ready ? '主链路可保存' : '仍待补齐', state.ready ? 'good' : 'warn')}
+      </div>
+      ${keyValueRowsHtml([
+        { label: '当前模型', value: state.model || '还没选默认模型' },
+        { label: 'Provider', value: state.preset?.label || state.provider || '待配置' },
+        { label: 'Endpoint', value: state.baseUrl || state.preset?.baseUrl || '跟随 Provider 默认值' },
+        { label: '建议', value: nextStep },
+      ])}
+      <div class="toolbar top-gap">
+        ${buttonHtml({
+          action: 'focus-workspace',
+          label: state.envReady ? '继续看接入设置' : '先去补凭证',
+          kind: state.envReady ? 'secondary' : 'primary',
+          attrs: { 'data-tab': state.envReady ? 'control' : 'credentials', 'data-section': state.envReady ? 'model-presets' : 'provider-credentials' },
+        })}
+        ${buttonHtml({ action: 'goto-gateway', label: '去看 Gateway' })}
+      </div>
+    </section>
+  `;
+}
+
+function renderModelConnectWorkbench(view, draft) {
+  return `
+    <section class="shell-card shell-card-dense workspace-section-anchor" data-workspace-section="model-presets">
+      <div class="workspace-main-header">
+        <div>
+          <strong>接入设置</strong>
+          <p class="workspace-main-copy">先定 Provider、默认模型和 Base URL，把主链路接通后再细调上下文与风格。</p>
+        </div>
+        ${pillHtml(draft.modelProvider || 'Provider 待补', draft.modelProvider ? 'good' : 'warn')}
+      </div>
+      ${renderProviderPresetGrid(view, draft)}
+      <div class="form-grid top-gap">
+        <label class="field-stack">
+          <span>默认模型</span>
+          <input class="search-input" id="control-model-default" value="${escapeHtml(draft.modelDefault)}" placeholder="gpt-5.4">
+        </label>
+        <label class="field-stack">
+          <span>Provider</span>
+          <input class="search-input" id="control-model-provider" value="${escapeHtml(draft.modelProvider)}" placeholder="openai / anthropic / custom">
+        </label>
+        <label class="field-stack">
+          <span>Base URL</span>
+          <input class="search-input" id="control-model-base-url" value="${escapeHtml(draft.modelBaseUrl)}" placeholder="https://api.example.com/v1">
+        </label>
+        <label class="field-stack">
+          <span>上下文引擎</span>
+          <input class="search-input" id="control-context-engine" value="${escapeHtml(draft.contextEngine)}" placeholder="compressor">
+        </label>
+      </div>
+    </section>
+  `;
+}
+
+function renderModelDetailWorkbench(view, draft) {
+  const state = modelGovernanceState(view, draft);
+  const endpointRecommendation = state.preset?.baseUrl || '';
+
+  return `
+    <section class="shell-card shell-card-dense workspace-section-anchor" data-workspace-section="model-detail">
+      <div class="workspace-main-header">
+        <div>
+          <strong>细调与补充</strong>
+          <p class="workspace-main-copy">把上下文、流式输出、人格风格和 Endpoint 辅助动作收在这里，避免和主接入表单混成一团。</p>
+        </div>
+        ${pillHtml(draft.streamingEnabled ? '流式输出' : '静态输出', draft.streamingEnabled ? 'neutral' : 'warn')}
+      </div>
+      <div class="selection-chip-grid">
+        ${CONTEXT_ENGINE_PRESETS.map((preset) => buttonHtml({
+          action: 'apply-context-preset',
+          label: preset.label,
+          kind: state.contextEngine === preset.value ? 'primary' : 'secondary',
+          className: `selection-chip${state.contextEngine === preset.value ? ' selection-chip-active' : ''}`,
+          attrs: { 'data-value': preset.value },
+        })).join('')}
+        ${buttonHtml({
+          action: 'toggle-streaming-output',
+          label: draft.streamingEnabled ? '关闭流式' : '开启流式',
+          className: `selection-chip${draft.streamingEnabled ? ' selection-chip-active' : ''}`,
+        })}
+        ${endpointRecommendation && state.baseUrl !== endpointRecommendation
+          ? buttonHtml({
+            action: 'apply-base-url-value',
+            label: '对齐官方 Endpoint',
+            className: 'selection-chip',
+            attrs: { 'data-value': endpointRecommendation },
+          })
+          : ''}
+        ${state.baseUrl
+          ? buttonHtml({
+            action: 'apply-base-url-value',
+            label: '清空 Base URL',
+            className: 'selection-chip',
+            attrs: { 'data-value': '' },
+          })
+          : ''}
+      </div>
+      <div class="form-grid top-gap">
+        <label class="field-stack">
+          <span>上下文引擎</span>
+          <input class="search-input" id="control-context-engine" value="${escapeHtml(draft.contextEngine)}" placeholder="compressor">
+        </label>
+        <label class="field-stack">
+          <span>人格 / 风格</span>
+          <input class="search-input" id="control-personality" value="${escapeHtml(draft.personality)}" placeholder="helpful / technical / concise">
+        </label>
+      </div>
+      ${state.preset?.models?.length
+        ? `<p class="model-focus-note">${escapeHtml(`当前 provider 常用模型：${state.preset.models.slice(0, 4).join(' · ')}${state.preset.models.length > 4 ? ' ...' : ''}`)}</p>`
+        : ''}
+      <div class="toolbar top-gap">
+        ${buttonHtml({
+          action: 'focus-workspace',
+          label: '去补凭证',
+          kind: state.envReady ? 'secondary' : 'primary',
+          attrs: { 'data-tab': 'credentials', 'data-section': 'provider-credentials' },
+        })}
+        ${buttonHtml({ action: 'goto-gateway', label: '去看 Gateway' })}
+      </div>
+    </section>
+  `;
+}
+
+function renderToolsetStatusWorkbench(draft) {
+  const normalizedBindings = normalizePlatformBindings(draft.platformToolsets);
+  const nextStep = !draft.toolsets.length
+    ? '先选一组顶层能力'
+    : !normalizedBindings.length
+      ? '按需补平台绑定'
+      : '能力面已就绪';
+
+  return `
+    <section class="shell-card shell-card-dense workspace-section-anchor" data-workspace-section="toolsets-overview">
+      <div class="workspace-main-header">
+        <div>
+          <strong>能力面状态</strong>
+          <p class="workspace-main-copy">先看顶层能力和平台绑定是否完整。</p>
+        </div>
+        ${pillHtml(draft.toolsets.length ? `${draft.toolsets.length} 组能力` : '待补能力面', draft.toolsets.length ? 'good' : 'warn')}
+      </div>
+      ${keyValueRowsHtml([
+        { label: '顶层能力', value: previewJoined(draft.toolsets, '还没挂能力面', 5) },
+        { label: '平台绑定', value: platformBindingsPreview(normalizedBindings, '还没做平台绑定', 2) },
+        { label: '当前方案', value: draft.toolsets.length ? `${draft.toolsets.length} 组顶层 / ${normalizedBindings.length} 平台` : '待整理' },
+        { label: '建议', value: nextStep },
+      ])}
+      <div class="toolbar top-gap">
+        ${buttonHtml({
+          action: 'focus-workspace',
+          label: draft.toolsets.length ? '查看能力预设' : '先选能力预设',
+          kind: draft.toolsets.length ? 'secondary' : 'primary',
+          attrs: { 'data-tab': 'control', 'data-section': 'toolsets-presets' },
+        })}
+        ${buttonHtml({
+          action: 'focus-workspace',
+          label: normalizedBindings.length ? '查看平台绑定' : '补平台绑定',
+          attrs: { 'data-tab': 'control', 'data-section': 'toolsets-detail' },
+        })}
+      </div>
+    </section>
+  `;
+}
+
 export function currentEditorBadge(view) {
   switch (view.editorTab) {
     case 'control':
@@ -1136,7 +1308,7 @@ export function currentEditorBadge(view) {
     case 'env':
       return 'ENV';
     default:
-      return '工作台';
+      return '概览';
   }
 }
 
@@ -1151,8 +1323,8 @@ const CONTROL_WORKSPACE_GROUPS = [
   {
     key: 'toolsets',
     label: '能力面',
-    sectionId: 'toolsets-presets',
-    sections: ['toolsets-presets', 'toolsets-detail'],
+    sectionId: 'toolsets-overview',
+    sections: ['toolsets-overview', 'toolsets-presets', 'toolsets-manual', 'toolsets-detail'],
     description: '只看 toolsets 与平台绑定，不把其他设置掺进来。',
   },
   {
@@ -1358,7 +1530,7 @@ export function renderConfigRail(view, context) {
 
     <section class="workspace-rail-section">
       <div class="workspace-rail-section-header">
-        <span class="workspace-rail-section-title">主工作台</span>
+        <span class="workspace-rail-section-title">常用入口</span>
         ${pillHtml(view.editorTab === 'credentials' ? '凭证面' : '控制面', 'neutral')}
       </div>
       <div class="workspace-shortcut-grid">
@@ -1373,8 +1545,8 @@ export function renderConfigRail(view, context) {
           action: 'focus-workspace',
           label: '能力面',
           meta: `${data.summary.toolsets.length} 组能力集 · ${enabledTools} 个工具`,
-          active: workspaceSectionActive(view, ['toolsets-presets', 'toolsets-detail']),
-          attrs: { 'data-tab': 'control', 'data-section': 'toolsets-presets' },
+          active: workspaceSectionActive(view, ['toolsets-overview', 'toolsets-presets', 'toolsets-manual', 'toolsets-detail']),
+          attrs: { 'data-tab': 'control', 'data-section': 'toolsets-overview' },
         })}
         ${shortcutCardHtml({
           action: 'focus-workspace',
@@ -1400,7 +1572,7 @@ export function renderConfigRail(view, context) {
         ${shortcutCardHtml({
           action: 'goto-gateway',
           label: 'Gateway',
-          meta: snapshot?.gateway?.gatewayState || '进入网关工作台',
+          meta: snapshot?.gateway?.gatewayState || '进入网关',
         })}
       </div>
     </section>
@@ -1440,7 +1612,7 @@ export function renderConfigRail(view, context) {
           kind: 'secondary',
         })}
       </div>
-      <p class="helper-text">只保留旧配置接管；模型、通道、记忆、插件和 skills 已优先收回客户端工作台。</p>
+      <p class="helper-text">这里只在迁移旧配置时使用。</p>
       ${view.showCompatibilityActions ? `
         <div class="workspace-compat-panel">
           ${buttonHtml({ action: 'compat-config-migrate', label: view.runningAction === 'config:compat-migrate' ? '迁移中…' : '迁移旧配置', kind: 'primary', disabled: actionBusy || !installation.binaryFound })}
@@ -1456,63 +1628,82 @@ export function renderStructuredControls(view) {
   const normalizedBindings = normalizePlatformBindings(draft.platformToolsets);
   const memoryPresets = memoryProviderPresets(view);
   const activeGroup = resolveWorkspaceGroup(CONTROL_WORKSPACE_GROUPS, view.activeWorkspaceSection, 'model');
+  const modelView = resolveModelWorkspaceView(view.controlModelView);
+  const toolsetView = resolveToolsetWorkspaceView(view.controlToolsetView);
   const activeGroupContent = activeGroup.key === 'model'
     ? `
       <section class="workspace-section-anchor" data-workspace-section="model-governance">
         ${renderModelGovernanceWorkbench(view, draft)}
       </section>
-      ${disclosureHtml({
-        sectionId: 'model-presets',
-        open: true,
-        eyebrow: '模型',
-        title: '模型 / Provider',
-        metaHtml: `${pillHtml(draft.modelProvider || '待补 provider', draft.modelProvider ? 'good' : 'warn')}${pillHtml(draft.streamingEnabled ? '流式输出' : '静态输出', draft.streamingEnabled ? 'neutral' : 'warn')}`,
-        body: `
-          ${renderProviderPresetGrid(view, draft)}
-          <div class="form-grid">
-            <label class="field-stack">
-              <span>默认模型</span>
-              <input class="search-input" id="control-model-default" value="${escapeHtml(draft.modelDefault)}" placeholder="gpt-5.4">
-            </label>
-            <label class="field-stack">
-              <span>Provider</span>
-              <input class="search-input" id="control-model-provider" value="${escapeHtml(draft.modelProvider)}" placeholder="openai / anthropic / custom">
-            </label>
-            <label class="field-stack">
-              <span>Base URL</span>
-              <input class="search-input" id="control-model-base-url" value="${escapeHtml(draft.modelBaseUrl)}" placeholder="https://api.example.com/v1">
-            </label>
-            <label class="field-stack">
-              <span>上下文引擎</span>
-              <input class="search-input" id="control-context-engine" value="${escapeHtml(draft.contextEngine)}" placeholder="compressor">
-            </label>
+      <section class="shell-card shell-card-dense top-gap">
+        <div class="workspace-main-header">
+          <div>
+            <strong>模型 / Provider</strong>
+            <p class="workspace-main-copy">把“判断状态”“接入设置”“细调补充”拆开看，减少一屏里同时出现太多输入框。</p>
           </div>
-          <label class="field-stack">
-            <span>人格 / 风格</span>
-            <input class="search-input" id="control-personality" value="${escapeHtml(draft.personality)}" placeholder="helpful / technical / concise">
-          </label>
-          <div class="checkbox-row top-gap">
-            <label>
-              <input type="checkbox" id="control-streaming-enabled" ${draft.streamingEnabled ? 'checked' : ''}>
-              <span>启用流式输出</span>
-            </label>
+          <div class="pill-row">
+            ${pillHtml(draft.modelProvider || '待补 provider', draft.modelProvider ? 'good' : 'warn')}
+            ${pillHtml(draft.streamingEnabled ? '流式输出' : '静态输出', draft.streamingEnabled ? 'neutral' : 'warn')}
           </div>
-        `,
-      })}
+        </div>
+        <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
+          ${controlSubviewTabHtml('data-control-model-view', modelView, 'status', '状态')}
+          ${controlSubviewTabHtml('data-control-model-view', modelView, 'connect', '接入')}
+          ${controlSubviewTabHtml('data-control-model-view', modelView, 'detail', '细调')}
+        </div>
+        <div class="page-stack top-gap">
+          ${modelView === 'connect'
+            ? renderModelConnectWorkbench(view, draft)
+            : modelView === 'detail'
+              ? renderModelDetailWorkbench(view, draft)
+              : renderModelStatusWorkbench(view, draft)}
+        </div>
+      </section>
     `
     : activeGroup.key === 'toolsets'
-      ? disclosureHtml({
-        sectionId: 'toolsets-presets',
-        open: true,
-        eyebrow: '能力集',
-        title: '能力面 / Toolsets',
-        metaHtml: `${pillHtml(draft.toolsets.length ? `${draft.toolsets.length} 组` : '待补齐', draft.toolsets.length ? 'good' : 'warn')}${pillHtml(normalizedBindings.length ? `${normalizedBindings.length} 平台` : '无平台绑定', normalizedBindings.length ? 'neutral' : 'warn')}`,
-        body: `
-          ${renderToolsetPresetGrid(draft)}
-          ${renderTopLevelToolsetManager(view, draft)}
-          ${renderPlatformBindingManager(view, draft)}
-        `,
-      })
+      ? `
+        <section class="shell-card shell-card-dense">
+          <div class="workspace-main-header">
+            <div>
+              <strong>能力面 / Toolsets</strong>
+              <p class="workspace-main-copy">先看状态，再决定是套用预设、手动整理顶层能力，还是继续下钻到平台绑定。</p>
+            </div>
+            <div class="pill-row">
+              ${pillHtml(draft.toolsets.length ? `${draft.toolsets.length} 组` : '待补齐', draft.toolsets.length ? 'good' : 'warn')}
+              ${pillHtml(normalizedBindings.length ? `${normalizedBindings.length} 平台` : '无平台绑定', normalizedBindings.length ? 'neutral' : 'warn')}
+            </div>
+          </div>
+          <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
+            ${controlSubviewTabHtml('data-control-toolset-view', toolsetView, 'status', '状态')}
+            ${controlSubviewTabHtml('data-control-toolset-view', toolsetView, 'presets', '预设')}
+            ${controlSubviewTabHtml('data-control-toolset-view', toolsetView, 'manual', '手动')}
+            ${controlSubviewTabHtml('data-control-toolset-view', toolsetView, 'platform', '平台')}
+          </div>
+          <div class="page-stack top-gap">
+            ${toolsetView === 'platform'
+              ? `
+                <section class="workspace-section-anchor" data-workspace-section="toolsets-detail">
+                  ${renderPlatformBindingManager(view, draft)}
+                </section>
+              `
+              : toolsetView === 'manual'
+                ? `
+                  <section class="workspace-section-anchor" data-workspace-section="toolsets-manual">
+                    ${renderTopLevelToolsetManager(view, draft)}
+                  </section>
+                `
+                : toolsetView === 'presets'
+                  ? `
+                    <section class="workspace-section-anchor" data-workspace-section="toolsets-presets">
+                      ${renderToolsetPresetGrid(draft)}
+                    </section>
+                  `
+              : `
+                ${renderToolsetStatusWorkbench(draft)}
+              `}
+          </div>
+        </section>
+      `
       : activeGroup.key === 'memory'
         ? disclosureHtml({
           sectionId: 'memory-presets',
@@ -1611,10 +1802,7 @@ export function renderStructuredControls(view) {
       <section class="panel panel-nested">
         <div class="workspace-main-header">
           <div>
-            <div class="panel-title-row">
-              <strong>结构化控制面</strong>
-              ${infoTipHtml('优先在客户端里直接完成模型、memory、toolsets 等高频配置，尽量减少回官方交互命令。')}
-            </div>
+            <strong>核心设置</strong>
           </div>
           <div class="pill-row">
             ${pillHtml(draft.modelProvider || 'provider 未配', draft.modelProvider ? 'good' : 'warn')}
@@ -1648,7 +1836,7 @@ export function renderStructuredControls(view) {
 
         <div class="workspace-main-header">
           <div>
-            <strong>当前只看这一组</strong>
+            <strong>当前分组</strong>
             <p class="workspace-main-copy">${escapeHtml(activeGroup.description)}</p>
           </div>
           ${pillHtml(activeGroup.label, 'neutral')}
@@ -1855,7 +2043,7 @@ export function renderStructuredEnvControls(view) {
 
         <div class="workspace-main-header">
           <div>
-            <strong>当前只看这一组</strong>
+            <strong>当前分组</strong>
             <p class="workspace-main-copy">${escapeHtml(activeGroup.description)}</p>
           </div>
           ${pillHtml(activeGroup.label, 'neutral')}

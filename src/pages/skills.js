@@ -130,43 +130,43 @@ function renderFocusSurface(view, state) {
   const { currentToolsets, jobs, runtimeLocal, runtimeMismatch, skill, selectedExistsInRuntime, usedNames, warnings } = state;
   const focusState = !view.skills.length
     ? {
-      description: '先创建或导入一个本地技能，再继续做安装、编排和运行态接入。',
+      description: '先创建或导入一个技能。',
       kicker: '先放进来',
-      title: '当前实例还没有可治理的技能',
+      title: '还没有可用技能',
       tone: 'warn',
     }
     : runtimeMismatch
       ? {
-        description: '技能目录和运行态数量不一致，先把技能真正接到运行面上。',
+        description: '请先对齐目录与运行态。',
         kicker: '先对齐',
-        title: 'Skills 目录态和运行态没有对上',
+        title: '技能运行态未对齐',
         tone: 'warn',
       }
       : !currentToolsets.length
         ? {
-          description: '技能文件已经有了，但工具集为空，模型侧不一定真的能用到这些技能。',
+          description: '请先补齐 toolsets。',
           kicker: '先暴露能力',
-          title: '当前还没有配置 toolsets',
+          title: 'Toolsets 未配置',
           tone: 'warn',
         }
         : skill && jobs.length === 0 && (view.cron?.jobs.length ?? 0) > 0
           ? {
-            description: '当前技能还没接入任何自动化作业，建议去编排页继续绑定。',
+            description: '请在编排页继续绑定。',
             kicker: '继续布线',
-            title: `${skill.name} 还没有进入自动化编排`,
+            title: `${skill.name} 未接入编排`,
             tone: 'warn',
           }
           : warnings.length > 0
             ? {
-              description: '技能链路已经能跑，但还有提醒项。默认层只保留最常用入口，不再把编辑器直接铺满。',
+              description: '有提醒需要处理。',
               kicker: '继续收口',
-              title: '技能工作面已经可用，继续处理提醒',
+              title: '技能工作面可用',
               tone: 'warn',
             }
             : {
-              description: '默认页只露出常用判断和去向。本地编辑、安装治理和目录列表都继续收进下一层。',
+              description: '可以继续管理技能与编排。',
               kicker: '可以继续',
-              title: '当前技能层已经比较稳定',
+              title: '技能层已就绪',
               tone: 'good',
             };
   const focusSignals = [
@@ -206,7 +206,7 @@ function renderFocusSurface(view, state) {
       <div class="panel-title-row">
         <h1 class="page-title">技能工作台</h1>
       </div>
-      <p class="page-desc">默认只保留技能层的主判断和最常用入口，编辑器与安装治理收进下一层。</p>
+      <p class="page-desc">技能查看、治理与编排。</p>
     </div>
 
     <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
@@ -247,8 +247,8 @@ function renderFocusSurface(view, state) {
       <section class="dashboard-jump-panel">
         <div class="config-section-header">
           <div>
-            <h2 class="config-section-title">继续去哪里</h2>
-            <p class="config-section-desc">高频入口留在这里，完整的目录列表、本地编辑和安装治理继续放到治理台里。</p>
+            <h2 class="config-section-title">常用入口</h2>
+            <p class="config-section-desc">打开最常用的 4 个工作区。</p>
           </div>
         </div>
         <div class="dashboard-jump-grid">
@@ -288,8 +288,8 @@ function renderFocusSurface(view, state) {
     <section class="config-section dashboard-quiet-card">
       <div class="config-section-header">
         <div>
-          <h2 class="config-section-title">当前只保留这些摘要</h2>
-          <p class="config-section-desc">默认页只给你是否可用、是否已接入、下一步去哪，不直接堆编辑器和长列表。</p>
+          <h2 class="config-section-title">概览</h2>
+          <p class="config-section-desc">当前状态与建议操作。</p>
         </div>
         <div class="toolbar">
           ${pillHtml(skill?.name || '等待选择', skill ? 'good' : 'warn')}
@@ -299,7 +299,7 @@ function renderFocusSurface(view, state) {
         { label: '当前技能', value: skill?.name || '还没有选择技能' },
         { label: '分类', value: skill?.category || '—' },
         { label: '最近动作', value: view.lastResult?.label || '还没有执行过治理动作' },
-        { label: '下一步', value: !view.skills.length ? '先创建或导入一个技能' : runtimeMismatch ? '优先对齐运行态' : !currentToolsets.length ? '先去补齐 toolsets' : '进入治理台做细节接管' },
+        { label: '建议操作', value: !view.skills.length ? '先创建或导入一个技能' : runtimeMismatch ? '优先对齐运行态' : !currentToolsets.length ? '先去补齐 toolsets' : '进入治理台继续处理' },
       ])}
     </section>
   `;
@@ -935,10 +935,32 @@ function bindEvents(view, intents = {}) {
         case 'open-skill-workbench':
           view.surfaceView = 'workbench';
           view.workspaceTab = element.getAttribute('data-tab') || 'overview';
+          if (view.workspaceTab === 'studio' && !view.skillStudioSection) {
+            view.skillStudioSection = 'target';
+          }
+          if (view.workspaceTab === 'registry' && !view.skillRegistrySection) {
+            view.skillRegistrySection = 'search';
+          }
           renderPage(view);
           return;
         case 'switch-workspace-tab':
           view.workspaceTab = element.getAttribute('data-tab') || 'overview';
+          if (view.workspaceTab === 'studio' && !view.skillStudioSection) {
+            view.skillStudioSection = 'target';
+          }
+          if (view.workspaceTab === 'registry' && !view.skillRegistrySection) {
+            view.skillRegistrySection = 'search';
+          }
+          renderPage(view);
+          return;
+        case 'focus-skill-studio-section':
+          view.workspaceTab = 'studio';
+          view.skillStudioSection = element.getAttribute('data-section') || 'target';
+          renderPage(view);
+          return;
+        case 'focus-skill-registry-section':
+          view.workspaceTab = 'registry';
+          view.skillRegistrySection = element.getAttribute('data-section') || 'search';
           renderPage(view);
           return;
         case 'select-skill':
@@ -1019,6 +1041,8 @@ function bindEvents(view, intents = {}) {
           return;
         case 'use-selected-skill-name':
           if (intents.skill) {
+            view.workspaceTab = 'registry';
+            view.skillRegistrySection = 'search';
             view.registryQuery = intents.skill.name;
             view.installTarget = intents.skill.name;
             renderPage(view);
@@ -1103,6 +1127,8 @@ export async function render() {
     skillFrontmatterDraft: null,
     skillFrontmatterExpanded: true,
     skillLocalOpsExpanded: false,
+    skillRegistrySection: 'search',
+    skillStudioSection: 'target',
     skills: [],
     surfaceView: 'focus',
     installTarget: '',

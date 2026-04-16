@@ -73,17 +73,17 @@ const GATEWAY_POLICY_GROUPS = [
   {
     key: 'reset',
     label: '重置',
-    description: '只看会话重置策略、触发词和提醒方式。',
+    description: '会话重置与触发词。',
   },
   {
     key: 'access',
     label: '准入',
-    description: '聚焦私聊准入和群聊 / 线程隔离，不和其他运行特性混排。',
+    description: '私聊准入与会话隔离。',
   },
   {
     key: 'runtime',
     label: '令牌与特性',
-    description: 'Gateway Token、本地日志和语音转写放在这一组单独处理。',
+    description: 'Token、本地日志和语音转写。',
   },
 ];
 
@@ -97,8 +97,8 @@ export function relaySeed(view) {
       }
     : {
         sourcePage: 'gateway',
-        headline: '来自 Gateway 的链路下钻',
-        description: '继续围绕消息平台、会话策略和远端交付做排障。',
+        headline: '查看 Gateway 状态',
+        description: '查看消息平台、会话策略和远端作业。',
       };
 }
 
@@ -490,7 +490,7 @@ export function renderGatewayRail(view, context) {
   return `
     <div class="workspace-rail-header">
       <div>
-        <strong>工作台摘要</strong>
+        <strong>概览</strong>
       </div>
       ${workspaceDirty ? pillHtml('待保存', 'warn') : pillHtml('已同步', 'good')}
     </div>
@@ -507,7 +507,7 @@ export function renderGatewayRail(view, context) {
       : `<p class="helper-text">平台异常 ${escapeHtml(String(unhealthyPlatforms.length))} 个，当前没有新的阻塞告警。</p>`}
     <section class="workspace-rail-section">
       <div class="workspace-rail-section-header">
-        <span class="workspace-rail-section-title">主工作台</span>
+        <span class="workspace-rail-section-title">常用入口</span>
         ${pillHtml(view.workspaceTab, 'neutral')}
       </div>
       <div class="workspace-shortcut-grid">
@@ -752,41 +752,34 @@ export function renderControlWorkspace(view, context) {
       <section class="shell-card shell-card-dense">
         <div class="shell-card-header">
           <div>
-            <div class="panel-title-row">
-              <strong>Service 接管</strong>
-              ${infoTipHtml('保留 Hermes 原生 service 生命周期，但把安装、启停和状态回收进客户端。')}
-            </div>
+            <strong>服务状态</strong>
           </div>
           ${pillHtml(gatewayRunning ? '运行中' : '待启动', gatewayRunning ? 'good' : 'warn')}
         </div>
         ${keyValueRowsHtml([
-          { label: 'PID', value: String(gateway?.pid ?? '—') },
-          { label: '活跃 Agent', value: String(gateway?.activeAgents ?? 0) },
-          { label: '异常平台', value: String(unhealthyPlatforms.length) },
-          { label: '远端作业', value: String(remoteJobs.length) },
+          { label: '服务接管', value: gatewayRunning ? '已经接管' : '还没启动' },
+          { label: '异常入口', value: unhealthyPlatforms.length > 0 ? `${unhealthyPlatforms.length} 个待处理` : '当前正常' },
+          { label: '远端投递', value: remoteJobs.length > 0 ? `${remoteJobs.length} 个依赖` : '当前没有' },
         ])}
         <div class="toolbar top-gap">
           ${buttonHtml({ action: gatewayRunning ? 'gateway-restart' : 'gateway-start', label: gatewayRunning ? '重启 Gateway' : '启动 Gateway', disabled: Boolean(view.runningAction) || !installation.binaryFound })}
           ${buttonHtml({ action: 'gateway-stop', label: '停止 Gateway', kind: 'danger', disabled: Boolean(view.runningAction) || !installation.binaryFound })}
           ${buttonHtml({ action: 'toggle-service-actions', label: view.showServiceActions ? '收起系统动作' : '系统动作' })}
         </div>
-        <p class="helper-text">安装和卸载 Service 已收进侧栏弱化区，避免和高频启停动作混在一起。</p>
+        <p class="helper-text">系统级安装和卸载放在侧栏里。</p>
       </section>
 
       <section class="shell-card shell-card-dense">
         <div class="shell-card-header">
           <div>
-            <div class="panel-title-row">
-              <strong>平台接入摘要</strong>
-              ${infoTipHtml('控制面只保留平台接入摘要和跳转入口，完整字段编辑收进“平台”标签，避免同一组通道表单在两个区域重复出现。')}
-            </div>
+            <strong>消息入口</strong>
           </div>
           ${buttonHtml({ action: 'switch-workspace-tab', label: '进入平台', attrs: { 'data-tab': 'platforms' } })}
         </div>
         <div class="platform-bridge-pill-row">
           ${renderChannelBridgePills(env, platformStates)}
         </div>
-        <p class="helper-text">这里只看接入骨架和运行状态，具体 token / home / reply 细项统一到平台标签继续编辑。</p>
+        <p class="helper-text">详细通道字段请到“平台”里编辑。</p>
         <div class="toolbar top-gap">
           ${buttonHtml({ action: 'switch-workspace-tab', label: '平台连接', kind: 'primary', attrs: { 'data-tab': 'platforms' } })}
           ${buttonHtml({ action: 'goto-logs', label: '查看日志' })}
@@ -797,11 +790,8 @@ export function renderControlWorkspace(view, context) {
     <section class="shell-card shell-card-dense top-gap">
       <div class="shell-card-header">
         <div>
-          <div class="panel-title-row">
-            <strong>策略治理</strong>
-            ${infoTipHtml('这里集中接管 Gateway token、会话重置、私聊准入和运行特性；保存后直接写回 config.yaml 和 .env。')}
-          </div>
-          <p class="shell-card-copy">主区只保留策略主控和闭环动作，细项收进折叠子模块，避免和平台连接表单混排。</p>
+          <strong>策略设置</strong>
+          <p class="shell-card-copy">策略、重置和运行特性都集中在这里。</p>
         </div>
         <div class="toolbar">
           ${dirty ? pillHtml('待保存', 'warn') : pillHtml('已同步', 'good')}
@@ -842,7 +832,7 @@ export function renderControlWorkspace(view, context) {
 
       <div class="workspace-main-header top-gap">
         <div>
-          <strong>当前只看这一组</strong>
+          <strong>当前分组</strong>
           <p class="workspace-main-copy">${escapeHtml(activePolicyGroup.description)}</p>
         </div>
         ${pillHtml(activePolicyGroup.label, 'neutral')}
@@ -1002,10 +992,7 @@ export function renderPlatformsWorkspace(view, context) {
         <div class="shell-card-header model-focus-head">
           <div class="model-focus-title-wrap">
             <div>
-              <div class="panel-title-row">
-                <strong>通道接入治理</strong>
-                ${infoTipHtml('这里直接接管 .env 中的消息通道字段。保存后可以立刻重启 Gateway 验证运行态，不再跳去命令行。')}
-              </div>
+              <strong>通道设置</strong>
             </div>
             <div class="model-focus-title">
               <div class="model-focus-title-copy">
@@ -1066,7 +1053,7 @@ export function renderPlatformsWorkspace(view, context) {
         <div class="workspace-main-header">
           <div>
             <strong>${escapeHtml(focusedPreset?.label || '当前平台')} 细项</strong>
-            <p class="workspace-main-copy">下方只展开当前聚焦平台，其他平台通过上面的治理卡切换，不再把四个平台表单同时摊开。</p>
+            <p class="workspace-main-copy">这里只显示当前选中的平台。</p>
           </div>
           <div class="pill-row">
             ${focusedSnapshot?.state ? pillHtml(focusedSnapshot.state, runtimePillTone(focusedSnapshot, true)) : ''}
@@ -1200,11 +1187,8 @@ export function renderDiagnosticsWorkspace(view, installation) {
       <section class="shell-card shell-card-dense">
         <div class="shell-card-header">
           <div>
-            <div class="panel-title-row">
-              <strong>网关诊断工作台</strong>
-              ${infoTipHtml('这部分保留 CLI 诊断能力，但把高频动作、最近回执和原始输出都收纳在同一个子工作台里，不再到处重复露出命令细节。')}
-            </div>
-            <p class="shell-card-copy">高频诊断在前，原始命令和原始输出降级为排障材料。</p>
+            <strong>网关诊断</strong>
+            <p class="shell-card-copy">常用诊断在上，详细结果在下。</p>
           </div>
           <div class="pill-row">
             ${pillHtml(installation.binaryFound ? 'Hermes 可执行' : '未检测到可执行组件', installation.binaryFound ? 'good' : 'warn')}
@@ -1216,7 +1200,7 @@ export function renderDiagnosticsWorkspace(view, installation) {
           <section class="summary-mini-card">
             <span class="summary-mini-label">最近诊断</span>
             <strong class="summary-mini-value">${escapeHtml(view.lastResult?.label || '还没执行')}</strong>
-            <span class="summary-mini-meta">只保留最新一次动作作为回执</span>
+            <span class="summary-mini-meta">显示最近一条结果</span>
           </section>
           <section class="summary-mini-card">
             <span class="summary-mini-label">退出码</span>
@@ -1226,7 +1210,7 @@ export function renderDiagnosticsWorkspace(view, installation) {
           <section class="summary-mini-card">
             <span class="summary-mini-label">stdout 摘要</span>
             <strong class="summary-mini-value">${escapeHtml(truncate(lastStdout, 24))}</strong>
-            <span class="summary-mini-meta">避免让整段原始输出直接占满主区</span>
+            <span class="summary-mini-meta">需要时再查看完整输出</span>
           </section>
           <section class="summary-mini-card">
             <span class="summary-mini-label">日志联动</span>
@@ -1240,7 +1224,7 @@ export function renderDiagnosticsWorkspace(view, installation) {
             <section class="action-card action-card-compact">
               <div class="action-card-header">
                 <div>
-                  <p class="eyebrow">高频诊断</p>
+                  <p class="eyebrow">常用诊断</p>
                   <h3 class="action-card-title">${escapeHtml(item.label)}</h3>
                 </div>
                 ${pillHtml(item.key, item.key.includes('deep') ? 'warn' : 'good')}
@@ -1290,10 +1274,10 @@ export function renderDiagnosticsWorkspace(view, installation) {
               <div class="workspace-main-header">
                 <div>
                   <strong>最近诊断回执</strong>
-                  <p class="workspace-main-copy">这里只保留最后一次动作的摘要，不让原始命令和长输出继续抢占主区。</p>
+                  <p class="workspace-main-copy">这里显示最近一次诊断结果。</p>
                 </div>
               </div>
-              ${renderGatewayResultReceipt(view.lastResult, '尚未执行 Gateway 诊断', '执行高频诊断后，这里会保留最后一次回执摘要。')}
+              ${renderGatewayResultReceipt(view.lastResult, '尚未执行 Gateway 诊断', '执行诊断后，这里会显示最近一次结果。')}
             </section>
           </div>
         </details>
@@ -1313,7 +1297,7 @@ export function renderRuntimeWorkspace(view) {
         <div class="workspace-main-header">
           <div>
             <strong>最近动作回执</strong>
-            <p class="workspace-main-copy">只保留最后一次 Gateway 启停、保存联调或诊断回执，作为排障参考。</p>
+            <p class="workspace-main-copy">显示最近一次启动、保存或诊断结果。</p>
           </div>
           <div class="pill-row">
             ${pillHtml(view.lastResult?.label || '尚未执行', 'neutral')}
@@ -1337,9 +1321,9 @@ export function renderRuntimeWorkspace(view) {
             <span class="summary-mini-meta">帮助判断是否是硬失败</span>
           </section>
           <section class="summary-mini-card">
-            <span class="summary-mini-label">下一步</span>
-            <strong class="summary-mini-value">${escapeHtml(view.lastResult?.result?.stderr ? '优先看日志' : '继续核对状态')}</strong>
-            <span class="summary-mini-meta">不要直接把整段原始输出顶到上层工作区</span>
+            <span class="summary-mini-label">建议操作</span>
+            <strong class="summary-mini-value">${escapeHtml(view.lastResult?.result?.stderr ? '优先看日志' : '查看连接状态')}</strong>
+            <span class="summary-mini-meta">需要完整内容时再看下方输出</span>
           </section>
         </section>
         <div class="toolbar top-gap">
@@ -1352,8 +1336,8 @@ export function renderRuntimeWorkspace(view) {
       <section class="panel panel-nested">
         <div class="workspace-main-header">
           <div>
-            <strong>原始输出对照</strong>
-            <p class="workspace-main-copy">只在需要时展开看 stdout / stderr 原文，不让大块文本抢主区。</p>
+            <strong>完整输出</strong>
+            <p class="workspace-main-copy">需要时再查看完整 stdout / stderr。</p>
           </div>
         </div>
         ${renderGatewayRawOutput(view.lastResult)}

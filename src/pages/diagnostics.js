@@ -349,7 +349,7 @@ function renderFocusSurface(view, state) {
             tone: 'warn',
           }
           : {
-            description: '默认层只保留判断、去向和最近信号；细粒度上下文、日志和原始回执都下沉到材料层。',
+            description: '查看当前诊断结论与最近信号。',
             kicker: '可以继续',
             primary: buttonHtml({ action: 'open-diagnostics-surface', label: '看材料与回执', kind: 'primary', attrs: { 'data-surface': 'artifacts' } }),
             secondary: buttonHtml({ action: 'open-diagnostics-surface', label: '进入修复台', attrs: { 'data-surface': 'repair' } }),
@@ -414,8 +414,8 @@ function renderFocusSurface(view, state) {
       <aside class="dashboard-jump-panel">
         <div class="workspace-main-header">
           <div>
-            <strong>继续去哪里</strong>
-            <p class="workspace-main-copy">默认层只露出 4 个高频去向，命令列表和日志原文继续收进下一层。</p>
+            <strong>常用入口</strong>
+            <p class="workspace-main-copy">打开最常用的 4 个工作区。</p>
           </div>
           ${pillHtml('高频 4 项', 'neutral')}
         </div>
@@ -456,8 +456,8 @@ function renderFocusSurface(view, state) {
     <section class="config-section dashboard-quiet-card">
       <div class="config-section-header">
         <div>
-          <h2 class="config-section-title">当前只保留这些摘要</h2>
-          <p class="config-section-desc">默认层不再把本地上下文字段、命令列表和日志原文一起摊开，只保留结论与下一步。</p>
+          <h2 class="config-section-title">概览</h2>
+          <p class="config-section-desc">当前状态与建议操作。</p>
         </div>
         <div class="toolbar">
           ${pillHtml(view.profile, 'neutral')}
@@ -467,7 +467,7 @@ function renderFocusSurface(view, state) {
         { label: '当前焦点', value: focusState.title },
         { label: '运行面', value: `${gatewayState} · 远端作业 ${state.remoteJobs.length} 个` },
         { label: '能力面', value: `${toolsEnabled}/${toolsTotal || 0} 工具 · ${view.skills.length} 个技能 · ${pluginCount} 个插件` },
-        { label: '下一步', value: !binaryFound ? '先安装 Hermes' : prioritiesCount > 0 ? '进入修复台处理高优先项' : '按需看材料层或继续下钻对应工作台' },
+        { label: '建议操作', value: !binaryFound ? '先安装 Hermes' : prioritiesCount > 0 ? '进入修复台处理高优先项' : '按需查看材料或进入对应工作台' },
       ])}
     </section>
   `;
@@ -479,7 +479,7 @@ function renderRepairSurface(view, state) {
       <div class="config-section-header">
         <div>
           <h2 class="config-section-title">修复入口</h2>
-          <p class="config-section-desc">优先回结构化工作台和客户端动作闭环，不再把所有诊断材料和文件细节混在同一个默认面板里。</p>
+          <p class="config-section-desc">优先处理高优先项与修复动作。</p>
         </div>
         <div class="toolbar">
           ${pillHtml(state.posture.priorities.length > 0 ? `${state.posture.priorities.length} 个高优先项` : '可继续体检', state.posture.priorities.length > 0 ? 'warn' : 'good')}
@@ -495,7 +495,7 @@ function renderRepairSurface(view, state) {
             ${pillHtml(view.installation?.binaryFound ? '已接管' : '待安装', view.installation?.binaryFound ? 'good' : 'bad')}
           </div>
           <p class="action-card-copy">如果 Hermes 本体都不稳，后续 Gateway、Skills、Plugins 和 Memory 的问题很多都会是假问题。</p>
-          <p class="workspace-inline-meta">客户端内执行安装脚本与更新命令，不再默认弹出 Terminal。</p>
+          <p class="workspace-inline-meta">可直接在客户端内执行安装与更新。</p>
           <div class="toolbar">
             ${buttonHtml({ action: 'install-cli', label: view.runningDesktopAction === 'diagnostics:install' ? '安装中…' : (view.installation?.binaryFound ? '重新安装 Hermes' : '安装 Hermes'), kind: 'primary', disabled: state.actionBusy || !view.installation })}
             ${buttonHtml({ action: 'update-cli', label: view.runningDesktopAction === 'diagnostics:update' ? '升级中…' : '升级 Hermes', disabled: state.actionBusy || !view.installation?.binaryFound })}
@@ -526,7 +526,7 @@ function renderRepairSurface(view, state) {
             </div>
             ${pillHtml(enabledToolCount(view.extensions) > 0 ? `${enabledToolCount(view.extensions)} 个 tools` : '能力面待修', enabledToolCount(view.extensions) > 0 ? 'good' : 'warn')}
           </div>
-          <p class="action-card-copy">能力面问题优先回工具、技能、记忆和扩展工作台，不再回到命令入口。</p>
+          <p class="action-card-copy">能力面问题优先在工具、技能、记忆和扩展工作台处理。</p>
           <p class="workspace-inline-meta">${escapeHtml(view.installation ? `${view.config?.summary.toolsets?.join(', ') || '无 toolsets'} · memory ${view.config?.summary.memoryProvider || 'builtin-file'} · plugins ${pluginsCount(view.extensions)}` : '未读取能力面摘要')}</p>
           <div class="toolbar">
             ${buttonHtml({ action: 'goto-config-toolsets', label: 'Toolsets', disabled: state.actionBusy || !view.installation?.binaryFound })}
@@ -753,10 +753,10 @@ function renderPage(view) {
   const lastCommand = state.lastCommand;
   const surfaceView = view.surfaceView || 'focus';
   const pageDescription = surfaceView === 'repair'
-    ? '修复台里只保留修复动作、运行诊断和能力诊断。'
+    ? '修复动作、运行诊断与能力诊断。'
     : surfaceView === 'artifacts'
       ? '材料层统一收纳本地上下文、最近回执和日志预览。'
-      : '默认层只保留诊断结论和最常用去向。';
+      : '查看当前诊断结论与常用入口。';
   const surfaceContent = surfaceView === 'repair'
     ? renderRepairSurface(view, state)
     : surfaceView === 'artifacts'
@@ -767,7 +767,6 @@ function renderPage(view) {
     <div class="page-header page-header-compact">
       <div class="panel-title-row">
         <h1 class="page-title">诊断工作台</h1>
-        ${infoTipHtml('诊断页只保留体检、日志预览和客户端内修复动作；大段说明后置到提示里，不抢排障区。')}
       </div>
       <p class="page-desc">${pageDescription}</p>
     </div>

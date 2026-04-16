@@ -23,6 +23,47 @@ const EMPTY_SKILL_IMPORT_DRAFT = {
   sourcePath: '',
 };
 
+const SKILL_STUDIO_GROUPS = [
+  {
+    key: 'target',
+    label: '目标',
+    description: '编辑当前技能的名称、说明和正文。',
+  },
+  {
+    key: 'import',
+    label: '导入',
+    description: '导入已有技能目录或单个 SKILL.md。',
+  },
+  {
+    key: 'create',
+    label: '新建',
+    description: '创建一个新的本地技能。',
+  },
+];
+
+const SKILL_REGISTRY_GROUPS = [
+  {
+    key: 'search',
+    label: '搜索安装',
+    description: '搜索并安装技能。',
+  },
+  {
+    key: 'maintain',
+    label: '更新审计',
+    description: '更新、审计和核对已安装技能。',
+  },
+  {
+    key: 'wiring',
+    label: '布线',
+    description: '查看运行态、工具集和自动化引用。',
+  },
+  {
+    key: 'output',
+    label: '回执',
+    description: '查看最近结果。',
+  },
+];
+
 function categoryLabel(value) {
   return value || '未分类';
 }
@@ -138,10 +179,10 @@ function capabilityWarnings(view, skill, jobs) {
 export function relaySeed(view, skill) {
   return {
     sourcePage: 'skills',
-    headline: skill ? `围绕技能 ${skill.name} 继续下钻` : '围绕技能层继续下钻',
+    headline: skill ? `查看技能 ${skill.name}` : '查看技能状态',
     description: skill
-      ? `继续围绕 ${skill.name} 的目录态、运行态与自动化接入做排查。`
-      : '继续围绕技能目录、运行态与自动化接入做排查。',
+      ? `查看 ${skill.name} 的目录、运行状态和自动化引用。`
+      : '查看技能目录、运行状态和自动化引用。',
     context: skill
       ? {
           sessionId: `skill:${skill.name}`,
@@ -221,14 +262,14 @@ function renderCronJobs(jobs) {
 function renderSkillWorkbenchTabs(view) {
   const tabs = [
     { key: 'overview', label: '概览' },
-    { key: 'studio', label: '本地治理' },
-    { key: 'registry', label: '安装治理' },
+    { key: 'studio', label: '本地编辑' },
+    { key: 'registry', label: '安装管理' },
   ];
 
   return `
     <div class="tab-bar tab-bar-dense">
       ${tabs.map((tab) => `
-        <button
+          <button
           type="button"
           class="tab ${view.workspaceTab === tab.key ? 'active' : ''}"
           data-action="switch-workspace-tab"
@@ -241,13 +282,55 @@ function renderSkillWorkbenchTabs(view) {
   `;
 }
 
+function resolveSkillStudioGroup(activeKey) {
+  return SKILL_STUDIO_GROUPS.find((group) => group.key === activeKey) ?? SKILL_STUDIO_GROUPS[0];
+}
+
+function renderSkillStudioTabs(activeKey) {
+  return `
+    <div class="tab-bar tab-bar-dense">
+      ${SKILL_STUDIO_GROUPS.map((group) => `
+        <button
+          type="button"
+          class="tab ${group.key === activeKey ? 'active' : ''}"
+          data-action="focus-skill-studio-section"
+          data-section="${escapeHtml(group.key)}"
+        >
+          ${escapeHtml(group.label)}
+        </button>
+      `).join('')}
+    </div>
+  `;
+}
+
+function resolveSkillRegistryGroup(activeKey) {
+  return SKILL_REGISTRY_GROUPS.find((group) => group.key === activeKey) ?? SKILL_REGISTRY_GROUPS[0];
+}
+
+function renderSkillRegistryTabs(activeKey) {
+  return `
+    <div class="tab-bar tab-bar-dense">
+      ${SKILL_REGISTRY_GROUPS.map((group) => `
+        <button
+          type="button"
+          class="tab ${group.key === activeKey ? 'active' : ''}"
+          data-action="focus-skill-registry-section"
+          data-section="${escapeHtml(group.key)}"
+        >
+          ${escapeHtml(group.label)}
+        </button>
+      `).join('')}
+    </div>
+  `;
+}
+
 function renderSkillOutputCard(view) {
   return `
     <section class="workspace-main-card">
       <div class="workspace-main-header">
         <div>
-          <h2 class="config-section-title">最近回执与原始输出</h2>
-          <p class="config-section-desc">执行搜索、预检、安装或审计后，回执会保留在这里。</p>
+          <h2 class="config-section-title">最近结果</h2>
+          <p class="config-section-desc">搜索、安装或审计后的结果会显示在这里。</p>
         </div>
         ${pillHtml(view.lastResult ? '最近回执' : '底层快照', view.lastResult ? 'good' : 'neutral')}
       </div>
@@ -269,10 +352,10 @@ function renderSkillOverviewWorkspace(view, state) {
             ${skill ? pillHtml(categoryLabel(skill.category), 'neutral') : ''}
             ${skill ? pillHtml(selectedExistsInRuntime ? '运行面已接入' : '运行面待同步', selectedExistsInRuntime ? 'good' : 'warn') : ''}
           </div>
-          <p class="workspace-main-copy">${escapeHtml(skill?.description || '从左侧选择技能后，这里会展示目录态、运行态和自动化引用。')}</p>
+          <p class="workspace-main-copy">${escapeHtml(skill?.description || '从左侧选择技能后，这里会显示基本信息和预览。')}</p>
         </div>
         <div class="toolbar">
-          ${buttonHtml({ action: 'use-selected-skill-name', label: '带入治理', kind: 'primary', disabled: !skill })}
+          ${buttonHtml({ action: 'use-selected-skill-name', label: '设为当前目标', kind: 'primary', disabled: !skill })}
           ${buttonHtml({ action: 'goto-logs', label: '日志', disabled: !skill })}
           ${buttonHtml({ action: 'goto-extensions', label: '扩展运行态' })}
         </div>
@@ -299,7 +382,7 @@ function renderSkillOverviewWorkspace(view, state) {
         <div class="workspace-main-header">
           <div>
             <h2 class="config-section-title">自动化引用</h2>
-            <p class="config-section-desc">优先核对真正被 cron 显式引用的技能。</p>
+            <p class="config-section-desc">查看这个技能关联的 cron 作业。</p>
           </div>
           ${pillHtml(skill ? `${jobs.length} 个作业` : '等待选择', skill && jobs.length > 0 ? 'good' : 'warn')}
         </div>
@@ -315,7 +398,7 @@ function renderSkillOverviewWorkspace(view, state) {
           <div class="workspace-main-header">
             <div>
               <h2 class="config-section-title">关键提醒</h2>
-              <p class="config-section-desc">只保留会影响技能闭环的信号，不抢主操作位。</p>
+              <p class="config-section-desc">当前技能的关键状态。</p>
             </div>
             ${pillHtml(`${warnings.length} 条`, 'warn')}
           </div>
@@ -338,16 +421,14 @@ function renderSkillRegistryWorkspace(view, state) {
     usedNames,
   } = state;
 
-  return `
-    <div class="compact-overview-grid compact-overview-grid-dense">
-      <section class="shell-card shell-card-dense">
-          <div class="shell-card-header">
-            <div>
-              <div class="panel-title-row">
-                <strong>搜索 / 预检 / 安装</strong>
-                ${infoTipHtml('调用的是桌面端封装的技能动作，不会把你甩回外部终端。')}
-              </div>
-            <p class="shell-card-copy">先搜关键词，再对目标技能做预检或安装。</p>
+  const activeGroup = resolveSkillRegistryGroup(view.skillRegistrySection);
+  const groupBody = activeGroup.key === 'search'
+    ? `
+      <section class="workspace-main-card">
+        <div class="workspace-main-header">
+          <div>
+            <h2 class="config-section-title">搜索 / 预检 / 安装</h2>
+            <p class="workspace-main-copy">搜索后可直接预检或安装。</p>
           </div>
           ${pillHtml(view.installTarget.trim() || '等待目标', view.installTarget.trim() ? 'good' : 'warn')}
         </div>
@@ -361,63 +442,77 @@ function renderSkillRegistryWorkspace(view, state) {
             <input class="search-input" id="skills-install-target" placeholder="official/security/1password">
           </label>
         </div>
-        <div class="toolbar">
+        <div class="toolbar top-gap">
           ${buttonHtml({ action: 'skills-search', label: view.runningAction === 'skills:search' ? '搜索中…' : '搜索技能', kind: 'primary', disabled: Boolean(view.runningAction) || !view.installation.binaryFound || !view.registryQuery.trim() })}
           ${buttonHtml({ action: 'skills-inspect', label: view.runningAction === 'skills:inspect' ? '预检中…' : '预检技能', disabled: Boolean(view.runningAction) || !view.installation.binaryFound || !view.installTarget.trim() })}
           ${buttonHtml({ action: 'skills-install', label: view.runningAction === 'skills:install' ? '安装中…' : '安装技能', disabled: Boolean(view.runningAction) || !view.installation.binaryFound || !view.installTarget.trim() })}
-          ${buttonHtml({ action: 'use-selected-skill-name', label: '使用当前技能', disabled: Boolean(view.runningAction) || !skill })}
+          ${buttonHtml({ action: 'use-selected-skill-name', label: '带入当前技能', disabled: Boolean(view.runningAction) || !skill })}
         </div>
       </section>
-
-      <section class="shell-card shell-card-dense">
-        <div class="shell-card-header">
-          <div>
-            <strong>治理与布线</strong>
-            <p class="shell-card-copy">更新、审计和布线核查集中在一处，避免在多个页面重复露出。</p>
+    `
+    : activeGroup.key === 'maintain'
+      ? `
+        <section class="workspace-main-card">
+          <div class="workspace-main-header">
+            <div>
+              <h2 class="config-section-title">更新与审计</h2>
+              <p class="config-section-desc">更新已安装技能并查看审计结果。</p>
+            </div>
+            ${pillHtml(view.installation.binaryFound ? '底层已就绪' : '底层待安装', view.installation.binaryFound ? 'good' : 'bad')}
           </div>
-          ${pillHtml(view.installation.binaryFound ? '底层已就绪' : '底层待安装', view.installation.binaryFound ? 'good' : 'bad')}
-        </div>
-        ${keyValueRowsHtml([
-          { label: '工具集', value: currentToolsets.length ? currentToolsets.join(', ') : '—' },
-          { label: '本地运行态', value: String(runtimeLocal) },
-          { label: '已编排技能', value: String(usedNames.size) },
-          { label: '当前技能可见', value: skill ? (selectedExistsInRuntime ? '是' : '否') : '—' },
-        ])}
-        <div class="toolbar top-gap">
-          ${buttonHtml({ action: 'skills-check', label: view.runningAction === 'skills:check' ? '检查中…' : '检查更新', kind: 'primary', disabled: Boolean(view.runningAction) || !view.installation.binaryFound })}
-          ${buttonHtml({ action: 'skills-update', label: view.runningAction === 'skills:update' ? '更新中…' : '更新技能', disabled: Boolean(view.runningAction) || !view.installation.binaryFound })}
-          ${buttonHtml({ action: 'skills-audit', label: view.runningAction === 'skills:audit' ? '审计中…' : '审计已装技能', disabled: Boolean(view.runningAction) || !view.installation.binaryFound })}
-          ${buttonHtml({ action: 'goto-config-toolsets', label: '核对工具集' })}
-          ${buttonHtml({ action: 'goto-config-memory', label: '核对记忆链路' })}
-          ${buttonHtml({ action: 'goto-extensions', label: '扩展运行态' })}
-        </div>
-      </section>
-    </div>
-
-    <div class="workspace-bottom-grid workspace-bottom-grid-dense top-gap">
-      <section class="workspace-main-card">
-        <div class="workspace-main-header">
-          <div>
-            <h2 class="config-section-title">当前目标布线</h2>
-            <p class="config-section-desc">把目录技能、运行态可见性和自动化引用放在一起核对。</p>
+          ${keyValueRowsHtml([
+            { label: '工具集', value: currentToolsets.length ? currentToolsets.join(', ') : '—' },
+            { label: '本地运行态', value: String(runtimeLocal) },
+            { label: '已编排技能', value: String(usedNames.size) },
+            { label: '当前技能可见', value: skill ? (selectedExistsInRuntime ? '是' : '否') : '—' },
+          ])}
+          <div class="toolbar top-gap">
+            ${buttonHtml({ action: 'skills-check', label: view.runningAction === 'skills:check' ? '检查中…' : '检查更新', kind: 'primary', disabled: Boolean(view.runningAction) || !view.installation.binaryFound })}
+            ${buttonHtml({ action: 'skills-update', label: view.runningAction === 'skills:update' ? '更新中…' : '更新技能', disabled: Boolean(view.runningAction) || !view.installation.binaryFound })}
+            ${buttonHtml({ action: 'skills-audit', label: view.runningAction === 'skills:audit' ? '审计中…' : '审计已装技能', disabled: Boolean(view.runningAction) || !view.installation.binaryFound })}
+            ${buttonHtml({ action: 'goto-config-toolsets', label: '核对工具集' })}
+            ${buttonHtml({ action: 'goto-config-memory', label: '核对记忆链路' })}
+            ${buttonHtml({ action: 'goto-extensions', label: '扩展运行态' })}
           </div>
-          ${skill ? pillHtml(skill.name, 'neutral') : pillHtml('等待选择', 'warn')}
-        </div>
-        ${keyValueRowsHtml([
-          { label: '当前技能', value: skill?.name || '—' },
-          { label: '分类', value: skill ? categoryLabel(skill.category) : '—' },
-          { label: '运行态', value: skill ? runtimeStateText(selectedExistsInRuntime) : '—' },
-          { label: '编排显式引用', value: skill ? String(jobs.length) : '0' },
-          { label: '目录路径', value: skill?.relativePath || '—' },
-        ])}
-        <div class="toolbar top-gap">
-          ${buttonHtml({ action: 'goto-cron', label: '查看编排' })}
-          ${buttonHtml({ action: 'goto-logs', label: '查看日志', disabled: !skill })}
-        </div>
-      </section>
+        </section>
+      `
+      : activeGroup.key === 'wiring'
+        ? `
+          <section class="workspace-main-card">
+            <div class="workspace-main-header">
+              <div>
+                <h2 class="config-section-title">当前目标布线</h2>
+                <p class="config-section-desc">核对目录、运行态和自动化引用。</p>
+              </div>
+              ${skill ? pillHtml(skill.name, 'neutral') : pillHtml('等待选择', 'warn')}
+            </div>
+            ${keyValueRowsHtml([
+              { label: '当前技能', value: skill?.name || '—' },
+              { label: '分类', value: skill ? categoryLabel(skill.category) : '—' },
+              { label: '运行态', value: skill ? runtimeStateText(selectedExistsInRuntime) : '—' },
+              { label: '编排显式引用', value: skill ? String(jobs.length) : '0' },
+              { label: '目录路径', value: skill?.relativePath || '—' },
+            ])}
+            <div class="toolbar top-gap">
+              ${buttonHtml({ action: 'goto-cron', label: '查看编排' })}
+              ${buttonHtml({ action: 'goto-logs', label: '查看日志', disabled: !skill })}
+            </div>
+          </section>
+        `
+        : renderSkillOutputCard(view);
 
-      ${renderSkillOutputCard(view)}
-    </div>
+  return `
+    <section class="workspace-main-card">
+      <div class="workspace-main-header">
+        <div>
+          <h2 class="config-section-title">安装分组</h2>
+          <p class="config-section-desc">搜索、更新、对照和结果分开显示。</p>
+        </div>
+        ${pillHtml(activeGroup.label, 'neutral')}
+      </div>
+      ${renderSkillRegistryTabs(activeGroup.key)}
+    </section>
+    ${groupBody}
   `;
 }
 
@@ -534,7 +629,7 @@ function renderSkillContentEditor(view, state) {
         <div class="compact-disclosure-head">
           <div class="compact-disclosure-copy">
             <strong class="compact-disclosure-title">SKILL.md 正文编修</strong>
-            <span class="preset-card-copy">直接维护本地 <code>SKILL.md</code> 正文，不再跳外部终端。</span>
+            <span class="preset-card-copy">可直接编辑本地 <code>SKILL.md</code> 正文。</span>
           </div>
           <div class="pill-row">
             <span id="skill-file-dirty-pill">${pillHtml(contentDirty ? '未保存' : '已同步', contentDirty ? 'warn' : 'good')}</span>
@@ -631,80 +726,14 @@ function renderSkillStudio(view, state) {
   const importDraft = view.importDraft ?? cloneSkillImportDraft();
   const lastImported = view.lastImportedSkill;
 
-  return `
-    <section class="shell-card shell-card-dense plugin-focus-card">
-      <div class="shell-card-header plugin-focus-head">
-        <div class="plugin-focus-title-wrap">
-          <div>
-            <div class="panel-title-row">
-              <strong>本地治理目标</strong>
-              ${infoTipHtml('这里优先承接技能的本地闭环：frontmatter、正文、目录控制都收进一个治理卡，导入和新建退到下方辅助区。')}
-            </div>
-            <p class="shell-card-copy">让当前技能的接管、编辑和删除都在一个主卡里完成。</p>
-          </div>
-          ${skill ? `
-            <div class="plugin-focus-title">
-              <span class="plugin-card-icon">🧠</span>
-              <div class="plugin-focus-title-copy">
-                <strong class="plugin-focus-name">${escapeHtml(skill.name)}</strong>
-                <div class="plugin-tile-badges">
-                  ${pillHtml(skill.category || '未分类', 'neutral')}
-                  ${pillHtml(selectedExistsInRuntime ? '运行面已接入' : '运行面待同步', selectedExistsInRuntime ? 'good' : 'warn')}
-                  ${skillDirty ? pillHtml('正文有改动', 'warn') : pillHtml('正文已同步', 'good')}
-                </div>
-              </div>
-            </div>
-          ` : ''}
-        </div>
-        ${pillHtml(skill ? skill.name : '等待目标', skill ? 'good' : 'warn')}
-      </div>
-
-      ${skill ? `
-        <div class="plugin-signal-grid top-gap">
-          ${renderSkillSignalCard('目录', skill.relativePath || '—', skill.category || '未分类', 'neutral')}
-          ${renderSkillSignalCard('运行态', selectedExistsInRuntime ? '已接入' : '待同步', selectedExistsInRuntime ? '当前已暴露给运行面' : '仍只存在于本地目录', selectedExistsInRuntime ? 'good' : 'warn')}
-          ${renderSkillSignalCard('自动化', jobs.length ? `${jobs.length} 个作业` : '未绑定', jobs.length ? '删除前建议先解除 cron 引用' : '当前没有显式编排引用', jobs.length ? 'warn' : 'good')}
-          ${renderSkillSignalCard('文件', skillDirty ? '正文未保存' : '正文已同步', view.skillFile?.filePath || skill.filePath || '等待读取技能文件', skillDirty ? 'warn' : 'neutral')}
-        </div>
-        ${warnings.length
-          ? `
-            <section class="plugin-focus-section top-gap">
-              <div class="plugin-focus-section-head">
-                <strong>当前提醒</strong>
-                <span>${escapeHtml(`${warnings.length} 条`)}</span>
-              </div>
-              <div class="warning-stack">
-                ${warnings.slice(0, 3).map((warning) => `<div class="warning-item">${escapeHtml(warning)}</div>`).join('')}
-              </div>
-            </section>
-          `
-          : ''}
-        <div class="compact-disclosure-stack top-gap">
-          ${renderSkillFrontmatterEditor(view, state)}
-          ${renderSkillContentEditor(view, state)}
-          ${renderSkillLocalOps(view, state)}
-        </div>
-        <div class="toolbar top-gap">
-          ${buttonHtml({ action: 'goto-logs', label: '查看日志', disabled: Boolean(view.runningAction) || !skill })}
-          ${buttonHtml({ action: 'goto-cron', label: '查看编排', disabled: Boolean(view.runningAction) })}
-          ${buttonHtml({ action: 'goto-extensions', label: '扩展运行态', disabled: Boolean(view.runningAction) })}
-        </div>
-      ` : `
-        <div class="top-gap">
-          ${emptyStateHtml('还没选治理目标', '先从左侧技能目录选择一个 skill，本地治理卡就会接管 frontmatter、正文和目录控制。')}
-        </div>
-      `}
-    </section>
-
-    <div class="compact-overview-grid compact-overview-grid-dense top-gap">
+  const activeGroup = resolveSkillStudioGroup(view.skillStudioSection);
+  const groupBody = activeGroup.key === 'import'
+    ? `
       <section class="workspace-main-card">
         <div class="workspace-main-header">
           <div>
-            <div class="panel-title-row">
-              <h2 class="config-section-title">导入现成技能</h2>
-              ${infoTipHtml('支持导入一个完整技能目录，或直接导入单个 SKILL.md。能复制的内容会直接落到当前 profile 的 skills 目录。')}
-            </div>
-            <p class="workspace-main-copy">优先接本地目录，再继续治理。</p>
+            <h2 class="config-section-title">导入现成技能</h2>
+            <p class="workspace-main-copy">支持导入技能目录或单个 <code>SKILL.md</code>。</p>
           </div>
           ${lastImported ? pillHtml(`${lastImported.copiedFiles} 个文件`, 'good') : pillHtml(importDraft.category || '自动归类', 'neutral')}
         </div>
@@ -743,42 +772,116 @@ function renderSkillStudio(view, state) {
           ${buttonHtml({ action: 'open-home', label: '打开 Home', disabled: Boolean(view.runningAction) })}
         </div>
       </section>
-
-      <section class="workspace-main-card">
-        <div class="workspace-main-header">
-          <div>
-            <div class="panel-title-row">
+    `
+    : activeGroup.key === 'create'
+      ? `
+        <section class="workspace-main-card">
+          <div class="workspace-main-header">
+            <div>
               <h2 class="config-section-title">新建本地技能</h2>
-              ${infoTipHtml('需要定制私有能力时，再直接在客户端里创建 skill 脚手架。')}
+              <p class="workspace-main-copy">填写名称、分类和描述后即可创建。</p>
             </div>
-            <p class="workspace-main-copy">只保留建立 skill 真正需要的最小字段。</p>
+            ${pillHtml(draft.category || 'custom', 'neutral')}
           </div>
-          ${pillHtml(draft.category || 'custom', 'neutral')}
-        </div>
-        <div class="form-grid">
+          <div class="form-grid">
+            <label class="field-stack">
+              <span>名称</span>
+              <input class="search-input" id="skill-create-name" value="${escapeHtml(draft.name)}" placeholder="Release Notes">
+            </label>
+            <label class="field-stack">
+              <span>分类</span>
+              <input class="search-input" id="skill-create-category" value="${escapeHtml(draft.category)}" placeholder="ops / coding / custom">
+            </label>
+          </div>
           <label class="field-stack">
-            <span>名称</span>
-            <input class="search-input" id="skill-create-name" value="${escapeHtml(draft.name)}" placeholder="Release Notes">
+            <span>描述</span>
+            <input class="search-input" id="skill-create-description" value="${escapeHtml(draft.description)}" placeholder="生成版本发布说明并整理亮点">
           </label>
-          <label class="field-stack">
-            <span>分类</span>
-            <input class="search-input" id="skill-create-category" value="${escapeHtml(draft.category)}" placeholder="ops / coding / custom">
+          <label class="field-stack top-gap">
+            <span>内容模板</span>
+            <textarea class="editor compact-control-editor" id="skill-create-content" placeholder="# Release Notes&#10;&#10;## 目标&#10;&#10;在这里编写 skill 具体内容。">${escapeHtml(draft.content)}</textarea>
           </label>
+          <div class="toolbar top-gap">
+            ${buttonHtml({ action: 'create-local-skill', label: view.runningAction === 'skills:create-local' ? '创建中…' : '创建本地技能', kind: 'primary', disabled: Boolean(view.runningAction) || !draft.name.trim(), attrs: { id: 'skill-create-submit' } })}
+            ${buttonHtml({ action: 'reset-local-skill-draft', label: '清空草稿', disabled: Boolean(view.runningAction) })}
+          </div>
+        </section>
+      `
+      : `
+        <section class="shell-card shell-card-dense plugin-focus-card">
+          <div class="shell-card-header plugin-focus-head">
+            <div class="plugin-focus-title-wrap">
+              <div>
+                <strong>当前技能</strong>
+                <p class="shell-card-copy">名称、说明和正文都可以直接编辑。</p>
+              </div>
+              ${skill ? `
+                <div class="plugin-focus-title">
+                  <span class="plugin-card-icon">🧠</span>
+                  <div class="plugin-focus-title-copy">
+                    <strong class="plugin-focus-name">${escapeHtml(skill.name)}</strong>
+                    <div class="plugin-tile-badges">
+                      ${pillHtml(skill.category || '未分类', 'neutral')}
+                      ${pillHtml(selectedExistsInRuntime ? '运行面已接入' : '运行面待同步', selectedExistsInRuntime ? 'good' : 'warn')}
+                      ${skillDirty ? pillHtml('正文有改动', 'warn') : pillHtml('正文已同步', 'good')}
+                    </div>
+                  </div>
+                </div>
+              ` : ''}
+            </div>
+            ${pillHtml(skill ? skill.name : '等待目标', skill ? 'good' : 'warn')}
+          </div>
+
+          ${skill ? `
+            <div class="plugin-signal-grid top-gap">
+              ${renderSkillSignalCard('目录', skill.relativePath || '—', skill.category || '未分类', 'neutral')}
+              ${renderSkillSignalCard('运行态', selectedExistsInRuntime ? '已接入' : '待同步', selectedExistsInRuntime ? '当前已暴露给运行面' : '仍只存在于本地目录', selectedExistsInRuntime ? 'good' : 'warn')}
+              ${renderSkillSignalCard('自动化', jobs.length ? `${jobs.length} 个作业` : '未绑定', jobs.length ? '删除前建议先解除 cron 引用' : '当前没有显式编排引用', jobs.length ? 'warn' : 'good')}
+              ${renderSkillSignalCard('文件', skillDirty ? '正文未保存' : '正文已同步', view.skillFile?.filePath || skill.filePath || '等待读取技能文件', skillDirty ? 'warn' : 'neutral')}
+            </div>
+            ${warnings.length
+              ? `
+                <section class="plugin-focus-section top-gap">
+                  <div class="plugin-focus-section-head">
+                    <strong>当前提醒</strong>
+                    <span>${escapeHtml(`${warnings.length} 条`)}</span>
+                  </div>
+                  <div class="warning-stack">
+                    ${warnings.slice(0, 3).map((warning) => `<div class="warning-item">${escapeHtml(warning)}</div>`).join('')}
+                  </div>
+                </section>
+              `
+              : ''}
+            <div class="compact-disclosure-stack top-gap">
+              ${renderSkillFrontmatterEditor(view, state)}
+              ${renderSkillContentEditor(view, state)}
+              ${renderSkillLocalOps(view, state)}
+            </div>
+            <div class="toolbar top-gap">
+              ${buttonHtml({ action: 'goto-logs', label: '查看日志', disabled: Boolean(view.runningAction) || !skill })}
+              ${buttonHtml({ action: 'goto-cron', label: '查看编排', disabled: Boolean(view.runningAction) })}
+              ${buttonHtml({ action: 'goto-extensions', label: '扩展运行态', disabled: Boolean(view.runningAction) })}
+            </div>
+          ` : `
+            <div class="top-gap">
+              ${emptyStateHtml('还没选技能', '先从左侧技能目录选择一个技能。')}
+            </div>
+          `}
+        </section>
+      `;
+
+  return `
+    <section class="workspace-main-card">
+      <div class="workspace-main-header">
+        <div>
+          <h2 class="config-section-title">本地分组</h2>
+          <p class="config-section-desc">编辑、导入和新建分开显示。</p>
         </div>
-        <label class="field-stack">
-          <span>描述</span>
-          <input class="search-input" id="skill-create-description" value="${escapeHtml(draft.description)}" placeholder="生成版本发布说明并整理亮点">
-        </label>
-        <label class="field-stack top-gap">
-          <span>内容模板</span>
-          <textarea class="editor compact-control-editor" id="skill-create-content" placeholder="# Release Notes&#10;&#10;## 目标&#10;&#10;在这里编写 skill 具体内容。">${escapeHtml(draft.content)}</textarea>
-        </label>
-        <div class="toolbar top-gap">
-          ${buttonHtml({ action: 'create-local-skill', label: view.runningAction === 'skills:create-local' ? '创建中…' : '创建本地技能', kind: 'primary', disabled: Boolean(view.runningAction) || !draft.name.trim(), attrs: { id: 'skill-create-submit' } })}
-          ${buttonHtml({ action: 'reset-local-skill-draft', label: '清空草稿', disabled: Boolean(view.runningAction) })}
-        </div>
-      </section>
-    </div>
+        ${pillHtml(activeGroup.label, 'neutral')}
+      </div>
+      ${renderSkillStudioTabs(activeGroup.key)}
+    </section>
+    ${groupBody}
   `;
 }
 
@@ -831,51 +934,25 @@ export function renderSkillsWorkbench(view, state, options = {}) {
 
   const headerHtml = includeHeader ? `
     <div class="page-header page-header-compact">
-      <div class="panel-title-row">
-        <h1 class="page-title">技能工作台</h1>
-        ${infoTipHtml('这里不再堆大段说明。核心只保留技能目录、安装动作、运行态差异和自动化引用，跨页入口尽量收敛到少量真正有用的跳转。')}
-      </div>
-      <p class="page-desc">技能目录、本地治理和安装动作在这里合流。</p>
+      <h1 class="page-title">技能</h1>
+      <p class="page-desc">查看目录、编辑内容并管理安装状态。</p>
     </div>
   ` : '';
 
   return `
     ${headerHtml}
 
-    <section class="workspace-summary-strip workspace-summary-strip-dense">
-      <section class="summary-mini-card">
-        <span class="summary-mini-label">目录技能</span>
-        <strong class="summary-mini-value">${escapeHtml(String(view.skills.length))}</strong>
-        <span class="summary-mini-meta">当前实例扫描到的本地技能</span>
-      </section>
-      <section class="summary-mini-card">
-        <span class="summary-mini-label">本地运行面</span>
-        <strong class="summary-mini-value">${escapeHtml(String(runtimeLocal))}</strong>
-        <span class="summary-mini-meta">${runtimeMismatch ? '运行面与目录存在偏差' : '运行面与目录已对齐'}</span>
-      </section>
-      <section class="summary-mini-card">
-        <span class="summary-mini-label">当前目标</span>
-        <strong class="summary-mini-value">${escapeHtml(view.installTarget.trim() || skill?.name || '未指定')}</strong>
-        <span class="summary-mini-meta">${escapeHtml(view.registryQuery.trim() || '优先在这里搜索、预检、安装技能')}</span>
-      </section>
-      <section class="summary-mini-card">
-        <span class="summary-mini-label">最近动作</span>
-        <strong class="summary-mini-value">${escapeHtml(view.lastResult?.label || '待执行')}</strong>
-        <span class="summary-mini-meta">${escapeHtml(view.lastResult?.result?.success ? '最近一次命令成功' : view.lastResult ? '最近一次命令失败' : '执行搜索、安装或审计后会显示')}</span>
-      </section>
-    </section>
-
     <section class="config-section">
       <div class="config-section-header">
         <div>
-          <div class="panel-title-row">
-            <h2 class="config-section-title">技能主工作台</h2>
-            ${infoTipHtml('左侧只保留筛选、技能列表和少量关键动作；右侧通过页内标签切换概览、本地治理和安装治理。')}
-          </div>
-          <p class="config-section-desc">把主操作收进一个工作台，不再到处重复露出。</p>
+          <h2 class="config-section-title">技能中心</h2>
+          <p class="config-section-desc">左侧选技能，右侧处理详情、编辑和安装。</p>
         </div>
         <div class="toolbar">
-          ${pillHtml(view.workspaceTab === 'overview' ? '概览' : view.workspaceTab === 'registry' ? '安装治理' : '本地治理', 'neutral')}
+          ${pillHtml(`${view.skills.length} 目录技能`, 'neutral')}
+          ${pillHtml(runtimeMismatch ? `${runtimeLocal}/${view.skills.length || 0} 待对齐` : `${runtimeLocal} 已对齐`, runtimeMismatch ? 'warn' : 'good')}
+          ${pillHtml(view.installTarget.trim() || skill?.name || '未指定目标', skill || view.installTarget.trim() ? 'neutral' : 'warn')}
+          ${pillHtml(view.workspaceTab === 'overview' ? '概览' : view.workspaceTab === 'registry' ? '安装管理' : '本地编辑', 'neutral')}
           ${buttonHtml({ action: 'refresh', label: view.refreshing ? '同步中…' : '刷新状态', kind: 'primary', disabled: view.refreshing || Boolean(view.runningAction) })}
         </div>
       </div>
@@ -885,7 +962,7 @@ export function renderSkillsWorkbench(view, state, options = {}) {
           <div class="workspace-rail-header">
             <div>
               <h2 class="config-section-title">技能目录</h2>
-              <p class="config-section-desc">先选一个要治理的技能，再在右侧继续接管。</p>
+              <p class="config-section-desc">先在这里选择一个技能。</p>
             </div>
             ${skill ? pillHtml(skill.name, 'neutral') : pillHtml('等待选择', 'warn')}
           </div>
@@ -922,7 +999,7 @@ export function renderSkillsWorkbench(view, state, options = {}) {
               { label: '运行态', value: skill ? runtimeStateText(selectedExistsInRuntime) : '—' },
             ])}
             <div class="workspace-rail-toolbar workspace-rail-toolbar-grid top-gap">
-              ${buttonHtml({ action: 'use-selected-skill-name', label: '带入治理', kind: 'primary', disabled: Boolean(view.runningAction) || !skill })}
+              ${buttonHtml({ action: 'use-selected-skill-name', label: '设为当前目标', kind: 'primary', disabled: Boolean(view.runningAction) || !skill })}
               ${buttonHtml({ action: 'open-skill-dir', label: '打开目录', disabled: Boolean(view.runningAction) || !skill })}
               ${buttonHtml({ action: 'goto-logs', label: '查看日志', disabled: !skill })}
               ${buttonHtml({ action: 'goto-extensions', label: '扩展运行态' })}

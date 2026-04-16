@@ -237,11 +237,8 @@ export function renderMemoryWorkbench(view, state, options = {}) {
       includeHeader
         ? `
           <div class="page-header page-header-compact">
-            <div class="panel-title-row">
-              <h1 class="page-title">记忆工作台</h1>
-              ${infoTipHtml('主区只保留槽位、编辑器、Provider 和校验动作。说明信息尽量后置，不再抢编辑区和闭环动作的位置。')}
-            </div>
-            <p class="page-desc">编辑槽位、核对 Provider，并把运行态偏差收口到一个工作台里。</p>
+            <h1 class="page-title">记忆</h1>
+            <p class="page-desc">编辑常用槽位，核对 Provider 和最近结果。</p>
           </div>
         `
         : ''
@@ -297,8 +294,8 @@ export function renderMemoryWorkbench(view, state, options = {}) {
     <section class="config-section">
       <div class="config-section-header">
         <div>
-          <h2 class="config-section-title">闭环动作</h2>
-          <p class="config-section-desc">开关写回、插件治理和文件定位都在这里直接处理。</p>
+          <h2 class="config-section-title">常用操作</h2>
+          <p class="config-section-desc">开关、插件和文件定位都在这里。</p>
         </div>
         <div class="toolbar">
           ${buttonHtml({ action: 'refresh', label: view.refreshing ? '同步中…' : '刷新状态', disabled: actionBusy || view.refreshing })}
@@ -334,9 +331,9 @@ export function renderMemoryWorkbench(view, state, options = {}) {
             <span>插件名</span>
             <input class="search-input" id="memory-plugin-input" placeholder="byterover / owner/repo">
           </label>
-          <p class="workspace-inline-meta">${escapeHtml(view.pluginInput.trim() || '先输入插件名，再直接安装 / 更新 / 移除或跳到扩展页继续治理。')}</p>
+          <p class="workspace-inline-meta">${escapeHtml(view.pluginInput.trim() || '输入插件名后可直接安装、更新或移除。')}</p>
           <div class="toolbar">
-            ${buttonHtml({ action: 'plugins-panel', label: '扩展工作台', disabled: actionBusy })}
+            ${buttonHtml({ action: 'plugins-panel', label: '扩展页', disabled: actionBusy })}
             ${buttonHtml({ action: 'plugin-install', label: view.runningAction === 'memory:plugin-install' ? '安装中…' : '安装', kind: 'primary', disabled: actionBusy || !view.installation.binaryFound || !view.pluginInput.trim() })}
             ${buttonHtml({ action: 'plugin-update', label: view.runningAction === 'memory:plugin-update' ? '更新中…' : '更新', disabled: actionBusy || !view.installation.binaryFound || !view.pluginInput.trim() })}
             ${buttonHtml({ action: 'plugin-remove', label: view.runningAction === 'memory:plugin-remove' ? '移除中…' : '移除', kind: 'danger', disabled: actionBusy || !view.installation.binaryFound || !view.pluginInput.trim() })}
@@ -387,9 +384,8 @@ export function renderMemoryWorkbench(view, state, options = {}) {
         <div class="workspace-rail-header">
           <div>
             <h2 class="config-section-title">记忆槽位</h2>
-            <p class="config-section-desc">只保留 3 个核心槽位，优先把空间让给编辑区。</p>
+            <p class="config-section-desc">这里保留最常用的 3 个槽位。</p>
           </div>
-          ${infoTipHtml('槽位卡片只负责文件层。是否真正参与运行时注入，还要结合 Provider、开关、字符预算和网关状态一起判断。')}
         </div>
         ${renderSlots(view)}
       </section>
@@ -438,7 +434,7 @@ export function renderMemoryWorkbench(view, state, options = {}) {
             <div class="workspace-main-header">
               <div>
                 <h2 class="config-section-title">Provider 与预算</h2>
-                <p class="config-section-desc">把配置声明、运行回执和字符预算放在一起核对。</p>
+                <p class="config-section-desc">核对 Provider、开关和字符预算。</p>
               </div>
               ${pillHtml(runtimeProvider, runtimeProvider === 'builtin-file' ? 'good' : 'neutral')}
             </div>
@@ -486,8 +482,8 @@ export function renderMemoryWorkbench(view, state, options = {}) {
           <section class="workspace-main-card">
             <div class="workspace-main-header">
               <div>
-                <h2 class="config-section-title">最近回执与原始输出</h2>
-                <p class="config-section-desc">保留最近一次写回、插件治理或状态体检结果。</p>
+                <h2 class="config-section-title">最近结果</h2>
+                <p class="config-section-desc">显示最近一次保存、插件操作或状态体检结果。</p>
               </div>
               ${buttonHtml({ action: 'goto-diagnostics', label: '进入诊断页' })}
             </div>
