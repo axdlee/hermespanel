@@ -300,15 +300,15 @@ function renderPage(view) {
       <div class="workspace-main-header">
         <div>
           <strong>当前只保留这些摘要</strong>
-          <p class="workspace-main-copy">Provider、默认模型、Base URL、Toolsets、活跃 Agent 这些细项不再单独铺满首页，而是收进主卡和二级工作台。</p>
+          <p class="workspace-main-copy">默认层只保留阶段判断和下一步，不再把 Provider、Base URL、Toolsets、活跃 Agent 这种技术字段单独摊满首页。</p>
         </div>
         ${pillHtml(workspaceTone === 'good' ? '当前稳定' : '仍有提醒', workspaceTone)}
       </div>
       ${keyValueRowsHtml([
-        { label: 'Provider / 模型', value: modelReady ? `${dashboard.config.modelProvider} / ${dashboard.config.modelDefault}` : '仍需补齐' },
-        { label: 'Toolsets', value: toolsetsLine },
-        { label: '活跃 Agent', value: String(dashboard.gateway?.activeAgents ?? 0) },
-        { label: '材料缺失', value: missingArtifacts === 0 ? '无' : missingArtifactList.map((item) => item.label).join('、') },
+        { label: '当前阶段', value: focusState.title },
+        { label: '主链路', value: !installation.binaryFound ? '组件待安装' : !modelReady ? '模型链路待补齐' : gatewayRunning ? '模型与 Gateway 已接通' : 'Gateway 待启动' },
+        { label: '工作区现况', value: `${dashboard.counts.sessions} 会话 · ${dashboard.counts.skills} 技能 · Cron ${dashboard.counts.cronJobs}` },
+        { label: '仍需收口', value: warnings[0] || (missingArtifacts === 0 ? '当前没有明显材料缺口' : missingArtifactList.map((item) => item.label).join('、')) },
       ])}
     </section>
   `;

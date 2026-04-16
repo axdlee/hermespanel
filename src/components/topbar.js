@@ -24,59 +24,46 @@ export function renderTopbar(el) {
   const shellBusy = state.loadingProfiles || state.loadingShell || state.refreshingShell;
   const statuses = [
     {
-      label: state.shellInstallation?.binaryFound ? '运行组件已接管' : '运行组件待安装',
+      label: state.shellInstallation?.binaryFound ? '组件已接管' : '组件待安装',
       tone: state.shellInstallation?.binaryFound ? 'good' : 'bad',
     },
     {
-      label: gatewayLabel(state.shellDashboard?.gateway?.gatewayState ?? 'unknown'),
-      tone: state.shellDashboard?.gateway?.gatewayState === 'running' ? 'good' : 'warn',
-    },
-    {
-      label: state.shellDashboard?.config.memoryEnabled ? '记忆已开启' : '记忆已关闭',
+      label: `${gatewayLabel(state.shellDashboard?.gateway?.gatewayState ?? 'unknown')} · ${state.shellDashboard?.config.memoryEnabled ? '记忆开' : '记忆关'}`,
       tone: state.shellDashboard?.config.memoryEnabled ? 'good' : 'warn',
     },
   ];
 
   el.innerHTML = `
     <div class="topbar-presence">
-      <span class="topbar-kicker">${activeGroupLabel(state.activePage)}</span>
+      <span class="topbar-kicker">${activeGroupLabel(state.activePage)} / ${PAGE_TITLES[state.activePage]}</span>
       <div class="topbar-route-line">
         <strong>${state.selectedProfile}</strong>
-        <span>${state.selectedProfile === activeProfile ? `当前默认实例 · ${PAGE_TITLES[state.activePage]}` : `默认实例 ${activeProfile} · ${PAGE_TITLES[state.activePage]}`}</span>
-        <span class="info-tip" tabindex="0" aria-label="更多信息">
-          <span class="info-tip-trigger">?</span>
-          <span class="info-tip-bubble">当前页是 ${PAGE_TITLES[state.activePage]}。顶栏只保留实例切换和全局健康信号，把主要操作位让给工作区。</span>
-        </span>
+        <span>${state.selectedProfile === activeProfile ? '当前默认实例' : `默认实例 ${activeProfile}`}</span>
+        <div class="topbar-health-strip topbar-health-strip-compact">
+          ${statuses.map((item) => `
+            <span class="topbar-health-item topbar-health-${item.tone}">
+              <span class="topbar-health-dot"></span>
+              ${item.label}
+            </span>
+          `).join('')}
+        </div>
       </div>
     </div>
-    <div class="topbar-actions">
-      <div class="topbar-health-strip">
-        ${statuses.map((item) => `
-          <span class="topbar-health-item topbar-health-${item.tone}">
-            <span class="topbar-health-dot"></span>
-            ${item.label}
-          </span>
-        `).join('')}
-      </div>
-      <div class="topbar-controls">
-        <label class="profile-switcher">
-          <span>实例</span>
-          <select class="select-input" id="topbar-profile-select" ${state.loadingProfiles || !state.profiles ? 'disabled' : ''}>
-            ${(state.profiles?.profiles ?? []).map((item) => `
-              <option value="${item.name}" ${item.name === state.selectedProfile ? 'selected' : ''}>
-                ${item.name}${item.isActive ? ' · 当前默认' : ''}
-              </option>
-            `).join('')}
-          </select>
-        </label>
-        <div class="toolbar shell-toolbar">
-          <button type="button" class="button button-secondary" id="topbar-refresh-profiles" ${state.loadingProfiles ? 'disabled' : ''}>
-            ${state.loadingProfiles ? '刷新中…' : '刷新实例列表'}
-          </button>
-          <button type="button" class="button button-secondary" id="topbar-refresh-shell" ${shellBusy ? 'disabled' : ''}>
-            ${shellBusy ? '同步中…' : '刷新状态'}
-          </button>
-        </div>
+    <div class="topbar-controls">
+      <label class="profile-switcher">
+        <span>实例</span>
+        <select class="select-input" id="topbar-profile-select" ${state.loadingProfiles || !state.profiles ? 'disabled' : ''}>
+          ${(state.profiles?.profiles ?? []).map((item) => `
+            <option value="${item.name}" ${item.name === state.selectedProfile ? 'selected' : ''}>
+              ${item.name}${item.isActive ? ' · 当前默认' : ''}
+            </option>
+          `).join('')}
+        </select>
+      </label>
+      <div class="toolbar shell-toolbar">
+        <button type="button" class="button button-secondary" id="topbar-refresh-all" ${shellBusy ? 'disabled' : ''}>
+          ${shellBusy ? '同步中…' : '刷新'}
+        </button>
       </div>
     </div>
   `;
@@ -86,11 +73,10 @@ export function renderTopbar(el) {
     void setSelectedProfile(value);
   });
 
-  el.querySelector('#topbar-refresh-profiles')?.addEventListener('click', () => {
-    void loadProfiles(state.selectedProfile);
-  });
-
-  el.querySelector('#topbar-refresh-shell')?.addEventListener('click', () => {
-    void loadShell(state.selectedProfile, { silent: true });
+  el.querySelector('#topbar-refresh-all')?.addEventListener('click', () => {
+    void Promise.all([
+      loadProfiles(state.selectedProfile),
+      loadShell(state.selectedProfile, { silent: true }),
+    ]);
   });
 }

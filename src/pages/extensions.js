@@ -119,6 +119,20 @@ function surfaceTabHtml(activeKey, key, label) {
   `;
 }
 
+function dashboardJumpCardHtml({ action, kicker, title, meta, tone = 'neutral', attrs = {} }) {
+  const extraAttrs = Object.entries(attrs)
+    .map(([key, value]) => `${key}="${escapeHtml(String(value))}"`)
+    .join(' ');
+
+  return `
+    <button type="button" class="dashboard-jump-card dashboard-jump-card-${tone}" data-action="${escapeHtml(action)}" ${extraAttrs}>
+      <span class="dashboard-jump-kicker">${escapeHtml(kicker)}</span>
+      <strong class="dashboard-jump-title">${escapeHtml(title)}</strong>
+      <span class="dashboard-jump-meta">${escapeHtml(meta)}</span>
+    </button>
+  `;
+}
+
 function parsePluginManifestList(value) {
   const seen = new Set();
   const result = [];
@@ -217,7 +231,173 @@ function renderPage(view) {
       : view.workbenchTab === 'skills'
       ? renderSkillsWorkbench(view, state)
       : renderRuntimeWorkbench(view, state);
-  const surfaceView = view.surfaceView || 'workbench';
+  const surfaceView = view.surfaceView || 'focus';
+  const gatewayRunning = view.dashboard.gateway?.gatewayState === 'running';
+  const focusState = !view.installation.binaryFound
+    ? {
+      description: '先确认 Hermes 组件和基础环境，再继续接管插件、工具和 provider。',
+      kicker: '先补底座',
+      title: '当前还不适合直接治理扩展',
+      tone: 'warn',
+    }
+    : !state.providerAligned
+      ? {
+        description: '配置态和运行态的 provider 没对上，优先把记忆链路对齐。',
+        kicker: '先对齐记忆链路',
+        title: 'Memory Provider 还没真正闭环',
+        tone: 'warn',
+      }
+      : state.toolsEnabled === 0
+        ? {
+          description: '能力面现在太空，先给当前平台接入真正会用到的工具。',
+          kicker: '先接能力',
+          title: '至少先启用一组常用工具',
+          tone: 'warn',
+        }
+        : state.runtimeSkillMismatch
+          ? {
+            description: '目录技能和运行技能数量不一致，建议先回技能层对齐。',
+            kicker: '先校对技能',
+            title: 'Skills 目录态与运行态有偏差',
+            tone: 'warn',
+          }
+          : state.warnings.length > 0
+            ? {
+              description: '主链路已经可用，但还存在一些需要你继续收口的提醒项。',
+              kicker: '继续收口',
+              title: '扩展层已经能用，继续处理提醒',
+              tone: 'warn',
+            }
+            : {
+              description: '默认层只保留最常用入口。插件、技能、工具和原始运行态都收进下一层。',
+              kicker: '可以继续',
+              title: '当前扩展能力面已经比较稳',
+              tone: 'good',
+            };
+  const focusSignals = [
+    {
+      label: '当前平台',
+      meta: state.currentPlatformSummary?.description || '优先围绕当前平台做治理',
+      value: state.currentPlatform?.displayName || '未选择',
+    },
+    {
+      label: '工具接入',
+      meta: `${state.currentPlatformBindingToolsets.length} 项平台绑定`,
+      value: `${state.toolsEnabled}/${state.toolsTotal || 0}`,
+    },
+    {
+      label: '插件',
+      meta: state.pluginAvailableCount ? '目录插件 / 已安装' : '暂未扫描到目录插件',
+      value: `${state.pluginInstalledCount}/${state.pluginAvailableCount || state.pluginInstalledCount}`,
+    },
+    {
+      label: 'Skills / Memory',
+      meta: gatewayRunning ? 'Gateway 已运行' : 'Gateway 还未运行',
+      value: `${state.runtimeSkills.length} 技能 · ${state.configuredProviderDisplay === 'builtin-file' ? '内置记忆' : state.configuredProviderDisplay}`,
+    },
+  ];
+  const focusPrimaryAction = !view.installation.binaryFound
+    ? buttonHtml({ action: 'goto-diagnostics', label: '先做环境体检', kind: 'primary' })
+    : !state.providerAligned
+      ? buttonHtml({ action: 'goto-config-memory', label: '去对齐 Memory', kind: 'primary' })
+      : state.toolsEnabled === 0
+        ? buttonHtml({ action: 'open-extensions-workbench', label: '去接工具平台', kind: 'primary', attrs: { 'data-tab': 'tools' } })
+        : state.runtimeSkillMismatch
+          ? buttonHtml({ action: 'goto-skills', label: '去校对 Skills', kind: 'primary' })
+          : state.warnings.length > 0
+            ? buttonHtml({ action: 'open-extensions-workbench', label: '查看运行摘要', kind: 'primary', attrs: { 'data-tab': 'runtime' } })
+            : buttonHtml({ action: 'open-extensions-workbench', label: '进入工具治理', kind: 'primary', attrs: { 'data-tab': 'tools' } });
+  const focusContent = `
+    <section class="dashboard-focus-shell">
+      <section class="dashboard-focus-card dashboard-focus-card-${focusState.tone}">
+        <div class="dashboard-focus-head">
+          <div class="dashboard-focus-copy">
+            <span class="dashboard-focus-kicker">${escapeHtml(focusState.kicker)}</span>
+            <h2 class="dashboard-focus-title">${escapeHtml(focusState.title)}</h2>
+            <p class="dashboard-focus-desc">${escapeHtml(focusState.description)}</p>
+          </div>
+          <div class="dashboard-focus-pills">
+            ${pillHtml(state.providerAligned ? 'Provider 已对齐' : 'Provider 待对齐', state.providerAligned ? 'good' : 'warn')}
+            ${pillHtml(gatewayRunning ? 'Gateway 运行中' : 'Gateway 待启动', gatewayRunning ? 'good' : 'warn')}
+            ${pillHtml(state.warnings.length ? `${state.warnings.length} 条提醒` : '当前稳定', state.warnings.length ? 'warn' : 'good')}
+          </div>
+        </div>
+        <div class="dashboard-signal-grid">
+          ${focusSignals.map((item) => `
+            <section class="dashboard-signal-card">
+              <span class="dashboard-signal-label">${escapeHtml(item.label)}</span>
+              <strong class="dashboard-signal-value">${escapeHtml(item.value)}</strong>
+              <span class="dashboard-signal-meta">${escapeHtml(item.meta)}</span>
+            </section>
+          `).join('')}
+        </div>
+        <div class="dashboard-focus-actions">
+          ${focusPrimaryAction}
+          ${buttonHtml({ action: 'goto-config-credentials', label: '凭证 / 通道' })}
+          ${buttonHtml({ action: 'goto-memory', label: '查看 Memory' })}
+        </div>
+      </section>
+
+      <section class="dashboard-jump-panel">
+        <div class="config-section-header">
+          <div>
+            <h2 class="config-section-title">继续去哪里</h2>
+            <p class="config-section-desc">这里只露出 4 个高频入口，完整治理台继续收进下一层。</p>
+          </div>
+        </div>
+        <div class="dashboard-jump-grid">
+          ${dashboardJumpCardHtml({
+            action: 'open-extensions-workbench',
+            attrs: { 'data-tab': 'tools' },
+            kicker: 'Tools',
+            title: '接管工具平台',
+            meta: '按平台接入、移出和补齐顶层 toolsets',
+            tone: 'good',
+          })}
+          ${dashboardJumpCardHtml({
+            action: 'open-extensions-workbench',
+            attrs: { 'data-tab': 'plugins' },
+            kicker: 'Plugins',
+            title: '治理插件',
+            meta: '安装、移除、编辑 manifest 与 README',
+          })}
+          ${dashboardJumpCardHtml({
+            action: 'open-extensions-workbench',
+            attrs: { 'data-tab': 'skills' },
+            kicker: 'Skills',
+            title: '核对技能来源',
+            meta: '只在需要时再进入运行态与 source 差异明细',
+          })}
+          ${dashboardJumpCardHtml({
+            action: 'open-extensions-workbench',
+            attrs: { 'data-tab': 'runtime' },
+            kicker: 'Signals',
+            title: '查看运行摘要',
+            meta: '原始输出、提醒项和快照全部放在这一层',
+            tone: state.warnings.length ? 'warn' : 'neutral',
+          })}
+        </div>
+      </section>
+    </section>
+
+    <section class="config-section dashboard-quiet-card">
+      <div class="config-section-header">
+        <div>
+          <h2 class="config-section-title">当前只保留这些摘要</h2>
+          <p class="config-section-desc">默认页只给判断，不把插件编辑器、原始输出和批量操作直接摊开。</p>
+        </div>
+        <div class="toolbar">
+          ${pillHtml(state.currentPlatform?.displayName || '未选择平台', state.currentPlatform ? 'good' : 'warn')}
+        </div>
+      </div>
+      ${keyValueRowsHtml([
+        { label: '当前 Provider', value: state.configuredProviderDisplay === 'builtin-file' ? '内置文件' : state.configuredProviderDisplay },
+        { label: '平台绑定', value: state.currentPlatformBindingToolsets.join(', ') || '当前平台还没有平台绑定' },
+        { label: '目录插件', value: state.pluginAvailableCount ? `${state.pluginAvailableCount} 个` : '暂未发现' },
+        { label: '下一步', value: !state.providerAligned ? '优先去对齐 Memory Provider' : state.toolsEnabled === 0 ? '先接入至少一组常用工具' : state.runtimeSkillMismatch ? '回技能页核对目录与运行态' : '按需进入治理台继续接管' },
+      ])}
+    </section>
+  `;
   const overviewContent = `
     <div class="stat-cards stat-cards-4">
       <section class="stat-card">
@@ -291,7 +471,11 @@ function renderPage(view) {
       </div>
     </section>
   `;
-  const surfaceContent = surfaceView === 'overview' ? overviewContent : workbenchContent;
+  const surfaceContent = surfaceView === 'focus'
+    ? focusContent
+    : surfaceView === 'summary'
+      ? overviewContent
+      : workbenchContent;
 
   view.page.innerHTML = `
     <div class="page-header page-header-compact">
@@ -326,8 +510,9 @@ function renderPage(view) {
     ` : ''}
 
     <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
-      ${surfaceTabHtml(surfaceView, 'workbench', '主工作台')}
-      ${surfaceTabHtml(surfaceView, 'overview', '概况与捷径')}
+      ${surfaceTabHtml(surfaceView, 'focus', '常用')}
+      ${surfaceTabHtml(surfaceView, 'workbench', '治理台')}
+      ${surfaceTabHtml(surfaceView, 'summary', '摘要')}
     </div>
 
     ${surfaceContent}
@@ -1354,6 +1539,11 @@ function bindEvents(view) {
           view.workbenchTab = element.getAttribute('data-tab') || 'tools';
           renderPage(view);
           return;
+        case 'open-extensions-workbench':
+          view.surfaceView = 'workbench';
+          view.workbenchTab = element.getAttribute('data-tab') || 'tools';
+          renderPage(view);
+          return;
         case 'set-plugin-filter':
           view.pluginFilter = element.getAttribute('data-filter') || 'all';
           renderPage(view);
@@ -1632,7 +1822,7 @@ export async function render() {
     selectedPlatform: '',
     skills: [],
     sourceFilter: 'all',
-    surfaceView: 'workbench',
+    surfaceView: 'focus',
     toolNamesInput: '',
     unsubscribe: null,
     workbenchTab: 'tools',

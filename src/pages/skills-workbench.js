@@ -809,7 +809,8 @@ export function deriveSkillsWorkbenchState(view) {
   };
 }
 
-export function renderSkillsWorkbench(view, state) {
+export function renderSkillsWorkbench(view, state, options = {}) {
+  const { includeHeader = true } = options;
   const {
     categories,
     filtered,
@@ -828,7 +829,7 @@ export function renderSkillsWorkbench(view, state) {
       ? renderSkillStudio(view, state)
       : renderSkillOverviewWorkspace(view, state);
 
-  return `
+  const headerHtml = includeHeader ? `
     <div class="page-header page-header-compact">
       <div class="panel-title-row">
         <h1 class="page-title">技能工作台</h1>
@@ -836,6 +837,10 @@ export function renderSkillsWorkbench(view, state) {
       </div>
       <p class="page-desc">技能目录、本地治理和安装动作在这里合流。</p>
     </div>
+  ` : '';
+
+  return `
+    ${headerHtml}
 
     <section class="workspace-summary-strip workspace-summary-strip-dense">
       <section class="summary-mini-card">

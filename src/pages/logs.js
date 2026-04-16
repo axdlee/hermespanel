@@ -183,6 +183,28 @@ function renderLogLines(view) {
   `;
 }
 
+function surfaceTabHtml(activeKey, key, label) {
+  return `
+    <button type="button" class="tab ${activeKey === key ? 'active' : ''}" data-logs-surface="${key}">
+      ${escapeHtml(label)}
+    </button>
+  `;
+}
+
+function dashboardJumpCardHtml({ action, kicker, title, meta, tone = 'neutral', attrs = {} }) {
+  const extraAttrs = Object.entries(attrs)
+    .map(([key, value]) => `${key}="${escapeHtml(String(value))}"`)
+    .join(' ');
+
+  return `
+    <button type="button" class="dashboard-jump-card dashboard-jump-card-${tone}" data-action="${escapeHtml(action)}" ${extraAttrs}>
+      <span class="dashboard-jump-kicker">${escapeHtml(kicker)}</span>
+      <strong class="dashboard-jump-title">${escapeHtml(title)}</strong>
+      <span class="dashboard-jump-meta">${escapeHtml(meta)}</span>
+    </button>
+  `;
+}
+
 function renderPage(view) {
   if (view.destroyed) {
     return;
@@ -192,43 +214,167 @@ function renderPage(view) {
   const logsDir = summary.logsDir;
   const currentDiagnostic = inferDiagnosticCommand(view.logName, relaySeed(view).context);
   const lineCount = String(view.data?.lines.length ?? 0);
-
-  view.page.innerHTML = `
+  const surfaceView = view.surfaceView || 'focus';
+  const focusState = !view.data
+    ? {
+      description: '先读一次日志，再决定去诊断、网关还是扩展面继续处理。',
+      kicker: '先读取',
+      title: '当前还没有带入日志内容',
+      tone: 'warn',
+    }
+    : view.logName.startsWith('gateway')
+      ? {
+        description: '你现在看的就是网关侧日志，下一步更适合继续去 Gateway 或诊断页。',
+        kicker: '网关排障',
+        title: '当前正在盯 Gateway 运行链路',
+        tone: 'warn',
+      }
+      : view.contains
+        ? {
+          description: '日志已经被关键词收窄，默认层只保留最常用去向和预设。',
+          kicker: '继续排障',
+          title: `围绕「${view.contains}」继续下钻`,
+          tone: 'good',
+        }
+        : {
+          description: '默认层只放最常用预设和下一步。完整控制台、过滤器和日志流继续留在下一层。',
+          kicker: '先收窄范围',
+          title: '先用预设或进入控制台',
+          tone: 'good',
+        };
+  const focusSignals = [
+    {
+      label: '当前日志',
+      meta: view.autoRefresh ? '5 秒自动刷新中' : '手动刷新模式',
+      value: LOG_OPTIONS.find((item) => item.key === view.logName)?.label || view.logName,
+    },
+    {
+      label: '返回行数',
+      meta: view.data?.filePath || '当前还没有日志文件路径',
+      value: lineCount,
+    },
+    {
+      label: '关键词',
+      meta: view.level ? `级别 ${view.level}` : '未附加级别过滤',
+      value: view.contains || '未过滤',
+    },
+    {
+      label: '建议诊断',
+      meta: view.snapshot?.gateway?.gatewayState ?? '未检测到 Gateway',
+      value: currentDiagnostic,
+    },
+  ];
+  const focusContent = `
     <div class="page-header page-header-compact">
       <div class="panel-title-row">
         <h1 class="page-title">日志查看</h1>
-        ${infoTipHtml('标签式日志页，主区域只保留日志切换、过滤和排障联动，不再用大段说明占位置。')}
+        ${infoTipHtml('默认层只保留最常用预设、边界和下一步。完整控制台、过滤器和日志流继续收进下一层。')}
       </div>
-      <p class="page-desc">把日志切换、过滤、自动刷新和跨页排障联动压成一个紧凑工作台。</p>
+      <p class="page-desc">让日志页先给判断和去向，而不是一上来就把所有控制项和联动模块全部堆出来。</p>
     </div>
 
-    <section class="workspace-summary-strip workspace-summary-strip-dense">
-      <section class="summary-mini-card">
-        <span class="summary-mini-label">当前实例</span>
-        <strong class="summary-mini-value">${escapeHtml(view.profile)}</strong>
-        <span class="summary-mini-meta">${escapeHtml(view.snapshot?.gateway?.gatewayState ?? '未检测到 Gateway')}</span>
+    <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
+      ${surfaceTabHtml(surfaceView, 'focus', '常用')}
+      ${surfaceTabHtml(surfaceView, 'console', '控制台')}
+    </div>
+
+    <section class="dashboard-focus-shell">
+      <section class="dashboard-focus-card dashboard-focus-card-${focusState.tone}">
+        <div class="dashboard-focus-head">
+          <div class="dashboard-focus-copy">
+            <span class="dashboard-focus-kicker">${escapeHtml(focusState.kicker)}</span>
+            <h2 class="dashboard-focus-title">${escapeHtml(focusState.title)}</h2>
+            <p class="dashboard-focus-desc">${escapeHtml(focusState.description)}</p>
+          </div>
+          <div class="dashboard-focus-pills">
+            ${pillHtml(view.autoRefresh ? '自动刷新开' : '自动刷新关', view.autoRefresh ? 'good' : 'neutral')}
+            ${pillHtml(view.snapshot?.gateway?.gatewayState ?? 'Gateway 未检测', view.snapshot?.gateway?.gatewayState === 'running' ? 'good' : 'warn')}
+          </div>
+        </div>
+        <div class="dashboard-signal-grid">
+          ${focusSignals.map((item) => `
+            <section class="dashboard-signal-card">
+              <span class="dashboard-signal-label">${escapeHtml(item.label)}</span>
+              <strong class="dashboard-signal-value">${escapeHtml(item.value)}</strong>
+              <span class="dashboard-signal-meta">${escapeHtml(item.meta)}</span>
+            </section>
+          `).join('')}
+        </div>
+        <div class="dashboard-focus-actions">
+          ${buttonHtml({ action: 'read-log', label: view.loading ? '读取中…' : '读取当前日志', kind: 'primary', disabled: view.loading })}
+          ${buttonHtml({ action: 'goto-diagnostics', label: '进入诊断页' })}
+          ${buttonHtml({ action: 'open-logs-dir', label: '打开 logs', disabled: !logsDir })}
+        </div>
       </section>
-      <section class="summary-mini-card">
-        <span class="summary-mini-label">日志标签</span>
-        <strong class="summary-mini-value">${escapeHtml(LOG_OPTIONS.find((item) => item.key === view.logName)?.label || view.logName)}</strong>
-        <span class="summary-mini-meta">${escapeHtml(view.autoRefresh ? '5 秒自动刷新中' : '手动刷新模式')}</span>
-      </section>
-      <section class="summary-mini-card">
-        <span class="summary-mini-label">返回行数</span>
-        <strong class="summary-mini-value">${escapeHtml(lineCount)}</strong>
-        <span class="summary-mini-meta">${escapeHtml(view.data?.filePath || '当前还没有日志文件路径')}</span>
-      </section>
-      <section class="summary-mini-card">
-        <span class="summary-mini-label">关键词</span>
-        <strong class="summary-mini-value">${escapeHtml(view.contains || '未过滤')}</strong>
-        <span class="summary-mini-meta">${escapeHtml(view.level ? `级别 ${view.level}` : '未附加级别过滤')}</span>
-      </section>
-      <section class="summary-mini-card">
-        <span class="summary-mini-label">建议诊断</span>
-        <strong class="summary-mini-value">${escapeHtml(currentDiagnostic)}</strong>
-        <span class="summary-mini-meta">当前日志线索下更适合继续执行的封装诊断</span>
+
+      <section class="dashboard-jump-panel">
+        <div class="config-section-header">
+          <div>
+            <h2 class="config-section-title">常用入口</h2>
+            <p class="config-section-desc">先用少量预设把范围收窄，想看细节时再进入控制台。</p>
+          </div>
+        </div>
+        <div class="dashboard-jump-grid">
+          ${dashboardJumpCardHtml({
+            action: 'open-log-console',
+            kicker: 'Console',
+            title: '进入控制台',
+            meta: '查看完整日志流、过滤器和排障联动',
+            tone: 'good',
+          })}
+          ${dashboardJumpCardHtml({
+            action: 'apply-preset',
+            attrs: { 'data-preset': 'gateway-main' },
+            kicker: 'Preset',
+            title: '网关主日志',
+            meta: '直接带入 gateway.log 并切到控制台',
+          })}
+          ${dashboardJumpCardHtml({
+            action: 'apply-preset',
+            attrs: { 'data-preset': 'provider-error' },
+            kicker: 'Preset',
+            title: 'Provider 异常',
+            meta: '快速查看 errors.log 里的 provider 相关线索',
+          })}
+          ${dashboardJumpCardHtml({
+            action: 'apply-preset',
+            attrs: { 'data-preset': 'tool-error' },
+            kicker: 'Preset',
+            title: '工具异常',
+            meta: '围绕 agent.log 里的 error 收窄范围',
+          })}
+        </div>
       </section>
     </section>
+
+    <section class="config-section dashboard-quiet-card">
+      <div class="config-section-header">
+        <div>
+          <h2 class="config-section-title">当前只保留这些边界</h2>
+          <p class="config-section-desc">默认页不再放一整排摘要卡和完整联动栏，只保留真正需要立刻知道的信息。</p>
+        </div>
+      </div>
+      ${keyValueRowsHtml([
+        { label: '日志目录', value: logsDir || '—' },
+        { label: '当前文件', value: view.data?.filePath || '—' },
+        { label: '当前实例', value: view.profile },
+        { label: '下一步', value: view.logName.startsWith('gateway') ? '优先去 Gateway 或诊断页继续看' : currentDiagnostic },
+      ])}
+    </section>
+  `;
+
+  const consoleContent = `
+    <div class="page-header page-header-compact">
+      <div class="panel-title-row">
+        <h1 class="page-title">日志控制台</h1>
+      </div>
+      <p class="page-desc">这里保留完整控制台、过滤器和日志流；常用预设和轻量判断继续留在上一层。</p>
+    </div>
+
+    <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
+      ${surfaceTabHtml(surfaceView, 'focus', '常用')}
+      ${surfaceTabHtml(surfaceView, 'console', '控制台')}
+    </div>
 
     <section class="config-section">
       <div class="config-section-header">
@@ -254,32 +400,6 @@ function renderPage(view) {
         <input class="search-input tiny" id="logs-limit-input" placeholder="120" value="${escapeHtml(view.limit)}">
         ${buttonHtml({ action: 'apply-filter', label: '应用过滤' })}
         ${buttonHtml({ action: 'clear-filter', label: '清空过滤' })}
-      </div>
-    </section>
-
-    <section class="config-section">
-      <div class="config-section-header">
-        <div>
-          <h2 class="config-section-title">快速预设</h2>
-          <p class="config-section-desc">先用预设把范围收窄，再根据日志内容决定进入诊断、网关还是配置。</p>
-        </div>
-      </div>
-      <div class="control-card-grid control-card-grid-dense">
-        ${PRESETS.map((preset) => `
-          <section class="action-card action-card-compact">
-            <div class="action-card-header">
-              <div>
-                <p class="eyebrow">预设</p>
-                <h3 class="action-card-title">${escapeHtml(preset.label)}</h3>
-              </div>
-              ${pillHtml(preset.logName, 'neutral')}
-            </div>
-            <p class="action-card-copy">${escapeHtml(preset.contains ? `包含关键词 ${preset.contains}` : '不附加关键词过滤')}，默认读取 ${escapeHtml(preset.limit)} 行。</p>
-            <div class="toolbar">
-              ${buttonHtml({ action: 'apply-preset', label: '应用预设', attrs: { 'data-preset': preset.key } })}
-            </div>
-          </section>
-        `).join('')}
       </div>
     </section>
 
@@ -423,6 +543,8 @@ function renderPage(view) {
     </div>
   `;
 
+  view.page.innerHTML = surfaceView === 'focus' ? focusContent : consoleContent;
+
   bindEvents(view);
   syncAutoRefresh(view);
 }
@@ -519,6 +641,7 @@ function syncWithPanelState(view) {
 
   if (intent) {
     applyIntent(view, intent);
+    view.surfaceView = 'console';
     void refreshAll(view, {
       contains: view.contains,
       level: view.level,
@@ -540,6 +663,17 @@ function syncWithPanelState(view) {
 }
 
 function bindEvents(view) {
+  view.page.querySelectorAll('[data-logs-surface]').forEach((element) => {
+    element.onclick = () => {
+      const nextView = element.getAttribute('data-logs-surface');
+      if (!nextView || nextView === view.surfaceView) {
+        return;
+      }
+      view.surfaceView = nextView;
+      renderPage(view);
+    };
+  });
+
   const levelInput = view.page.querySelector('#logs-level-input');
   const containsInput = view.page.querySelector('#logs-contains-input');
   const limitInput = view.page.querySelector('#logs-limit-input');
@@ -582,14 +716,20 @@ function bindEvents(view) {
       const summary = logSummary(view);
 
       switch (action) {
+        case 'open-log-console':
+          view.surfaceView = 'console';
+          renderPage(view);
+          return;
         case 'read-log':
         case 'apply-filter':
+          view.surfaceView = 'console';
           await refreshAll(view);
           return;
         case 'clear-filter':
           view.level = '';
           view.contains = '';
           view.limit = '120';
+          view.surfaceView = 'console';
           await refreshAll(view);
           return;
         case 'toggle-auto-refresh':
@@ -602,6 +742,7 @@ function bindEvents(view) {
           if (!preset) {
             return;
           }
+          view.surfaceView = 'console';
           view.logName = preset.logName;
           view.level = preset.level;
           view.contains = preset.contains;
@@ -611,6 +752,7 @@ function bindEvents(view) {
           return;
         }
         case 'select-log-tab':
+          view.surfaceView = 'console';
           view.logName = element.getAttribute('data-log') || 'agent';
           await refreshAll(view);
           return;
@@ -679,6 +821,7 @@ export async function render() {
     profile: getPanelState().selectedProfile,
     refreshing: false,
     snapshot: null,
+    surfaceView: 'focus',
     timer: null,
     unsubscribe: null,
   };
@@ -686,6 +829,7 @@ export async function render() {
   const intent = getPageIntent('logs');
   if (intent) {
     applyIntent(activeView, intent, false);
+    activeView.surfaceView = 'console';
   }
 
   activeView.unsubscribe = subscribePanelState(() => {

@@ -69,6 +69,24 @@ export const PLATFORM_WORKSPACE_PRESETS = [
 
 const CHANNEL_REPLY_MODE_OPTIONS = ['reply', 'thread', 'inline'];
 
+const GATEWAY_POLICY_GROUPS = [
+  {
+    key: 'reset',
+    label: '重置',
+    description: '只看会话重置策略、触发词和提醒方式。',
+  },
+  {
+    key: 'access',
+    label: '准入',
+    description: '聚焦私聊准入和群聊 / 线程隔离，不和其他运行特性混排。',
+  },
+  {
+    key: 'runtime',
+    label: '令牌与特性',
+    description: 'Gateway Token、本地日志和语音转写放在这一组单独处理。',
+  },
+];
+
 export function relaySeed(view) {
   return view.investigation
     ? {
@@ -253,6 +271,27 @@ function renderGatewayPolicyDisclosure({ title, summary, pills = '', body, open 
         ${body}
       </div>
     </details>
+  `;
+}
+
+function resolveGatewayPolicyGroup(activeKey) {
+  return GATEWAY_POLICY_GROUPS.find((item) => item.key === activeKey) ?? GATEWAY_POLICY_GROUPS[0];
+}
+
+function renderGatewayPolicyTabs(activeKey) {
+  return `
+    <div class="tab-bar tab-bar-dense">
+      ${GATEWAY_POLICY_GROUPS.map((group) => `
+        <button
+          type="button"
+          class="tab ${group.key === activeKey ? 'active' : ''}"
+          data-action="focus-gateway-policy"
+          data-section="${escapeHtml(group.key)}"
+        >
+          ${escapeHtml(group.label)}
+        </button>
+      `).join('')}
+    </div>
   `;
 }
 
@@ -616,6 +655,97 @@ export function renderControlWorkspace(view, context) {
   const dirty = gatewayWorkspaceDirty(view);
   const resetModeLabel = optionLabel(RESET_MODE_OPTIONS, draft.sessionResetMode, '未设置');
   const dmBehaviorLabel = optionLabel(DM_BEHAVIOR_OPTIONS, draft.unauthorizedDmBehavior, '未设置');
+  const activePolicyGroup = resolveGatewayPolicyGroup(view.gatewayPolicySection);
+  const activePolicyDisclosure = activePolicyGroup.key === 'reset'
+    ? renderGatewayPolicyDisclosure({
+      title: '会话重置',
+      summary: `${resetModeLabel} · ${gatewayResetSummary(draft)}`,
+      pills: `${pillHtml(resetModeLabel, 'neutral')}${pillHtml(draft.sessionResetNotify ? '重置通知' : '静默重置', draft.sessionResetNotify ? 'good' : 'neutral')}`,
+      open: true,
+      body: `
+        <div class="selection-chip-grid">
+          ${RESET_MODE_OPTIONS.map((item) => buttonHtml({
+            action: 'set-reset-mode',
+            label: item.label,
+            className: `selection-chip${draft.sessionResetMode === item.key ? ' selection-chip-active' : ''}`,
+            kind: draft.sessionResetMode === item.key ? 'primary' : 'secondary',
+            attrs: { 'data-value': item.key },
+          })).join('')}
+        </div>
+        <div class="form-grid">
+          <label class="field-stack">
+            <span>Reset Hour</span>
+            <input class="search-input" id="gateway-reset-hour" type="number" min="0" max="23" value="${escapeHtml(draft.sessionResetAtHour ?? '')}" placeholder="4">
+          </label>
+          <label class="field-stack">
+            <span>Idle Minutes</span>
+            <input class="search-input" id="gateway-reset-idle" type="number" min="1" value="${escapeHtml(draft.sessionResetIdleMinutes ?? '')}" placeholder="1440">
+          </label>
+          <label class="field-stack">
+            <span>Reset Triggers</span>
+            <input class="search-input" id="gateway-reset-triggers" value="${escapeHtml(draft.resetTriggers.join(', '))}" placeholder="/new, /reset">
+          </label>
+        </div>
+        <div class="checkbox-row">
+          <label>
+            <input type="checkbox" id="gateway-reset-notify" ${draft.sessionResetNotify ? 'checked' : ''}>
+            <span>自动重置时通知</span>
+          </label>
+        </div>
+      `,
+    })
+    : activePolicyGroup.key === 'access'
+      ? renderGatewayPolicyDisclosure({
+        title: '准入与隔离',
+        summary: `${dmBehaviorLabel} · ${gatewayIsolationSummary(draft)}`,
+        pills: `${pillHtml(dmBehaviorLabel, 'neutral')}${pillHtml(draft.groupSessionsPerUser || draft.threadSessionsPerUser ? '按用户隔离' : '共享会话', draft.groupSessionsPerUser || draft.threadSessionsPerUser ? 'good' : 'neutral')}`,
+        open: true,
+        body: `
+          <div class="selection-chip-grid">
+            ${DM_BEHAVIOR_OPTIONS.map((item) => buttonHtml({
+              action: 'set-dm-behavior',
+              label: item.label,
+              className: `selection-chip${draft.unauthorizedDmBehavior === item.key ? ' selection-chip-active' : ''}`,
+              kind: draft.unauthorizedDmBehavior === item.key ? 'primary' : 'secondary',
+              attrs: { 'data-value': item.key },
+            })).join('')}
+          </div>
+          <div class="checkbox-row">
+            <label>
+              <input type="checkbox" id="gateway-group-sessions" ${draft.groupSessionsPerUser ? 'checked' : ''}>
+              <span>群聊按用户隔离</span>
+            </label>
+            <label>
+              <input type="checkbox" id="gateway-thread-sessions" ${draft.threadSessionsPerUser ? 'checked' : ''}>
+              <span>线程按用户隔离</span>
+            </label>
+          </div>
+        `,
+      })
+      : renderGatewayPolicyDisclosure({
+        title: '令牌与运行特性',
+        summary: `${draft.hermesGatewayToken.trim() ? 'Gateway Token 已写入' : 'Gateway Token 未写入'} · ${gatewayFeatureSummary(draft)}`,
+        pills: `${pillHtml(draft.hermesGatewayToken.trim() ? 'Token 已写' : '缺 Token', draft.hermesGatewayToken.trim() ? 'good' : 'warn')}${pillHtml(draft.sttEnabled ? 'STT On' : 'STT Off', draft.sttEnabled ? 'good' : 'neutral')}`,
+        open: true,
+        body: `
+          <div class="form-grid">
+            <label class="field-stack">
+              <span>Gateway Token</span>
+              <input class="search-input" id="gateway-token" value="${escapeHtml(draft.hermesGatewayToken)}" placeholder="HERMES_GATEWAY_TOKEN">
+            </label>
+          </div>
+          <div class="checkbox-row">
+            <label>
+              <input type="checkbox" id="gateway-always-log-local" ${draft.alwaysLogLocal ? 'checked' : ''}>
+              <span>始终保留本地日志</span>
+            </label>
+            <label>
+              <input type="checkbox" id="gateway-stt-enabled" ${draft.sttEnabled ? 'checked' : ''}>
+              <span>启用语音转写</span>
+            </label>
+          </div>
+        `,
+      });
 
   return `
     <div class="compact-overview-grid compact-overview-grid-dense">
@@ -710,93 +840,16 @@ export function renderControlWorkspace(view, context) {
         ${buttonHtml({ action: 'switch-workspace-tab', label: '平台连接', attrs: { 'data-tab': 'platforms' } })}
       </div>
 
+      <div class="workspace-main-header top-gap">
+        <div>
+          <strong>当前只看这一组</strong>
+          <p class="workspace-main-copy">${escapeHtml(activePolicyGroup.description)}</p>
+        </div>
+        ${pillHtml(activePolicyGroup.label, 'neutral')}
+      </div>
+      ${renderGatewayPolicyTabs(activePolicyGroup.key)}
       <div class="compact-disclosure-stack top-gap">
-        ${renderGatewayPolicyDisclosure({
-          title: '会话重置',
-          summary: `${resetModeLabel} · ${gatewayResetSummary(draft)}`,
-          pills: `${pillHtml(resetModeLabel, 'neutral')}${pillHtml(draft.sessionResetNotify ? '重置通知' : '静默重置', draft.sessionResetNotify ? 'good' : 'neutral')}`,
-          open: true,
-          body: `
-            <div class="selection-chip-grid">
-              ${RESET_MODE_OPTIONS.map((item) => buttonHtml({
-                action: 'set-reset-mode',
-                label: item.label,
-                className: `selection-chip${draft.sessionResetMode === item.key ? ' selection-chip-active' : ''}`,
-                kind: draft.sessionResetMode === item.key ? 'primary' : 'secondary',
-                attrs: { 'data-value': item.key },
-              })).join('')}
-            </div>
-            <div class="form-grid">
-              <label class="field-stack">
-                <span>Reset Hour</span>
-                <input class="search-input" id="gateway-reset-hour" type="number" min="0" max="23" value="${escapeHtml(draft.sessionResetAtHour ?? '')}" placeholder="4">
-              </label>
-              <label class="field-stack">
-                <span>Idle Minutes</span>
-                <input class="search-input" id="gateway-reset-idle" type="number" min="1" value="${escapeHtml(draft.sessionResetIdleMinutes ?? '')}" placeholder="1440">
-              </label>
-              <label class="field-stack">
-                <span>Reset Triggers</span>
-                <input class="search-input" id="gateway-reset-triggers" value="${escapeHtml(draft.resetTriggers.join(', '))}" placeholder="/new, /reset">
-              </label>
-            </div>
-            <div class="checkbox-row">
-              <label>
-                <input type="checkbox" id="gateway-reset-notify" ${draft.sessionResetNotify ? 'checked' : ''}>
-                <span>自动重置时通知</span>
-              </label>
-            </div>
-          `,
-        })}
-        ${renderGatewayPolicyDisclosure({
-          title: '准入与隔离',
-          summary: `${dmBehaviorLabel} · ${gatewayIsolationSummary(draft)}`,
-          pills: `${pillHtml(dmBehaviorLabel, 'neutral')}${pillHtml(draft.groupSessionsPerUser || draft.threadSessionsPerUser ? '按用户隔离' : '共享会话', draft.groupSessionsPerUser || draft.threadSessionsPerUser ? 'good' : 'neutral')}`,
-          body: `
-            <div class="selection-chip-grid">
-              ${DM_BEHAVIOR_OPTIONS.map((item) => buttonHtml({
-                action: 'set-dm-behavior',
-                label: item.label,
-                className: `selection-chip${draft.unauthorizedDmBehavior === item.key ? ' selection-chip-active' : ''}`,
-                kind: draft.unauthorizedDmBehavior === item.key ? 'primary' : 'secondary',
-                attrs: { 'data-value': item.key },
-              })).join('')}
-            </div>
-            <div class="checkbox-row">
-              <label>
-                <input type="checkbox" id="gateway-group-sessions" ${draft.groupSessionsPerUser ? 'checked' : ''}>
-                <span>群聊按用户隔离</span>
-              </label>
-              <label>
-                <input type="checkbox" id="gateway-thread-sessions" ${draft.threadSessionsPerUser ? 'checked' : ''}>
-                <span>线程按用户隔离</span>
-              </label>
-            </div>
-          `,
-        })}
-        ${renderGatewayPolicyDisclosure({
-          title: '令牌与运行特性',
-          summary: `${draft.hermesGatewayToken.trim() ? 'Gateway Token 已写入' : 'Gateway Token 未写入'} · ${gatewayFeatureSummary(draft)}`,
-          pills: `${pillHtml(draft.hermesGatewayToken.trim() ? 'Token 已写' : '缺 Token', draft.hermesGatewayToken.trim() ? 'good' : 'warn')}${pillHtml(draft.sttEnabled ? 'STT On' : 'STT Off', draft.sttEnabled ? 'good' : 'neutral')}`,
-          body: `
-            <div class="form-grid">
-              <label class="field-stack">
-                <span>Gateway Token</span>
-                <input class="search-input" id="gateway-token" value="${escapeHtml(draft.hermesGatewayToken)}" placeholder="HERMES_GATEWAY_TOKEN">
-              </label>
-            </div>
-            <div class="checkbox-row">
-              <label>
-                <input type="checkbox" id="gateway-always-log-local" ${draft.alwaysLogLocal ? 'checked' : ''}>
-                <span>始终保留本地日志</span>
-              </label>
-              <label>
-                <input type="checkbox" id="gateway-stt-enabled" ${draft.sttEnabled ? 'checked' : ''}>
-                <span>启用语音转写</span>
-              </label>
-            </div>
-          `,
-        })}
+        ${activePolicyDisclosure}
       </div>
     </section>
   `;

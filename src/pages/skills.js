@@ -10,6 +10,8 @@ import { getPanelState, loadShell, navigate, notify, subscribePanelState } from 
 import {
   buttonHtml,
   emptyStateHtml,
+  escapeHtml,
+  keyValueRowsHtml,
   pillHtml,
 } from './native-helpers';
 import {
@@ -40,6 +42,28 @@ function selectedJobs(view, skill = currentSkill(view)) {
   }
 
   return view.cron.jobs.filter((job) => job.skills.includes(skill.name));
+}
+
+function surfaceTabHtml(activeKey, key, label) {
+  return `
+    <button type="button" class="tab ${activeKey === key ? 'active' : ''}" data-skills-surface="${key}">
+      ${escapeHtml(label)}
+    </button>
+  `;
+}
+
+function dashboardJumpCardHtml({ action, kicker, title, meta, tone = 'neutral', attrs = {} }) {
+  const extraAttrs = Object.entries(attrs)
+    .map(([key, value]) => `${key}="${escapeHtml(String(value))}"`)
+    .join(' ');
+
+  return `
+    <button type="button" class="dashboard-jump-card dashboard-jump-card-${tone}" data-action="${escapeHtml(action)}" ${extraAttrs}>
+      <span class="dashboard-jump-kicker">${escapeHtml(kicker)}</span>
+      <strong class="dashboard-jump-title">${escapeHtml(title)}</strong>
+      <span class="dashboard-jump-meta">${escapeHtml(meta)}</span>
+    </button>
+  `;
 }
 
 function createSkillFrontmatterDraft(detail) {
@@ -100,6 +124,185 @@ function syncSkillInlineControls(view) {
   if (deleteButton) {
     deleteButton.disabled = Boolean(view.runningAction) || !deleteReady;
   }
+}
+
+function renderFocusSurface(view, state) {
+  const { currentToolsets, jobs, runtimeLocal, runtimeMismatch, skill, selectedExistsInRuntime, usedNames, warnings } = state;
+  const focusState = !view.skills.length
+    ? {
+      description: '先创建或导入一个本地技能，再继续做安装、编排和运行态接入。',
+      kicker: '先放进来',
+      title: '当前实例还没有可治理的技能',
+      tone: 'warn',
+    }
+    : runtimeMismatch
+      ? {
+        description: '技能目录和运行态数量不一致，先把技能真正接到运行面上。',
+        kicker: '先对齐',
+        title: 'Skills 目录态和运行态没有对上',
+        tone: 'warn',
+      }
+      : !currentToolsets.length
+        ? {
+          description: '技能文件已经有了，但工具集为空，模型侧不一定真的能用到这些技能。',
+          kicker: '先暴露能力',
+          title: '当前还没有配置 toolsets',
+          tone: 'warn',
+        }
+        : skill && jobs.length === 0 && (view.cron?.jobs.length ?? 0) > 0
+          ? {
+            description: '当前技能还没接入任何自动化作业，建议去编排页继续绑定。',
+            kicker: '继续布线',
+            title: `${skill.name} 还没有进入自动化编排`,
+            tone: 'warn',
+          }
+          : warnings.length > 0
+            ? {
+              description: '技能链路已经能跑，但还有提醒项。默认层只保留最常用入口，不再把编辑器直接铺满。',
+              kicker: '继续收口',
+              title: '技能工作面已经可用，继续处理提醒',
+              tone: 'warn',
+            }
+            : {
+              description: '默认页只露出常用判断和去向。本地编辑、安装治理和目录列表都继续收进下一层。',
+              kicker: '可以继续',
+              title: '当前技能层已经比较稳定',
+              tone: 'good',
+            };
+  const focusSignals = [
+    {
+      label: '目录技能',
+      meta: '当前实例扫描到的本地技能数',
+      value: String(view.skills.length),
+    },
+    {
+      label: '运行接入',
+      meta: runtimeMismatch ? '目录态和运行态仍有偏差' : '运行态与目录已基本对齐',
+      value: `${runtimeLocal}/${view.skills.length || 0}`,
+    },
+    {
+      label: '当前技能',
+      meta: skill ? (selectedExistsInRuntime ? '运行面已接入' : '运行面待同步') : '还没有选中技能',
+      value: skill?.name || '未选择',
+    },
+    {
+      label: '自动化',
+      meta: currentToolsets.length ? `toolsets: ${currentToolsets.join(', ')}` : '当前没有 toolsets',
+      value: `${usedNames.size} 已编排`,
+    },
+  ];
+  const primaryAction = !view.skills.length
+    ? buttonHtml({ action: 'open-skill-workbench', label: '去新建技能', kind: 'primary', attrs: { 'data-tab': 'studio' } })
+    : runtimeMismatch
+      ? buttonHtml({ action: 'goto-extensions', label: '去看运行接入', kind: 'primary' })
+      : !currentToolsets.length
+        ? buttonHtml({ action: 'goto-config-toolsets', label: '去配置 Toolsets', kind: 'primary' })
+        : skill && jobs.length === 0 && (view.cron?.jobs.length ?? 0) > 0
+          ? buttonHtml({ action: 'goto-cron', label: '去绑定编排', kind: 'primary' })
+          : buttonHtml({ action: 'open-skill-workbench', label: '进入本地治理', kind: 'primary', attrs: { 'data-tab': 'studio' } });
+
+  return `
+    <div class="page-header page-header-compact">
+      <div class="panel-title-row">
+        <h1 class="page-title">技能工作台</h1>
+      </div>
+      <p class="page-desc">默认只保留技能层的主判断和最常用入口，编辑器与安装治理收进下一层。</p>
+    </div>
+
+    <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
+      ${surfaceTabHtml(view.surfaceView, 'focus', '常用')}
+      ${surfaceTabHtml(view.surfaceView, 'workbench', '治理台')}
+    </div>
+
+    <section class="dashboard-focus-shell">
+      <section class="dashboard-focus-card dashboard-focus-card-${focusState.tone}">
+        <div class="dashboard-focus-head">
+          <div class="dashboard-focus-copy">
+            <span class="dashboard-focus-kicker">${escapeHtml(focusState.kicker)}</span>
+            <h2 class="dashboard-focus-title">${escapeHtml(focusState.title)}</h2>
+            <p class="dashboard-focus-desc">${escapeHtml(focusState.description)}</p>
+          </div>
+          <div class="dashboard-focus-pills">
+            ${pillHtml(runtimeMismatch ? '运行态待对齐' : '运行态已对齐', runtimeMismatch ? 'warn' : 'good')}
+            ${pillHtml(currentToolsets.length ? `${currentToolsets.length} 个 toolsets` : 'Toolsets 为空', currentToolsets.length ? 'good' : 'warn')}
+            ${pillHtml(warnings.length ? `${warnings.length} 条提醒` : '当前稳定', warnings.length ? 'warn' : 'good')}
+          </div>
+        </div>
+        <div class="dashboard-signal-grid">
+          ${focusSignals.map((item) => `
+            <section class="dashboard-signal-card">
+              <span class="dashboard-signal-label">${escapeHtml(item.label)}</span>
+              <strong class="dashboard-signal-value">${escapeHtml(item.value)}</strong>
+              <span class="dashboard-signal-meta">${escapeHtml(item.meta)}</span>
+            </section>
+          `).join('')}
+        </div>
+        <div class="dashboard-focus-actions">
+          ${primaryAction}
+          ${buttonHtml({ action: 'open-skill-workbench', label: '查看技能详情', attrs: { 'data-tab': 'overview' } })}
+          ${buttonHtml({ action: 'goto-logs', label: '查看日志', disabled: !skill })}
+        </div>
+      </section>
+
+      <section class="dashboard-jump-panel">
+        <div class="config-section-header">
+          <div>
+            <h2 class="config-section-title">继续去哪里</h2>
+            <p class="config-section-desc">高频入口留在这里，完整的目录列表、本地编辑和安装治理继续放到治理台里。</p>
+          </div>
+        </div>
+        <div class="dashboard-jump-grid">
+          ${dashboardJumpCardHtml({
+            action: 'open-skill-workbench',
+            attrs: { 'data-tab': 'overview' },
+            kicker: 'Overview',
+            title: '查看当前技能',
+            meta: skill ? `围绕 ${skill.name} 看详情和引用` : '先进入治理台再选技能',
+            tone: skill ? 'good' : 'neutral',
+          })}
+          ${dashboardJumpCardHtml({
+            action: 'open-skill-workbench',
+            attrs: { 'data-tab': 'studio' },
+            kicker: 'Studio',
+            title: '本地治理',
+            meta: '编辑 frontmatter、内容和本地导入创建动作',
+          })}
+          ${dashboardJumpCardHtml({
+            action: 'open-skill-workbench',
+            attrs: { 'data-tab': 'registry' },
+            kicker: 'Registry',
+            title: '安装治理',
+            meta: '搜索、预检、安装、更新和审计技能',
+          })}
+          ${dashboardJumpCardHtml({
+            action: 'goto-cron',
+            kicker: 'Cron',
+            title: '查看编排',
+            meta: '确认哪些技能真正被作业引用',
+            tone: jobs.length > 0 ? 'good' : 'neutral',
+          })}
+        </div>
+      </section>
+    </section>
+
+    <section class="config-section dashboard-quiet-card">
+      <div class="config-section-header">
+        <div>
+          <h2 class="config-section-title">当前只保留这些摘要</h2>
+          <p class="config-section-desc">默认页只给你是否可用、是否已接入、下一步去哪，不直接堆编辑器和长列表。</p>
+        </div>
+        <div class="toolbar">
+          ${pillHtml(skill?.name || '等待选择', skill ? 'good' : 'warn')}
+        </div>
+      </div>
+      ${keyValueRowsHtml([
+        { label: '当前技能', value: skill?.name || '还没有选择技能' },
+        { label: '分类', value: skill?.category || '—' },
+        { label: '最近动作', value: view.lastResult?.label || '还没有执行过治理动作' },
+        { label: '下一步', value: !view.skills.length ? '先创建或导入一个技能' : runtimeMismatch ? '优先对齐运行态' : !currentToolsets.length ? '先去补齐 toolsets' : '进入治理台做细节接管' },
+      ])}
+    </section>
+  `;
 }
 
 function renderSkeleton(view) {
@@ -179,7 +382,22 @@ function renderPage(view) {
     query: skill?.name ?? view.query,
     sourceFilter: view.extensions.runtimeSkills.some((item) => item.source === 'local') ? 'local' : 'all',
   });
-  view.page.innerHTML = renderSkillsWorkbench(view, state);
+  const surfaceView = view.surfaceView || 'focus';
+  view.page.innerHTML = surfaceView === 'focus'
+    ? renderFocusSurface(view, state)
+    : `
+      <div class="page-header page-header-compact">
+        <div class="panel-title-row">
+          <h1 class="page-title">技能工作台</h1>
+        </div>
+        <p class="page-desc">治理台里保留目录、安装、本地编辑和原始回执；常用判断继续留在上一层。</p>
+      </div>
+      <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
+        ${surfaceTabHtml(surfaceView, 'focus', '常用')}
+        ${surfaceTabHtml(surfaceView, 'workbench', '治理台')}
+      </div>
+      ${renderSkillsWorkbench(view, state, { includeHeader: false })}
+    `;
 
   bindEvents(view, {
     configMemoryIntent,
@@ -546,6 +764,7 @@ function syncWithPanelState(view) {
     view.skillFrontmatterDraft = null;
     view.skillFileSavedContent = '';
     view.skillDeleteConfirm = '';
+    view.surfaceView = 'focus';
     void loadData(view);
     return;
   }
@@ -554,6 +773,17 @@ function syncWithPanelState(view) {
 }
 
 function bindEvents(view, intents = {}) {
+  view.page.querySelectorAll('[data-skills-surface]').forEach((element) => {
+    element.onclick = () => {
+      const nextView = element.getAttribute('data-skills-surface');
+      if (!nextView || nextView === view.surfaceView) {
+        return;
+      }
+      view.surfaceView = nextView;
+      renderPage(view);
+    };
+  });
+
   const queryInput = view.page.querySelector('#skills-query');
   const categorySelect = view.page.querySelector('#skills-category-filter');
   const registryInput = view.page.querySelector('#skills-registry-query');
@@ -701,6 +931,11 @@ function bindEvents(view, intents = {}) {
       switch (action) {
         case 'refresh':
           await loadData(view);
+          return;
+        case 'open-skill-workbench':
+          view.surfaceView = 'workbench';
+          view.workspaceTab = element.getAttribute('data-tab') || 'overview';
+          renderPage(view);
           return;
         case 'switch-workspace-tab':
           view.workspaceTab = element.getAttribute('data-tab') || 'overview';
@@ -869,9 +1104,10 @@ export async function render() {
     skillFrontmatterExpanded: true,
     skillLocalOpsExpanded: false,
     skills: [],
+    surfaceView: 'focus',
     installTarget: '',
     unsubscribe: null,
-    workspaceTab: 'studio',
+    workspaceTab: 'overview',
   };
 
   activeView.unsubscribe = subscribePanelState(() => {

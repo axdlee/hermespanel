@@ -149,6 +149,26 @@ function surfaceTabHtml(activeKey, key, label) {
   `;
 }
 
+function launcherCardHtml({ action, kicker, title, meta, tone = 'neutral', attrs = {} }) {
+  const attrString = Object.entries(attrs)
+    .filter(([, value]) => value !== undefined && value !== null && value !== false)
+    .map(([key, value]) => `${key}="${escapeHtml(value)}"`)
+    .join(' ');
+
+  return `
+    <button
+      type="button"
+      class="dashboard-jump-card dashboard-jump-card-${tone}"
+      data-action="${escapeHtml(action)}"
+      ${attrString}
+    >
+      <span class="dashboard-jump-kicker">${escapeHtml(kicker)}</span>
+      <strong class="dashboard-jump-title">${escapeHtml(title)}</strong>
+      <span class="dashboard-jump-meta">${escapeHtml(meta)}</span>
+    </button>
+  `;
+}
+
 function workspaceSectionFromFocus(focus) {
   switch (focus) {
     case 'model':
@@ -167,6 +187,7 @@ function workspaceSectionFromFocus(focus) {
 }
 
 function queueWorkspaceFocus(view, tab, sectionId, behavior = 'smooth') {
+  view.surfaceView = 'workspace';
   view.editorTab = tab;
   view.activeWorkspaceSection = sectionId || null;
   view.pendingSectionFocus = sectionId ? { tab, sectionId, behavior } : null;
@@ -269,6 +290,22 @@ function renderPage(view) {
   const totalTools = totalToolCount(extensions);
   const localSkills = localRuntimeSkillCount(extensions);
   const pluginTotal = pluginsCount(extensions);
+  const env = data.envWorkspace ?? {};
+  const credentialsCount = [
+    env.openaiApiKey,
+    env.openrouterApiKey,
+    env.anthropicApiKey,
+    env.googleApiKey,
+    env.hfToken,
+    env.hermesGatewayToken,
+  ].filter((value) => String(value ?? '').trim()).length;
+  const channelCount = [
+    env.telegramBotToken,
+    env.telegramHomeChannel,
+    env.discordBotToken,
+    env.discordHomeChannel,
+    env.slackBotToken,
+  ].filter((value) => String(value ?? '').trim()).length;
   const configDirty = view.configYaml !== data.configYaml;
   const envDirty = view.envFile !== data.envFile;
   const structuredDirty = structuredConfigDirty(view);
@@ -294,15 +331,127 @@ function renderPage(view) {
     rawKind: view.investigation?.focus === 'memory' ? 'memory' : 'tools',
     query: view.investigation?.focus === 'toolsets' ? data.summary.toolsets.join(' ') : '',
   });
-  const surfaceView = view.surfaceView || 'workspace';
-  const workspaceContent = `
-    <div class="quick-actions">
-      ${buttonHtml({ action: 'refresh', label: view.refreshing ? '同步中…' : '重新读取', kind: 'primary', disabled: view.refreshing })}
-      ${buttonHtml({ action: 'diagnostic-config-check', label: view.runningDiagnostic === 'config-check' ? '配置体检…' : '配置体检', disabled: actionBusy })}
-      ${buttonHtml({ action: 'focus-workspace', label: '模型工作台', attrs: { 'data-tab': 'control', 'data-section': 'model-governance' } })}
-      ${buttonHtml({ action: 'focus-workspace', label: '凭证 / 通道', attrs: { 'data-tab': 'credentials', 'data-section': 'provider-credentials' } })}
-    </div>
+  const surfaceView = view.surfaceView || 'focus';
+  const modelReady = Boolean(data.summary.modelDefault && data.summary.modelProvider);
+  const gatewayRunning = snapshot?.gateway?.gatewayState === 'running';
+  const focusTone = modelReady && warnings.length === 0 ? 'good' : 'warn';
+  const configFocusShell = `
+    <div class="dashboard-focus-shell">
+      <section class="dashboard-focus-card dashboard-focus-card-${focusTone}">
+        <div class="dashboard-focus-head">
+          <div class="dashboard-focus-copy">
+            <span class="dashboard-focus-kicker">${modelReady ? '可以继续' : '先补齐'}</span>
+            <h2 class="dashboard-focus-title">${modelReady ? '当前配置已经进入可用状态' : '主配置链路还没补齐'}</h2>
+            <p class="dashboard-focus-desc">${modelReady ? '主区只保留最常用的设置入口，体检和运行验证继续交给二级工作面。' : '先把 provider、默认模型和关键凭证补齐，再继续验证 Gateway、技能和插件闭环。'}</p>
+          </div>
+          <div class="dashboard-focus-pills">
+            ${pillHtml(modelReady ? '模型已就绪' : '模型待补齐', modelReady ? 'good' : 'warn')}
+            ${pillHtml(gatewayRunning ? 'Gateway 已运行' : 'Gateway 待验证', gatewayRunning ? 'good' : 'warn')}
+            ${pillHtml(`${warnings.length} 条提醒`, warnings.length === 0 ? 'good' : 'warn')}
+          </div>
+        </div>
+        <div class="dashboard-signal-grid">
+          <section class="dashboard-signal-card">
+            <span class="dashboard-signal-label">模型</span>
+            <strong class="dashboard-signal-value">${escapeHtml(data.summary.modelDefault || '待配置')}</strong>
+            <span class="dashboard-signal-meta">${escapeHtml(data.summary.modelProvider || 'provider 未配置')}</span>
+          </section>
+          <section class="dashboard-signal-card">
+            <span class="dashboard-signal-label">凭证</span>
+            <strong class="dashboard-signal-value">${escapeHtml(`${credentialsCount} 项已填`)}</strong>
+            <span class="dashboard-signal-meta">${escapeHtml(`${channelCount} 项通道参数 · ${remoteJobs.length} 个远端作业`)}</span>
+          </section>
+          <section class="dashboard-signal-card">
+            <span class="dashboard-signal-label">能力面</span>
+            <strong class="dashboard-signal-value">${escapeHtml(`${data.summary.toolsets.length} 组 / ${enabledTools} 工具`)}</strong>
+            <span class="dashboard-signal-meta">${escapeHtml(`总工具 ${totalTools} · 本地技能 ${localSkills}/${skills.length}`)}</span>
+          </section>
+          <section class="dashboard-signal-card">
+            <span class="dashboard-signal-label">运行侧</span>
+            <strong class="dashboard-signal-value">${escapeHtml(snapshot?.gateway?.gatewayState || '未检测到')}</strong>
+            <span class="dashboard-signal-meta">${escapeHtml(`${data.summary.memoryProvider || 'builtin-file'} · 插件 ${pluginTotal} 个`)}</span>
+          </section>
+        </div>
+        <div class="dashboard-focus-actions">
+          ${buttonHtml({ action: 'focus-workspace', label: modelReady ? '继续细调' : '去改模型', kind: 'primary', attrs: { 'data-tab': 'control', 'data-section': 'model-governance' }, disabled: actionBusy })}
+          ${buttonHtml({ action: 'focus-workspace', label: '凭证 / 通道', attrs: { 'data-tab': 'credentials', 'data-section': 'provider-credentials' }, disabled: actionBusy })}
+          ${buttonHtml({ action: 'diagnostic-config-check', label: view.runningDiagnostic === 'config-check' ? '配置体检…' : '配置体检', disabled: actionBusy })}
+          ${buttonHtml({ action: 'refresh', label: view.refreshing ? '同步中…' : '刷新', disabled: view.refreshing || actionBusy })}
+        </div>
+      </section>
 
+      <aside class="dashboard-jump-panel">
+        <div class="workspace-main-header">
+          <div>
+            <strong>常用入口</strong>
+            <p class="workspace-main-copy">只露出最常用的四个去向，历史迁移和低频联动继续收进侧栏。</p>
+          </div>
+          ${pillHtml('高频 4 项', 'neutral')}
+        </div>
+        <div class="dashboard-jump-grid">
+          ${launcherCardHtml({
+            action: 'focus-workspace',
+            attrs: { 'data-tab': 'control', 'data-section': 'model-governance' },
+            kicker: '模型',
+            title: 'Provider / 默认模型',
+            meta: modelReady ? `${data.summary.modelProvider || 'provider'} / ${data.summary.modelDefault || 'model'}` : '先补主对话链路',
+            tone: modelReady ? 'good' : 'warn',
+          })}
+          ${launcherCardHtml({
+            action: 'focus-workspace',
+            attrs: { 'data-tab': 'credentials', 'data-section': 'provider-credentials' },
+            kicker: '凭证',
+            title: 'Key 与 Base URL',
+            meta: credentialsCount > 0 ? `${credentialsCount} 项已写入` : '关键凭证还没补齐',
+            tone: credentialsCount > 0 ? 'good' : 'warn',
+          })}
+          ${launcherCardHtml({
+            action: 'focus-workspace',
+            attrs: { 'data-tab': 'control', 'data-section': 'toolsets-presets' },
+            kicker: '能力面',
+            title: 'Toolsets 与记忆',
+            meta: `${data.summary.toolsets.length} 组能力面 · Memory ${data.summary.memoryProvider || 'builtin-file'}`,
+          })}
+          ${launcherCardHtml({
+            action: 'goto-gateway',
+            kicker: '验证',
+            title: 'Gateway 与通道',
+            meta: gatewayRunning ? '继续看消息链路' : '配置完后去跑闭环',
+            tone: gatewayRunning ? 'good' : 'warn',
+          })}
+        </div>
+      </aside>
+    </div>
+  `;
+  const focusContent = `
+    ${configFocusShell}
+
+    <section class="config-section dashboard-quiet-card">
+      <div class="config-section-header">
+        <div>
+          <h2 class="config-section-title">当前只保留这些摘要</h2>
+          <p class="config-section-desc">默认页不直接摊开结构化编辑器、YAML、ENV 和兼容迁移动作，只保留是否可用与下一步。</p>
+        </div>
+        <div class="toolbar">
+          ${pillHtml(warnings.length > 0 ? `${warnings.length} 条提醒` : '当前稳定', warnings.length > 0 ? 'warn' : 'good')}
+        </div>
+      </div>
+      <div class="detail-list compact">
+        ${[
+          { label: 'Provider / 模型', value: `${data.summary.modelProvider || 'provider 未配置'} / ${data.summary.modelDefault || 'model 未配置'}` },
+          { label: '关键凭证', value: credentialsCount > 0 ? `${credentialsCount} 项已填写` : '关键凭证还没有补齐' },
+          { label: 'Toolsets / 记忆', value: `${data.summary.toolsets.join(', ') || '未配置'} · ${data.summary.memoryProvider || 'builtin-file'}` },
+          { label: '下一步', value: !modelReady ? '先补 Provider、模型和 Key' : !gatewayRunning ? '改完后去 Gateway 做闭环验证' : '按需进入工作台继续细调' },
+        ].map((item) => `
+          <div class="key-value-row">
+            <span>${escapeHtml(item.label)}</span>
+            <strong>${escapeHtml(item.value)}</strong>
+          </div>
+        `).join('')}
+      </div>
+    </section>
+  `;
+  const workspaceContent = `
     <section class="config-section">
       <div class="config-section-header">
         <div>
@@ -473,7 +622,11 @@ function renderPage(view) {
       </section>
     </div>
   `;
-  const surfaceContent = surfaceView === 'verify' ? verifyContent : workspaceContent;
+  const surfaceContent = surfaceView === 'focus'
+    ? focusContent
+    : surfaceView === 'verify'
+      ? verifyContent
+      : workspaceContent;
 
   view.page.innerHTML = `
     <div class="page-header page-header-compact">
@@ -514,7 +667,8 @@ function renderPage(view) {
     ` : ''}
 
     <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
-      ${surfaceTabHtml(surfaceView, 'workspace', '主工作台')}
+      ${surfaceTabHtml(surfaceView, 'focus', '常用')}
+      ${surfaceTabHtml(surfaceView, 'workspace', '工作台')}
       ${surfaceTabHtml(surfaceView, 'verify', '验证与闭环')}
     </div>
 
@@ -1582,7 +1736,7 @@ export async function render() {
     runningDiagnostic: null,
     saving: null,
     skills: [],
-    surfaceView: 'workspace',
+    surfaceView: 'focus',
     skillDirBulkInput: '',
     skillDirInput: '',
     showCompatibilityActions: false,

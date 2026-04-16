@@ -26,6 +26,43 @@ import {
 
 let activeView = null;
 
+function surfaceTabHtml(activeKey, key, label) {
+  return `
+    <button type="button" class="tab ${activeKey === key ? 'active' : ''}" data-memory-surface="${key}">
+      ${escapeHtml(label)}
+    </button>
+  `;
+}
+
+function launcherCardHtml({ action, kicker, title, meta, tone = 'neutral', attrs = {} }) {
+  const attrString = Object.entries(attrs)
+    .filter(([, value]) => value !== undefined && value !== null && value !== false)
+    .map(([key, value]) => `${key}="${escapeHtml(String(value))}"`)
+    .join(' ');
+
+  return `
+    <button
+      type="button"
+      class="dashboard-jump-card dashboard-jump-card-${tone}"
+      data-action="${escapeHtml(action)}"
+      ${attrString}
+    >
+      <span class="dashboard-jump-kicker">${escapeHtml(kicker)}</span>
+      <strong class="dashboard-jump-title">${escapeHtml(title)}</strong>
+      <span class="dashboard-jump-meta">${escapeHtml(meta)}</span>
+    </button>
+  `;
+}
+
+function renderSurfaceTabs(view) {
+  return `
+    <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
+      ${surfaceTabHtml(view.surfaceView, 'focus', '常用')}
+      ${surfaceTabHtml(view.surfaceView, 'workbench', '工作台')}
+    </div>
+  `;
+}
+
 function directoryOf(path) {
   const normalized = String(path ?? '').trim();
   const index = normalized.lastIndexOf('/');
@@ -50,6 +87,7 @@ function applyIntent(view, intent, announce = true) {
   }
 
   view.investigation = intent;
+  view.surfaceView = 'workbench';
   if (intent.selectedKey) {
     view.selectedKey = intent.selectedKey;
   }
@@ -106,6 +144,222 @@ function updateEditorIndicators(view) {
   }
 }
 
+function renderFocusSurface(view, state) {
+  const {
+    budgetRemaining,
+    current,
+    readyCount,
+    runtimeProvider,
+    selected,
+    summary,
+    warnings,
+  } = state;
+  const currentLabel = view.detail?.label || selected?.label || view.selectedKey;
+  const currentPath = view.detail?.path || view.config?.hermesHome || '—';
+  const memoryEnabled = summary?.memoryEnabled !== false;
+  const gatewayRunning = view.dashboard?.gateway?.gatewayState === 'running';
+  const userProfileEnabled = Boolean(summary?.userProfileEnabled);
+  const slotCount = view.items.length || 3;
+  const focusTone = memoryEnabled && warnings.length === 0 ? 'good' : 'warn';
+  const focusTitle = !view.items.length
+    ? '先准备记忆槽位'
+    : warnings.length > 0
+      ? `${currentLabel} 还有几处需要收口`
+      : `${currentLabel} 已经可以继续维护`;
+  const focusDescription = !view.items.length
+    ? '默认层先只保留记忆是否接入、当前槽位和下一步去向。完整编辑区与插件治理继续放到工作台。'
+    : warnings.length > 0
+      ? '默认层只帮你判断先处理 Provider、预算还是运行链路。编辑器、原始输出和插件动作继续下沉到工作台。'
+      : '当前记忆链路已经比较稳定。默认层不再直接展开槽位列表、编辑器、插件区和原始输出。';
+  const budgetLabel = budgetRemaining == null ? '无限制' : `剩余 ${budgetRemaining}`;
+  const nextStep = warnings.length > 0 ? '先看工作台或诊断页' : '进入工作台继续编辑';
+
+  return `
+    <div class="page-header page-header-compact">
+      <div class="panel-title-row">
+        <h1 class="page-title">记忆工作台</h1>
+      </div>
+      <p class="page-desc">默认页只保留记忆接入判断和高频入口，详细编辑与治理继续放到下一层。</p>
+    </div>
+
+    ${renderSurfaceTabs(view)}
+
+    <section class="workspace-summary-strip workspace-summary-strip-dense">
+      <section class="summary-mini-card">
+        <span class="summary-mini-label">当前实例</span>
+        <strong class="summary-mini-value">${escapeHtml(view.profile)}</strong>
+        <span class="summary-mini-meta">${escapeHtml(`${memoryEnabled ? '记忆开启' : '记忆关闭'} · ${gatewayRunning ? '网关运行中' : '网关未运行'}`)}</span>
+      </section>
+      <section class="summary-mini-card">
+        <span class="summary-mini-label">运行 Provider</span>
+        <strong class="summary-mini-value">${escapeHtml(runtimeProvider)}</strong>
+        <span class="summary-mini-meta">${escapeHtml(summary?.memoryProvider === runtimeProvider ? '配置与运行态已对齐' : `配置 ${summary?.memoryProvider || 'builtin-file'}，运行 ${runtimeProvider}`)}</span>
+      </section>
+      <section class="summary-mini-card">
+        <span class="summary-mini-label">槽位覆盖</span>
+        <strong class="summary-mini-value">${escapeHtml(`${readyCount}/${slotCount}`)}</strong>
+        <span class="summary-mini-meta">${escapeHtml(`当前焦点 ${currentLabel} · 用户画像 ${userProfileEnabled ? '开启' : '关闭'}`)}</span>
+      </section>
+      <section class="summary-mini-card">
+        <span class="summary-mini-label">当前状态</span>
+        <strong class="summary-mini-value">${escapeHtml(warnings.length === 0 ? '当前稳定' : `${warnings.length} 条提醒`)}</strong>
+        <span class="summary-mini-meta">${escapeHtml(nextStep)}</span>
+      </section>
+    </section>
+
+    <section class="dashboard-focus-shell">
+      <section class="dashboard-focus-card dashboard-focus-card-${focusTone}">
+        <div class="dashboard-focus-head">
+          <div class="dashboard-focus-copy">
+            <span class="dashboard-focus-kicker">${escapeHtml(current?.eyebrow || '记忆焦点')}</span>
+            <h2 class="dashboard-focus-title">${escapeHtml(focusTitle)}</h2>
+            <p class="dashboard-focus-desc">${escapeHtml(focusDescription)}</p>
+          </div>
+          <div class="dashboard-focus-pills">
+            ${pillHtml(memoryEnabled ? '记忆开启' : '记忆关闭', memoryEnabled ? 'good' : 'warn')}
+            ${pillHtml(gatewayRunning ? '网关运行中' : '网关未运行', gatewayRunning ? 'good' : 'warn')}
+            ${pillHtml(warnings.length === 0 ? '当前稳定' : `${warnings.length} 条提醒`, warnings.length === 0 ? 'good' : 'warn')}
+          </div>
+        </div>
+        <div class="dashboard-signal-grid">
+          <section class="dashboard-signal-card">
+            <span class="dashboard-signal-label">当前槽位</span>
+            <strong class="dashboard-signal-value">${escapeHtml(currentLabel)}</strong>
+            <span class="dashboard-signal-meta">${escapeHtml(currentPath)}</span>
+          </section>
+          <section class="dashboard-signal-card">
+            <span class="dashboard-signal-label">字符预算</span>
+            <strong class="dashboard-signal-value">${escapeHtml(budgetLabel)}</strong>
+            <span class="dashboard-signal-meta">${escapeHtml(selected?.exists ? '当前槽位已落盘' : '当前槽位尚未落盘')}</span>
+          </section>
+          <section class="dashboard-signal-card">
+            <span class="dashboard-signal-label">运行链路</span>
+            <strong class="dashboard-signal-value">${escapeHtml(runtimeProvider)}</strong>
+            <span class="dashboard-signal-meta">${escapeHtml(`${view.dashboard?.counts?.sessions ?? 0} 个会话 · 插件 ${view.extensions?.plugins?.installedCount ?? 0} 个`)}</span>
+          </section>
+          <section class="dashboard-signal-card">
+            <span class="dashboard-signal-label">用户画像</span>
+            <strong class="dashboard-signal-value">${escapeHtml(userProfileEnabled ? '已开启' : '已关闭')}</strong>
+            <span class="dashboard-signal-meta">${escapeHtml(memoryEnabled ? '可继续参与记忆闭环' : '关闭后不会稳定注入运行态')}</span>
+          </section>
+        </div>
+        <div class="dashboard-focus-actions">
+          ${buttonHtml({ action: 'open-memory-workbench', label: '进入工作台', kind: 'primary' })}
+          ${buttonHtml({ action: 'memory-setup', label: '调整 Provider / 开关', disabled: Boolean(view.runningAction) || Boolean(view.runningDiagnostic) || Boolean(view.saving) })}
+          ${buttonHtml({ action: 'goto-diagnostics', label: '系统诊断' })}
+          ${buttonHtml({ action: 'refresh', label: view.refreshing ? '同步中…' : '刷新', disabled: Boolean(view.refreshing) || Boolean(view.runningAction) || Boolean(view.runningDiagnostic) || Boolean(view.saving) })}
+        </div>
+      </section>
+
+      <aside class="dashboard-jump-panel">
+        <div class="workspace-main-header">
+          <div>
+            <strong>继续去哪里</strong>
+            <p class="workspace-main-copy">默认层只保留 4 个高频入口，编辑器、插件治理和原始输出继续放到工作台。</p>
+          </div>
+          ${pillHtml('常用 4 项', 'neutral')}
+        </div>
+        <div class="dashboard-jump-grid">
+          ${launcherCardHtml({
+            action: 'open-memory-workbench',
+            kicker: '编辑',
+            title: '继续写当前槽位',
+            meta: `${currentLabel} · ${budgetLabel}`,
+            tone: selected?.exists ? 'good' : 'warn',
+          })}
+          ${launcherCardHtml({
+            action: 'memory-setup',
+            kicker: '配置',
+            title: 'Provider 与记忆开关',
+            meta: `${summary?.memoryProvider || 'builtin-file'} · ${memoryEnabled ? '开启' : '关闭'}`,
+            tone: memoryEnabled ? 'neutral' : 'warn',
+          })}
+          ${launcherCardHtml({
+            action: 'plugins-panel',
+            kicker: '扩展',
+            title: '插件与扩展',
+            meta: `${view.extensions?.plugins?.installedCount ?? 0} 个插件 · 继续治理运行时能力`,
+          })}
+          ${launcherCardHtml({
+            action: 'goto-diagnostics',
+            kicker: '排障',
+            title: '诊断与收口',
+            meta: warnings[0] || '进入诊断页继续排查运行偏差',
+            tone: warnings.length > 0 ? 'warn' : 'neutral',
+          })}
+        </div>
+      </aside>
+    </section>
+
+    <section class="config-section">
+      <div class="config-section-header">
+        <div>
+          <h2 class="config-section-title">当前边界</h2>
+          <p class="config-section-desc">默认层只保留槽位选择和边界摘要，不再直接堆出编辑器与插件动作区。</p>
+        </div>
+      </div>
+      <div class="compact-overview-grid compact-overview-grid-dense">
+        <section class="shell-card shell-card-dense">
+          <div class="shell-card-header">
+            <strong>当前槽位</strong>
+            ${pillHtml(selected?.exists ? '已落盘' : '未落盘', selected?.exists ? 'good' : 'warn')}
+          </div>
+          <label class="field-stack">
+            <span>槽位</span>
+            <select class="select-input" id="memory-focus-select" ${view.items.length === 0 ? 'disabled' : ''}>
+              ${
+                view.items.length
+                  ? view.items.map((item) => `
+                    <option value="${escapeHtml(item.key)}" ${item.key === view.selectedKey ? 'selected' : ''}>
+                      ${escapeHtml(item.label)}
+                    </option>
+                  `).join('')
+                  : '<option value="">暂无槽位</option>'
+              }
+            </select>
+          </label>
+          ${keyValueRowsHtml([
+            { label: '路径', value: currentPath },
+            { label: 'Provider', value: `${summary?.memoryProvider || 'builtin-file'} / ${runtimeProvider}` },
+            { label: '下一步', value: nextStep },
+          ])}
+        </section>
+        <section class="shell-card shell-card-dense shell-card-muted">
+          <div class="shell-card-header">
+            <strong>系统边界</strong>
+            ${pillHtml(warnings.length === 0 ? '当前稳定' : `${warnings.length} 条提醒`, warnings.length === 0 ? 'good' : 'warn')}
+          </div>
+          ${keyValueRowsHtml([
+            { label: '网关', value: view.dashboard?.gateway?.gatewayState || '未检测到' },
+            { label: '会话数', value: String(view.dashboard?.counts?.sessions ?? 0) },
+            { label: '用户画像', value: userProfileEnabled ? '已开启' : '已关闭' },
+            { label: '插件数', value: String(view.extensions?.plugins?.installedCount ?? 0) },
+          ])}
+          ${
+            warnings.length > 0
+              ? `<div class="warning-stack top-gap">${warnings.slice(0, 2).map((warning) => `<div class="warning-item">${escapeHtml(warning)}</div>`).join('')}</div>`
+              : ''
+          }
+        </section>
+      </div>
+    </section>
+  `;
+}
+
+function renderWorkbenchSurface(view, state) {
+  return `
+    <div class="page-header page-header-compact">
+      <div class="panel-title-row">
+        <h1 class="page-title">记忆工作台</h1>
+      </div>
+      <p class="page-desc">需要具体编辑槽位、做保存校验、治理插件或查看原始输出时，再进入这一层。</p>
+    </div>
+
+    ${renderSurfaceTabs(view)}
+    ${renderMemoryWorkbench(view, state, { includeHeader: false })}
+  `;
+}
+
 function renderPage(view) {
   if (view.destroyed) {
     return;
@@ -152,7 +406,9 @@ function renderPage(view) {
     logName: 'agent',
   });
 
-  view.page.innerHTML = renderMemoryWorkbench(view, state);
+  view.page.innerHTML = (view.surfaceView || 'focus') === 'workbench'
+    ? renderWorkbenchSurface(view, state)
+    : renderFocusSurface(view, state);
 
   bindEvents(view, { configIntent, diagnosticsIntent });
 
@@ -386,8 +642,26 @@ function syncWithPanelState(view) {
 }
 
 function bindEvents(view, intents) {
+  const focusSelect = view.page.querySelector('#memory-focus-select');
   const pluginInput = view.page.querySelector('#memory-plugin-input');
   const editor = view.page.querySelector('#memory-editor');
+
+  view.page.querySelectorAll('[data-memory-surface]').forEach((element) => {
+    element.onclick = () => {
+      const nextView = element.getAttribute('data-memory-surface');
+      if (!nextView || nextView === view.surfaceView) {
+        return;
+      }
+      view.surfaceView = nextView;
+      renderPage(view);
+    };
+  });
+
+  if (focusSelect) {
+    focusSelect.onchange = (event) => {
+      void loadDetail(view, event.target.value);
+    };
+  }
 
   if (pluginInput) {
     pluginInput.oninput = (event) => {
@@ -419,6 +693,10 @@ function bindEvents(view, intents) {
       switch (action) {
         case 'refresh':
           await loadData(view);
+          return;
+        case 'open-memory-workbench':
+          view.surfaceView = 'workbench';
+          renderPage(view);
           return;
         case 'memory-status':
           await runMemoryStatus(view);
@@ -530,6 +808,7 @@ export async function render() {
     runningDiagnostic: false,
     saving: null,
     selectedKey: 'soul',
+    surfaceView: 'focus',
     unsubscribe: null,
   };
 

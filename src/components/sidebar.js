@@ -93,7 +93,6 @@ export function renderSidebar(el) {
           <button type="button" class="sidebar-section-trigger" data-group="${group.label}">
             <span class="sidebar-section-head">
               <span class="sidebar-section-label">${group.label}</span>
-              <span class="sidebar-section-meta">${group.items.map((item) => item.label).join(' / ')}</span>
             </span>
             <span class="sidebar-section-count">${group.items.length}</span>
           </button>
@@ -109,7 +108,6 @@ export function renderSidebar(el) {
                   <span class="nav-item-icon">${ICONS[item.icon] ?? ''}</span>
                   <span class="nav-item-copy">
                     <strong>${item.label}</strong>
-                    <small>${item.eyebrow}</small>
                   </span>
                 </button>
               `).join('')}

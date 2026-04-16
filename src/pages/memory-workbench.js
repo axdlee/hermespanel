@@ -215,7 +215,8 @@ export function deriveMemoryWorkbenchState(view) {
   };
 }
 
-export function renderMemoryWorkbench(view, state) {
+export function renderMemoryWorkbench(view, state, options = {}) {
+  const { includeHeader = true } = options;
   const {
     actionBusy,
     budgetRemaining,
@@ -232,13 +233,19 @@ export function renderMemoryWorkbench(view, state) {
   } = state;
 
   return `
-    <div class="page-header page-header-compact">
-      <div class="panel-title-row">
-        <h1 class="page-title">记忆工作台</h1>
-        ${infoTipHtml('主区只保留槽位、编辑器、Provider 和校验动作。说明信息尽量后置，不再抢编辑区和闭环动作的位置。')}
-      </div>
-      <p class="page-desc">编辑槽位、核对 Provider，并把运行态偏差收口到一个工作台里。</p>
-    </div>
+    ${
+      includeHeader
+        ? `
+          <div class="page-header page-header-compact">
+            <div class="panel-title-row">
+              <h1 class="page-title">记忆工作台</h1>
+              ${infoTipHtml('主区只保留槽位、编辑器、Provider 和校验动作。说明信息尽量后置，不再抢编辑区和闭环动作的位置。')}
+            </div>
+            <p class="page-desc">编辑槽位、核对 Provider，并把运行态偏差收口到一个工作台里。</p>
+          </div>
+        `
+        : ''
+    }
 
     <section class="workspace-summary-strip workspace-summary-strip-dense">
       <section class="summary-mini-card">

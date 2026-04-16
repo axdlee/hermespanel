@@ -1140,6 +1140,61 @@ export function currentEditorBadge(view) {
   }
 }
 
+const CONTROL_WORKSPACE_GROUPS = [
+  {
+    key: 'model',
+    label: '模型',
+    sectionId: 'model-governance',
+    sections: ['model-governance', 'model-presets', 'model-detail'],
+    description: '先把 provider、默认模型、endpoint 和上下文引擎拉稳。',
+  },
+  {
+    key: 'toolsets',
+    label: '能力面',
+    sectionId: 'toolsets-presets',
+    sections: ['toolsets-presets', 'toolsets-detail'],
+    description: '只看 toolsets 与平台绑定，不把其他设置掺进来。',
+  },
+  {
+    key: 'memory',
+    label: '记忆',
+    sectionId: 'memory-presets',
+    sections: ['memory-presets', 'memory-detail'],
+    description: '专注记忆 provider、画像开关和外部 skills 目录。',
+  },
+  {
+    key: 'runtime',
+    label: '终端',
+    sectionId: 'runtime-presets',
+    sections: ['runtime-presets', 'runtime-detail'],
+    description: '终端后端、审批模式和 Discord 路由统一收在这一组。',
+  },
+];
+
+const CREDENTIAL_WORKSPACE_GROUPS = [
+  {
+    key: 'provider',
+    label: '模型密钥',
+    sectionId: 'provider-credentials',
+    sections: ['provider-credentials'],
+    description: '只看模型与 provider 相关密钥。',
+  },
+  {
+    key: 'channel',
+    label: '通道',
+    sectionId: 'channel-credentials',
+    sections: ['channel-credentials', 'channel-presets'],
+    description: '网关 token 和消息通道参数单独聚焦，不和模型密钥混排。',
+  },
+  {
+    key: 'runtime',
+    label: '运行变量',
+    sectionId: 'runtime-env',
+    sections: ['runtime-env'],
+    description: '终端和浏览器运行时变量单独放在这里。',
+  },
+];
+
 function approvalModeLabel(value) {
   switch (value) {
     case 'auto':
@@ -1183,6 +1238,32 @@ function disclosureHtml({ sectionId, open = false, eyebrow, title, metaHtml = ''
         ${body}
       </div>
     </details>
+  `;
+}
+
+function resolveWorkspaceGroup(groups, activeSection, fallbackKey) {
+  const normalized = String(activeSection ?? '').trim();
+  if (!normalized) {
+    return groups.find((group) => group.key === fallbackKey) ?? groups[0];
+  }
+  return groups.find((group) => group.sections.includes(normalized)) ?? groups.find((group) => group.key === fallbackKey) ?? groups[0];
+}
+
+function workspaceGroupTabs(tab, groups, activeGroupKey) {
+  return `
+    <div class="tab-bar tab-bar-dense">
+      ${groups.map((group) => `
+        <button
+          type="button"
+          class="tab ${group.key === activeGroupKey ? 'active' : ''}"
+          data-action="focus-workspace"
+          data-tab="${escapeHtml(tab)}"
+          data-section="${escapeHtml(group.sectionId)}"
+        >
+          ${escapeHtml(group.label)}
+        </button>
+      `).join('')}
+    </div>
   `;
 }
 
@@ -1374,6 +1455,157 @@ export function renderStructuredControls(view) {
   const draft = view.controlDraft ?? cloneWorkspace();
   const normalizedBindings = normalizePlatformBindings(draft.platformToolsets);
   const memoryPresets = memoryProviderPresets(view);
+  const activeGroup = resolveWorkspaceGroup(CONTROL_WORKSPACE_GROUPS, view.activeWorkspaceSection, 'model');
+  const activeGroupContent = activeGroup.key === 'model'
+    ? `
+      <section class="workspace-section-anchor" data-workspace-section="model-governance">
+        ${renderModelGovernanceWorkbench(view, draft)}
+      </section>
+      ${disclosureHtml({
+        sectionId: 'model-presets',
+        open: true,
+        eyebrow: '模型',
+        title: '模型 / Provider',
+        metaHtml: `${pillHtml(draft.modelProvider || '待补 provider', draft.modelProvider ? 'good' : 'warn')}${pillHtml(draft.streamingEnabled ? '流式输出' : '静态输出', draft.streamingEnabled ? 'neutral' : 'warn')}`,
+        body: `
+          ${renderProviderPresetGrid(view, draft)}
+          <div class="form-grid">
+            <label class="field-stack">
+              <span>默认模型</span>
+              <input class="search-input" id="control-model-default" value="${escapeHtml(draft.modelDefault)}" placeholder="gpt-5.4">
+            </label>
+            <label class="field-stack">
+              <span>Provider</span>
+              <input class="search-input" id="control-model-provider" value="${escapeHtml(draft.modelProvider)}" placeholder="openai / anthropic / custom">
+            </label>
+            <label class="field-stack">
+              <span>Base URL</span>
+              <input class="search-input" id="control-model-base-url" value="${escapeHtml(draft.modelBaseUrl)}" placeholder="https://api.example.com/v1">
+            </label>
+            <label class="field-stack">
+              <span>上下文引擎</span>
+              <input class="search-input" id="control-context-engine" value="${escapeHtml(draft.contextEngine)}" placeholder="compressor">
+            </label>
+          </div>
+          <label class="field-stack">
+            <span>人格 / 风格</span>
+            <input class="search-input" id="control-personality" value="${escapeHtml(draft.personality)}" placeholder="helpful / technical / concise">
+          </label>
+          <div class="checkbox-row top-gap">
+            <label>
+              <input type="checkbox" id="control-streaming-enabled" ${draft.streamingEnabled ? 'checked' : ''}>
+              <span>启用流式输出</span>
+            </label>
+          </div>
+        `,
+      })}
+    `
+    : activeGroup.key === 'toolsets'
+      ? disclosureHtml({
+        sectionId: 'toolsets-presets',
+        open: true,
+        eyebrow: '能力集',
+        title: '能力面 / Toolsets',
+        metaHtml: `${pillHtml(draft.toolsets.length ? `${draft.toolsets.length} 组` : '待补齐', draft.toolsets.length ? 'good' : 'warn')}${pillHtml(normalizedBindings.length ? `${normalizedBindings.length} 平台` : '无平台绑定', normalizedBindings.length ? 'neutral' : 'warn')}`,
+        body: `
+          ${renderToolsetPresetGrid(draft)}
+          ${renderTopLevelToolsetManager(view, draft)}
+          ${renderPlatformBindingManager(view, draft)}
+        `,
+      })
+      : activeGroup.key === 'memory'
+        ? disclosureHtml({
+          sectionId: 'memory-presets',
+          open: true,
+          eyebrow: '记忆',
+          title: '记忆 / 外部 Skills',
+          metaHtml: `${pillHtml(draft.memoryEnabled ? '记忆开启' : '记忆关闭', draft.memoryEnabled ? 'good' : 'warn')}${pillHtml(draft.userProfileEnabled ? '画像开启' : '画像关闭', draft.userProfileEnabled ? 'neutral' : 'warn')}${pillHtml(draft.skillsExternalDirs.length ? `${draft.skillsExternalDirs.length} 外部目录` : '无外部目录', draft.skillsExternalDirs.length ? 'neutral' : 'warn')}`,
+          body: `
+            ${renderMemoryPresetGrid(view, memoryPresets)}
+            <div class="form-grid">
+              <label class="field-stack">
+                <span>记忆 Provider</span>
+                <input class="search-input" id="control-memory-provider" value="${escapeHtml(draft.memoryProvider)}" placeholder="留空表示内置文件">
+              </label>
+              <label class="field-stack">
+                <span>Memory 字符上限</span>
+                <input class="search-input" id="control-memory-char-limit" value="${escapeHtml(draft.memoryCharLimit ?? '')}" placeholder="2200">
+              </label>
+              <label class="field-stack">
+                <span>User 字符上限</span>
+                <input class="search-input" id="control-user-char-limit" value="${escapeHtml(draft.userCharLimit ?? '')}" placeholder="1375">
+              </label>
+            </div>
+            <div class="checkbox-row">
+              <label>
+                <input type="checkbox" id="control-memory-enabled" ${draft.memoryEnabled ? 'checked' : ''}>
+                <span>启用记忆</span>
+              </label>
+              <label>
+                <input type="checkbox" id="control-user-profile-enabled" ${draft.userProfileEnabled ? 'checked' : ''}>
+                <span>启用用户画像</span>
+              </label>
+            </div>
+            ${renderSkillsDirectoryManager(view, draft)}
+          `,
+        })
+        : disclosureHtml({
+          sectionId: 'runtime-presets',
+          open: true,
+          eyebrow: '运行时',
+          title: '运行时 / 终端 / Discord 路由',
+          metaHtml: `${pillHtml(draft.terminalBackend || '未配后端', draft.terminalBackend ? 'good' : 'warn')}${pillHtml(approvalModeLabel(draft.approvalsMode), 'neutral')}`,
+          body: `
+            ${renderTerminalPresetGrid(view)}
+            <div class="form-grid">
+              <label class="field-stack">
+                <span>终端后端</span>
+                <input class="search-input" id="control-terminal-backend" value="${escapeHtml(draft.terminalBackend)}" placeholder="local / docker / modal">
+              </label>
+              <label class="field-stack">
+                <span>终端工作目录</span>
+                <input class="search-input" id="control-terminal-cwd" value="${escapeHtml(draft.terminalCwd)}" placeholder=".">
+              </label>
+              <label class="field-stack">
+                <span>审批模式</span>
+                <select class="select-input" id="control-approvals-mode">
+                  ${['manual', 'auto', 'disabled'].map((item) => `
+                    <option value="${item}" ${draft.approvalsMode === item ? 'selected' : ''}>${approvalModeLabel(item)}</option>
+                  `).join('')}
+                </select>
+              </label>
+              <label class="field-stack">
+                <span>审批超时</span>
+                <input class="search-input" id="control-approvals-timeout" value="${escapeHtml(draft.approvalsTimeout ?? '')}" placeholder="60">
+              </label>
+            </div>
+            <div class="checkbox-row">
+              <label>
+                <input type="checkbox" id="control-discord-require-mention" ${draft.discordRequireMention ? 'checked' : ''}>
+                <span>Discord 需要 @ 提及</span>
+              </label>
+              <label>
+                <input type="checkbox" id="control-discord-auto-thread" ${draft.discordAutoThread ? 'checked' : ''}>
+                <span>自动开线程</span>
+              </label>
+              <label>
+                <input type="checkbox" id="control-discord-reactions" ${draft.discordReactions ? 'checked' : ''}>
+                <span>启用状态反应</span>
+              </label>
+            </div>
+            <div class="form-grid">
+              <label class="field-stack">
+                <span>自由响应频道</span>
+                <input class="search-input" id="control-discord-free-response" value="${escapeHtml(draft.discordFreeResponseChannels)}" placeholder="dev,ops">
+              </label>
+              <label class="field-stack">
+                <span>允许频道</span>
+                <input class="search-input" id="control-discord-allowed" value="${escapeHtml(draft.discordAllowedChannels)}" placeholder="general,alerts">
+              </label>
+            </div>
+          `,
+        });
+
   return `
     <div class="page-stack">
       <section class="panel panel-nested">
@@ -1414,152 +1646,16 @@ export function renderStructuredControls(view) {
           </section>
         </section>
 
-        <section class="workspace-section-anchor" data-workspace-section="model-governance">
-          ${renderModelGovernanceWorkbench(view, draft)}
-        </section>
-
-        <div class="compact-disclosure-stack">
-          ${disclosureHtml({
-            sectionId: 'model-presets',
-            open: disclosureOpen(view, ['model-governance', 'model-presets', 'model-detail'], true),
-            eyebrow: '模型',
-            title: '模型 / Provider',
-            metaHtml: `${pillHtml(draft.modelProvider || '待补 provider', draft.modelProvider ? 'good' : 'warn')}${pillHtml(draft.streamingEnabled ? '流式输出' : '静态输出', draft.streamingEnabled ? 'neutral' : 'warn')}`,
-            body: `
-              ${renderProviderPresetGrid(view, draft)}
-              <div class="form-grid">
-                <label class="field-stack">
-                  <span>默认模型</span>
-                  <input class="search-input" id="control-model-default" value="${escapeHtml(draft.modelDefault)}" placeholder="gpt-5.4">
-                </label>
-                <label class="field-stack">
-                  <span>Provider</span>
-                  <input class="search-input" id="control-model-provider" value="${escapeHtml(draft.modelProvider)}" placeholder="openai / anthropic / custom">
-                </label>
-                <label class="field-stack">
-                  <span>Base URL</span>
-                  <input class="search-input" id="control-model-base-url" value="${escapeHtml(draft.modelBaseUrl)}" placeholder="https://api.example.com/v1">
-                </label>
-                <label class="field-stack">
-                  <span>上下文引擎</span>
-                  <input class="search-input" id="control-context-engine" value="${escapeHtml(draft.contextEngine)}" placeholder="compressor">
-                </label>
-              </div>
-              <label class="field-stack">
-                <span>人格 / 风格</span>
-                <input class="search-input" id="control-personality" value="${escapeHtml(draft.personality)}" placeholder="helpful / technical / concise">
-              </label>
-              <div class="checkbox-row top-gap">
-                <label>
-                  <input type="checkbox" id="control-streaming-enabled" ${draft.streamingEnabled ? 'checked' : ''}>
-                  <span>启用流式输出</span>
-                </label>
-              </div>
-            `,
-          })}
-          ${disclosureHtml({
-            sectionId: 'toolsets-presets',
-            open: disclosureOpen(view, ['toolsets-detail', 'toolsets-presets']),
-            eyebrow: '能力集',
-            title: '能力面 / Toolsets',
-            metaHtml: `${pillHtml(draft.toolsets.length ? `${draft.toolsets.length} 组` : '待补齐', draft.toolsets.length ? 'good' : 'warn')}${pillHtml(normalizedBindings.length ? `${normalizedBindings.length} 平台` : '无平台绑定', normalizedBindings.length ? 'neutral' : 'warn')}`,
-            body: `
-              ${renderToolsetPresetGrid(draft)}
-              ${renderTopLevelToolsetManager(view, draft)}
-              ${renderPlatformBindingManager(view, draft)}
-            `,
-          })}
-          ${disclosureHtml({
-            sectionId: 'memory-presets',
-            open: disclosureOpen(view, ['memory-detail', 'memory-presets']),
-            eyebrow: '记忆',
-            title: '记忆 / 外部 Skills',
-            metaHtml: `${pillHtml(draft.memoryEnabled ? '记忆开启' : '记忆关闭', draft.memoryEnabled ? 'good' : 'warn')}${pillHtml(draft.userProfileEnabled ? '画像开启' : '画像关闭', draft.userProfileEnabled ? 'neutral' : 'warn')}${pillHtml(draft.skillsExternalDirs.length ? `${draft.skillsExternalDirs.length} 外部目录` : '无外部目录', draft.skillsExternalDirs.length ? 'neutral' : 'warn')}`,
-            body: `
-              ${renderMemoryPresetGrid(view, memoryPresets)}
-              <div class="form-grid">
-                <label class="field-stack">
-                  <span>记忆 Provider</span>
-                  <input class="search-input" id="control-memory-provider" value="${escapeHtml(draft.memoryProvider)}" placeholder="留空表示内置文件">
-                </label>
-                <label class="field-stack">
-                  <span>Memory 字符上限</span>
-                  <input class="search-input" id="control-memory-char-limit" value="${escapeHtml(draft.memoryCharLimit ?? '')}" placeholder="2200">
-                </label>
-                <label class="field-stack">
-                  <span>User 字符上限</span>
-                  <input class="search-input" id="control-user-char-limit" value="${escapeHtml(draft.userCharLimit ?? '')}" placeholder="1375">
-                </label>
-              </div>
-              <div class="checkbox-row">
-                <label>
-                  <input type="checkbox" id="control-memory-enabled" ${draft.memoryEnabled ? 'checked' : ''}>
-                  <span>启用记忆</span>
-                </label>
-                <label>
-                  <input type="checkbox" id="control-user-profile-enabled" ${draft.userProfileEnabled ? 'checked' : ''}>
-                  <span>启用用户画像</span>
-                </label>
-              </div>
-              ${renderSkillsDirectoryManager(view, draft)}
-            `,
-          })}
-          ${disclosureHtml({
-            sectionId: 'runtime-presets',
-            open: disclosureOpen(view, ['runtime-detail', 'runtime-presets']),
-            eyebrow: '运行时',
-            title: '运行时 / 终端 / Discord 路由',
-            metaHtml: `${pillHtml(draft.terminalBackend || '未配后端', draft.terminalBackend ? 'good' : 'warn')}${pillHtml(approvalModeLabel(draft.approvalsMode), 'neutral')}`,
-            body: `
-              ${renderTerminalPresetGrid(view)}
-              <div class="form-grid">
-                <label class="field-stack">
-                  <span>终端后端</span>
-                  <input class="search-input" id="control-terminal-backend" value="${escapeHtml(draft.terminalBackend)}" placeholder="local / docker / modal">
-                </label>
-                <label class="field-stack">
-                  <span>终端工作目录</span>
-                  <input class="search-input" id="control-terminal-cwd" value="${escapeHtml(draft.terminalCwd)}" placeholder=".">
-                </label>
-                <label class="field-stack">
-                  <span>审批模式</span>
-                  <select class="select-input" id="control-approvals-mode">
-                    ${['manual', 'auto', 'disabled'].map((item) => `
-                      <option value="${item}" ${draft.approvalsMode === item ? 'selected' : ''}>${approvalModeLabel(item)}</option>
-                    `).join('')}
-                  </select>
-                </label>
-                <label class="field-stack">
-                  <span>审批超时</span>
-                  <input class="search-input" id="control-approvals-timeout" value="${escapeHtml(draft.approvalsTimeout ?? '')}" placeholder="60">
-                </label>
-              </div>
-              <div class="checkbox-row">
-                <label>
-                  <input type="checkbox" id="control-discord-require-mention" ${draft.discordRequireMention ? 'checked' : ''}>
-                  <span>Discord 需要 @ 提及</span>
-                </label>
-                <label>
-                  <input type="checkbox" id="control-discord-auto-thread" ${draft.discordAutoThread ? 'checked' : ''}>
-                  <span>自动开线程</span>
-                </label>
-                <label>
-                  <input type="checkbox" id="control-discord-reactions" ${draft.discordReactions ? 'checked' : ''}>
-                  <span>启用状态反应</span>
-                </label>
-              </div>
-              <div class="form-grid">
-                <label class="field-stack">
-                  <span>自由响应频道</span>
-                  <input class="search-input" id="control-discord-free-response" value="${escapeHtml(draft.discordFreeResponseChannels)}" placeholder="dev,ops">
-                </label>
-                <label class="field-stack">
-                  <span>允许频道</span>
-                  <input class="search-input" id="control-discord-allowed" value="${escapeHtml(draft.discordAllowedChannels)}" placeholder="general,alerts">
-                </label>
-              </div>
-            `,
-          })}
+        <div class="workspace-main-header">
+          <div>
+            <strong>当前只看这一组</strong>
+            <p class="workspace-main-copy">${escapeHtml(activeGroup.description)}</p>
+          </div>
+          ${pillHtml(activeGroup.label, 'neutral')}
+        </div>
+        ${workspaceGroupTabs('control', CONTROL_WORKSPACE_GROUPS, activeGroup.key)}
+        <div class="compact-disclosure-stack top-gap">
+          ${activeGroupContent}
         </div>
       </section>
     </div>
@@ -1588,6 +1684,134 @@ export function renderStructuredEnvControls(view) {
     draft.discordHomeChannel,
     draft.discordReplyToMode,
   ].filter((value) => value.trim()).length;
+  const activeGroup = resolveWorkspaceGroup(CREDENTIAL_WORKSPACE_GROUPS, view.activeWorkspaceSection, 'provider');
+  const activeGroupContent = activeGroup.key === 'provider'
+    ? disclosureHtml({
+      sectionId: 'provider-credentials',
+      open: true,
+      eyebrow: '模型凭证',
+      title: '模型与 Provider 密钥',
+      metaHtml: `${pillHtml(credentialsCount ? `${credentialsCount} 项已填` : '待补齐', credentialsCount ? 'good' : 'warn')}`,
+      body: `
+        <div class="form-grid">
+          <label class="field-stack">
+            <span>OpenAI API Key</span>
+            <input class="search-input" id="env-openai-api-key" value="${escapeHtml(draft.openaiApiKey)}" placeholder="sk-..." spellcheck="false" autocomplete="off">
+          </label>
+          <label class="field-stack">
+            <span>Anthropic API Key</span>
+            <input class="search-input" id="env-anthropic-api-key" value="${escapeHtml(draft.anthropicApiKey)}" placeholder="sk-ant-..." spellcheck="false" autocomplete="off">
+          </label>
+          <label class="field-stack">
+            <span>OpenRouter API Key</span>
+            <input class="search-input" id="env-openrouter-api-key" value="${escapeHtml(draft.openrouterApiKey)}" placeholder="sk-or-..." spellcheck="false" autocomplete="off">
+          </label>
+          <label class="field-stack">
+            <span>Google API Key</span>
+            <input class="search-input" id="env-google-api-key" value="${escapeHtml(draft.googleApiKey)}" placeholder="AIza..." spellcheck="false" autocomplete="off">
+          </label>
+          <label class="field-stack">
+            <span>HF Token</span>
+            <input class="search-input" id="env-hf-token" value="${escapeHtml(draft.hfToken)}" placeholder="hf_..." spellcheck="false" autocomplete="off">
+          </label>
+          <label class="field-stack">
+            <span>AnyRouter 2 API Key</span>
+            <input class="search-input" id="env-anyrouter2-api-key" value="${escapeHtml(draft.anyrouter2ApiKey)}" placeholder="填写 AnyRouter 2 token" spellcheck="false" autocomplete="off">
+          </label>
+          <label class="field-stack">
+            <span>CRS API Key</span>
+            <input class="search-input" id="env-crs-api-key" value="${escapeHtml(draft.crsApiKey)}" placeholder="填写 CRS token" spellcheck="false" autocomplete="off">
+          </label>
+          <label class="field-stack">
+            <span>SiliconFlow API Key</span>
+            <input class="search-input" id="env-siliconflow-api-key" value="${escapeHtml(draft.siliconflowApiKey)}" placeholder="填写 SiliconFlow token" spellcheck="false" autocomplete="off">
+          </label>
+        </div>
+      `,
+    })
+    : activeGroup.key === 'channel'
+      ? disclosureHtml({
+        sectionId: 'channel-credentials',
+        open: true,
+        eyebrow: '通道',
+        title: '网关与消息通道',
+        metaHtml: `${pillHtml(draft.hermesGatewayToken ? '网关 token 已填' : '网关 token 待补', draft.hermesGatewayToken ? 'good' : 'warn')}${pillHtml(channelCount ? `${channelCount} 项通道参数` : '通道参数待补', channelCount ? 'neutral' : 'warn')}`,
+        body: `
+          ${renderChannelPresetGrid(view)}
+          <div class="form-grid">
+            <label class="field-stack">
+              <span>Hermes Gateway Token</span>
+              <input class="search-input" id="env-hermes-gateway-token" value="${escapeHtml(draft.hermesGatewayToken)}" placeholder="gateway token" spellcheck="false" autocomplete="off">
+            </label>
+            <label class="field-stack">
+              <span>Telegram Bot Token</span>
+              <input class="search-input" id="env-telegram-bot-token" value="${escapeHtml(draft.telegramBotToken)}" placeholder="telegram bot token" spellcheck="false" autocomplete="off">
+            </label>
+            <label class="field-stack">
+              <span>Telegram Home Channel</span>
+              <input class="search-input" id="env-telegram-home-channel" value="${escapeHtml(draft.telegramHomeChannel)}" placeholder="home channel / chat id">
+            </label>
+            <label class="field-stack">
+              <span>Telegram Reply Mode</span>
+              <input class="search-input" id="env-telegram-reply-to-mode" value="${escapeHtml(draft.telegramReplyToMode)}" placeholder="inline / thread / reply">
+            </label>
+            <label class="field-stack">
+              <span>Discord Bot Token</span>
+              <input class="search-input" id="env-discord-bot-token" value="${escapeHtml(draft.discordBotToken)}" placeholder="discord bot token" spellcheck="false" autocomplete="off">
+            </label>
+            <label class="field-stack">
+              <span>Discord Home Channel</span>
+              <input class="search-input" id="env-discord-home-channel" value="${escapeHtml(draft.discordHomeChannel)}" placeholder="channel id / alias">
+            </label>
+            <label class="field-stack">
+              <span>Discord Reply Mode</span>
+              <input class="search-input" id="env-discord-reply-to-mode" value="${escapeHtml(draft.discordReplyToMode)}" placeholder="inline / thread / reply">
+            </label>
+            <label class="field-stack">
+              <span>Slack Bot Token</span>
+              <input class="search-input" id="env-slack-bot-token" value="${escapeHtml(draft.slackBotToken)}" placeholder="xoxb-..." spellcheck="false" autocomplete="off">
+            </label>
+          </div>
+          <div class="checkbox-row top-gap">
+            <label>
+              <input type="checkbox" id="env-whatsapp-enabled" ${draft.whatsappEnabled ? 'checked' : ''}>
+              <span>启用 WhatsApp 通道</span>
+            </label>
+          </div>
+        `,
+      })
+      : disclosureHtml({
+        sectionId: 'runtime-env',
+        open: true,
+        eyebrow: '运行时',
+        title: '终端与浏览器变量',
+        metaHtml: `${pillHtml(draft.terminalModalImage || '默认镜像', 'neutral')}${pillHtml(draft.browserSessionTimeout ? `Browser ${draft.browserSessionTimeout}s` : 'Browser 默认', draft.browserSessionTimeout ? 'good' : 'neutral')}`,
+        body: `
+          <div class="form-grid">
+            <label class="field-stack">
+              <span>Terminal Modal Image</span>
+              <input class="search-input" id="env-terminal-modal-image" value="${escapeHtml(draft.terminalModalImage)}" placeholder="debian_slim / ubuntu">
+            </label>
+            <label class="field-stack">
+              <span>Terminal Timeout</span>
+              <input class="search-input" id="env-terminal-timeout" value="${escapeHtml(draft.terminalTimeout ?? '')}" placeholder="120">
+            </label>
+            <label class="field-stack">
+              <span>Terminal Lifetime Seconds</span>
+              <input class="search-input" id="env-terminal-lifetime-seconds" value="${escapeHtml(draft.terminalLifetimeSeconds ?? '')}" placeholder="900">
+            </label>
+            <label class="field-stack">
+              <span>Browser Session Timeout</span>
+              <input class="search-input" id="env-browser-session-timeout" value="${escapeHtml(draft.browserSessionTimeout ?? '')}" placeholder="600">
+            </label>
+            <label class="field-stack">
+              <span>Browser Inactivity Timeout</span>
+              <input class="search-input" id="env-browser-inactivity-timeout" value="${escapeHtml(draft.browserInactivityTimeout ?? '')}" placeholder="90">
+            </label>
+          </div>
+          <p class="helper-text">这里直接写 modal / browser 运行时变量。</p>
+        `,
+      });
 
   return `
     <div class="page-stack">
@@ -1629,132 +1853,16 @@ export function renderStructuredEnvControls(view) {
           </section>
         </section>
 
-        <div class="compact-disclosure-stack">
-          ${disclosureHtml({
-            sectionId: 'provider-credentials',
-            open: disclosureOpen(view, ['provider-credentials'], true),
-            eyebrow: '模型凭证',
-            title: '模型与 Provider 密钥',
-            metaHtml: `${pillHtml(credentialsCount ? `${credentialsCount} 项已填` : '待补齐', credentialsCount ? 'good' : 'warn')}`,
-            body: `
-              <div class="form-grid">
-                <label class="field-stack">
-                  <span>OpenAI API Key</span>
-                  <input class="search-input" id="env-openai-api-key" value="${escapeHtml(draft.openaiApiKey)}" placeholder="sk-..." spellcheck="false" autocomplete="off">
-                </label>
-                <label class="field-stack">
-                  <span>Anthropic API Key</span>
-                  <input class="search-input" id="env-anthropic-api-key" value="${escapeHtml(draft.anthropicApiKey)}" placeholder="sk-ant-..." spellcheck="false" autocomplete="off">
-                </label>
-                <label class="field-stack">
-                  <span>OpenRouter API Key</span>
-                  <input class="search-input" id="env-openrouter-api-key" value="${escapeHtml(draft.openrouterApiKey)}" placeholder="sk-or-..." spellcheck="false" autocomplete="off">
-                </label>
-                <label class="field-stack">
-                  <span>Google API Key</span>
-                  <input class="search-input" id="env-google-api-key" value="${escapeHtml(draft.googleApiKey)}" placeholder="AIza..." spellcheck="false" autocomplete="off">
-                </label>
-                <label class="field-stack">
-                  <span>HF Token</span>
-                  <input class="search-input" id="env-hf-token" value="${escapeHtml(draft.hfToken)}" placeholder="hf_..." spellcheck="false" autocomplete="off">
-                </label>
-                <label class="field-stack">
-                  <span>AnyRouter 2 API Key</span>
-                  <input class="search-input" id="env-anyrouter2-api-key" value="${escapeHtml(draft.anyrouter2ApiKey)}" placeholder="填写 AnyRouter 2 token" spellcheck="false" autocomplete="off">
-                </label>
-                <label class="field-stack">
-                  <span>CRS API Key</span>
-                  <input class="search-input" id="env-crs-api-key" value="${escapeHtml(draft.crsApiKey)}" placeholder="填写 CRS token" spellcheck="false" autocomplete="off">
-                </label>
-                <label class="field-stack">
-                  <span>SiliconFlow API Key</span>
-                  <input class="search-input" id="env-siliconflow-api-key" value="${escapeHtml(draft.siliconflowApiKey)}" placeholder="填写 SiliconFlow token" spellcheck="false" autocomplete="off">
-                </label>
-              </div>
-            `,
-          })}
-          ${disclosureHtml({
-            sectionId: 'channel-credentials',
-            open: disclosureOpen(view, ['channel-credentials', 'channel-presets']),
-            eyebrow: '通道',
-            title: '网关与消息通道',
-            metaHtml: `${pillHtml(draft.hermesGatewayToken ? '网关 token 已填' : '网关 token 待补', draft.hermesGatewayToken ? 'good' : 'warn')}${pillHtml(channelCount ? `${channelCount} 项通道参数` : '通道参数待补', channelCount ? 'neutral' : 'warn')}`,
-            body: `
-              ${renderChannelPresetGrid(view)}
-              <div class="form-grid">
-                <label class="field-stack">
-                  <span>Hermes Gateway Token</span>
-                  <input class="search-input" id="env-hermes-gateway-token" value="${escapeHtml(draft.hermesGatewayToken)}" placeholder="gateway token" spellcheck="false" autocomplete="off">
-                </label>
-                <label class="field-stack">
-                  <span>Telegram Bot Token</span>
-                  <input class="search-input" id="env-telegram-bot-token" value="${escapeHtml(draft.telegramBotToken)}" placeholder="telegram bot token" spellcheck="false" autocomplete="off">
-                </label>
-                <label class="field-stack">
-                  <span>Telegram Home Channel</span>
-                  <input class="search-input" id="env-telegram-home-channel" value="${escapeHtml(draft.telegramHomeChannel)}" placeholder="home channel / chat id">
-                </label>
-                <label class="field-stack">
-                  <span>Telegram Reply Mode</span>
-                  <input class="search-input" id="env-telegram-reply-to-mode" value="${escapeHtml(draft.telegramReplyToMode)}" placeholder="inline / thread / reply">
-                </label>
-                <label class="field-stack">
-                  <span>Discord Bot Token</span>
-                  <input class="search-input" id="env-discord-bot-token" value="${escapeHtml(draft.discordBotToken)}" placeholder="discord bot token" spellcheck="false" autocomplete="off">
-                </label>
-                <label class="field-stack">
-                  <span>Discord Home Channel</span>
-                  <input class="search-input" id="env-discord-home-channel" value="${escapeHtml(draft.discordHomeChannel)}" placeholder="channel id / alias">
-                </label>
-                <label class="field-stack">
-                  <span>Discord Reply Mode</span>
-                  <input class="search-input" id="env-discord-reply-to-mode" value="${escapeHtml(draft.discordReplyToMode)}" placeholder="inline / thread / reply">
-                </label>
-                <label class="field-stack">
-                  <span>Slack Bot Token</span>
-                  <input class="search-input" id="env-slack-bot-token" value="${escapeHtml(draft.slackBotToken)}" placeholder="xoxb-..." spellcheck="false" autocomplete="off">
-                </label>
-              </div>
-              <div class="checkbox-row top-gap">
-                <label>
-                  <input type="checkbox" id="env-whatsapp-enabled" ${draft.whatsappEnabled ? 'checked' : ''}>
-                  <span>启用 WhatsApp 通道</span>
-                </label>
-              </div>
-            `,
-          })}
-          ${disclosureHtml({
-            sectionId: 'runtime-env',
-            open: disclosureOpen(view, ['runtime-env']),
-            eyebrow: '运行时',
-            title: '终端与浏览器变量',
-            metaHtml: `${pillHtml(draft.terminalModalImage || '默认镜像', 'neutral')}${pillHtml(draft.browserSessionTimeout ? `Browser ${draft.browserSessionTimeout}s` : 'Browser 默认', draft.browserSessionTimeout ? 'good' : 'neutral')}`,
-            body: `
-              <div class="form-grid">
-                <label class="field-stack">
-                  <span>Terminal Modal Image</span>
-                  <input class="search-input" id="env-terminal-modal-image" value="${escapeHtml(draft.terminalModalImage)}" placeholder="debian_slim / ubuntu">
-                </label>
-                <label class="field-stack">
-                  <span>Terminal Timeout</span>
-                  <input class="search-input" id="env-terminal-timeout" value="${escapeHtml(draft.terminalTimeout ?? '')}" placeholder="120">
-                </label>
-                <label class="field-stack">
-                  <span>Terminal Lifetime Seconds</span>
-                  <input class="search-input" id="env-terminal-lifetime-seconds" value="${escapeHtml(draft.terminalLifetimeSeconds ?? '')}" placeholder="900">
-                </label>
-                <label class="field-stack">
-                  <span>Browser Session Timeout</span>
-                  <input class="search-input" id="env-browser-session-timeout" value="${escapeHtml(draft.browserSessionTimeout ?? '')}" placeholder="600">
-                </label>
-                <label class="field-stack">
-                  <span>Browser Inactivity Timeout</span>
-                  <input class="search-input" id="env-browser-inactivity-timeout" value="${escapeHtml(draft.browserInactivityTimeout ?? '')}" placeholder="90">
-                </label>
-              </div>
-              <p class="helper-text">这里直接写 modal / browser 运行时变量。</p>
-            `,
-          })}
+        <div class="workspace-main-header">
+          <div>
+            <strong>当前只看这一组</strong>
+            <p class="workspace-main-copy">${escapeHtml(activeGroup.description)}</p>
+          </div>
+          ${pillHtml(activeGroup.label, 'neutral')}
+        </div>
+        ${workspaceGroupTabs('credentials', CREDENTIAL_WORKSPACE_GROUPS, activeGroup.key)}
+        <div class="compact-disclosure-stack top-gap">
+          ${activeGroupContent}
         </div>
       </section>
     </div>

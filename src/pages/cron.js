@@ -49,6 +49,43 @@ function infoTipHtml(content) {
   `;
 }
 
+function surfaceTabHtml(activeKey, key, label) {
+  return `
+    <button type="button" class="tab ${activeKey === key ? 'active' : ''}" data-cron-surface="${key}">
+      ${escapeHtml(label)}
+    </button>
+  `;
+}
+
+function launcherCardHtml({ action, kicker, title, meta, tone = 'neutral', attrs = {} }) {
+  const attrString = Object.entries(attrs)
+    .filter(([, value]) => value !== undefined && value !== null && value !== false)
+    .map(([key, value]) => `${key}="${escapeHtml(value)}"`)
+    .join(' ');
+
+  return `
+    <button
+      type="button"
+      class="dashboard-jump-card dashboard-jump-card-${tone}"
+      data-action="${escapeHtml(action)}"
+      ${attrString}
+    >
+      <span class="dashboard-jump-kicker">${escapeHtml(kicker)}</span>
+      <strong class="dashboard-jump-title">${escapeHtml(title)}</strong>
+      <span class="dashboard-jump-meta">${escapeHtml(meta)}</span>
+    </button>
+  `;
+}
+
+function renderSurfaceTabs(view) {
+  return `
+    <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
+      ${surfaceTabHtml(view.surfaceView, 'focus', '常用')}
+      ${surfaceTabHtml(view.surfaceView, 'workbench', '工作台')}
+    </div>
+  `;
+}
+
 function directoryOf(path) {
   const value = String(path ?? '').trim();
   const index = value.lastIndexOf('/');
@@ -468,79 +505,227 @@ function renderOutputWorkspace(view, state) {
   `;
 }
 
-function renderPage(view) {
-  if (view.destroyed) {
-    return;
-  }
+function renderFocusSurface(view, state) {
+  const selectedJob = state.selectedJob;
+  const gatewayRunning = view.dashboard.gateway?.gatewayState === 'running';
+  const focusTone = state.jobs.length > 0 && state.warnings.length === 0 ? 'good' : 'warn';
+  const focusTitle = !state.jobs.length
+    ? '先建立第一条自动化作业'
+    : state.warnings.length > 0
+      ? '自动化链路还有几处需要收口'
+      : selectedJob
+        ? `${selectedJob.name} 已经可以继续使用`
+        : '自动化调度已经基本成形';
+  const focusDescription = !state.jobs.length
+    ? '默认层先只告诉你该从哪里开始。完整列表、编辑器、输出和删除确认都继续收进工作台。'
+    : state.warnings.length > 0
+      ? '默认层只保留判断和入口。作业列表、筛选器、编辑器和危险动作继续下沉到工作台。'
+      : '当前调度链路已经比较稳定。默认层不再直接堆满 jobs 列表、筛选器和编辑表单。';
+  const selectedPreview = selectedJob
+    ? truncate(selectedJob.prompt || selectedJob.script || '无 prompt', 72)
+    : '先从工作台中选择一条作业，或直接新建第一条自动化。';
+  const currentStatus = !state.jobs.length
+    ? '尚无作业'
+    : state.warnings.length > 0
+      ? `${state.warnings.length} 条提醒`
+      : '当前稳定';
 
-  if (view.loading && !view.snapshot) {
-    renderSkeleton(view);
-    return;
-  }
-
-  if (view.error || !view.snapshot || !view.dashboard || !view.installation) {
-    view.page.innerHTML = `
-      <div class="page-header">
-        <div class="panel-title-row">
-          <h1 class="page-title">定时任务</h1>
-        </div>
-        <p class="page-desc">围绕 Hermes 自动化调度、skills、gateway 和 delivery 做统一治理。</p>
+  return `
+    <div class="page-header page-header-compact">
+      <div class="panel-title-row">
+        <h1 class="page-title">定时任务</h1>
+        ${infoTipHtml('默认页只保留调度链路判断和最常用入口。作业列表、筛选器、编辑器和输出已经继续下沉到工作台。')}
       </div>
-      <section class="config-section">
-        <div class="config-section-header">
-          <div>
-            <h2 class="config-section-title">读取失败</h2>
-            <p class="config-section-desc">cron 工作台快照暂时不可用，可以直接重试。</p>
+      <p class="page-desc">让新手先看懂“调度能不能跑、下一步去哪里”，让进阶用户再进入完整工作台。</p>
+    </div>
+
+    ${renderSurfaceTabs(view)}
+
+    <section class="workspace-summary-strip workspace-summary-strip-dense">
+      <section class="summary-mini-card">
+        <span class="summary-mini-label">当前实例</span>
+        <strong class="summary-mini-value">${escapeHtml(view.profile)}</strong>
+        <span class="summary-mini-meta">${escapeHtml(view.snapshot.jobsPath || 'jobs.json 未解析')}</span>
+      </section>
+      <section class="summary-mini-card">
+        <span class="summary-mini-label">调度规模</span>
+        <strong class="summary-mini-value">${escapeHtml(state.jobs.length === 0 ? '尚无作业' : `${state.enabledCount}/${state.jobs.length} 已启用`)}</strong>
+        <span class="summary-mini-meta">${escapeHtml(`${state.remoteJobs.length} 个远端投递 · ${state.failingJobs.length} 个失败`)}</span>
+      </section>
+      <section class="summary-mini-card">
+        <span class="summary-mini-label">Gateway</span>
+        <strong class="summary-mini-value">${escapeHtml(view.dashboard.gateway?.gatewayState ?? '未检测到')}</strong>
+        <span class="summary-mini-meta">${escapeHtml(gatewayRunning ? '远端投递链路可继续验证' : '远端投递会受阻')}</span>
+      </section>
+      <section class="summary-mini-card">
+        <span class="summary-mini-label">技能引用</span>
+        <strong class="summary-mini-value">${escapeHtml(state.missingReferencedSkills.length === 0 ? '已对齐' : `${state.missingReferencedSkills.length} 个缺口`)}</strong>
+        <span class="summary-mini-meta">${escapeHtml(`${state.referencedSkillNames.length} 个被引用 skill · ${state.jobsWithSkills.length} 条声明作业`)}</span>
+      </section>
+    </section>
+
+    <section class="dashboard-focus-shell">
+      <section class="dashboard-focus-card dashboard-focus-card-${focusTone}">
+        <div class="dashboard-focus-head">
+          <div class="dashboard-focus-copy">
+            <span class="dashboard-focus-kicker">${escapeHtml(state.jobs.length > 0 ? '自动化主判断' : '先开始')}</span>
+            <h2 class="dashboard-focus-title">${escapeHtml(focusTitle)}</h2>
+            <p class="dashboard-focus-desc">${escapeHtml(focusDescription)}</p>
+          </div>
+          <div class="dashboard-focus-pills">
+            ${pillHtml(currentStatus, state.warnings.length > 0 || state.jobs.length === 0 ? 'warn' : 'good')}
+            ${pillHtml(view.installation.binaryFound ? 'CLI 已就绪' : 'CLI 缺失', view.installation.binaryFound ? 'good' : 'warn')}
+            ${pillHtml(gatewayRunning ? 'Gateway 已运行' : 'Gateway 未运行', gatewayRunning ? 'good' : 'warn')}
           </div>
         </div>
-        ${emptyStateHtml('未能读取 cron 工作台', view.error || '请稍后再试。')}
-        <div class="quick-actions">
-          ${buttonHtml({ action: 'refresh', label: '重新读取', kind: 'primary' })}
+        <div class="dashboard-signal-grid">
+          <section class="dashboard-signal-card">
+            <span class="dashboard-signal-label">作业总数</span>
+            <strong class="dashboard-signal-value">${escapeHtml(String(state.jobs.length))}</strong>
+            <span class="dashboard-signal-meta">${escapeHtml(`${state.enabledCount} 条已启用 · ${state.failingJobs.length} 条失败`)}</span>
+          </section>
+          <section class="dashboard-signal-card">
+            <span class="dashboard-signal-label">远端链路</span>
+            <strong class="dashboard-signal-value">${escapeHtml(state.remoteJobs.length === 0 ? '本地优先' : `${state.remoteJobs.length} 个`)}</strong>
+            <span class="dashboard-signal-meta">${escapeHtml(gatewayRunning ? 'Gateway 已承接远端投递' : 'Gateway 未就绪时会阻塞远端作业')}</span>
+          </section>
+          <section class="dashboard-signal-card">
+            <span class="dashboard-signal-label">当前焦点</span>
+            <strong class="dashboard-signal-value">${escapeHtml(selectedJob?.name || '未选择')}</strong>
+            <span class="dashboard-signal-meta">${escapeHtml(selectedJob ? `${selectedJob.scheduleDisplay} · ${selectedJob.deliver}` : '进入工作台后再选择具体作业')}</span>
+          </section>
+          <section class="dashboard-signal-card">
+            <span class="dashboard-signal-label">Skills 缺口</span>
+            <strong class="dashboard-signal-value">${escapeHtml(String(state.missingReferencedSkills.length))}</strong>
+            <span class="dashboard-signal-meta">${escapeHtml(state.missingReferencedSkills.length === 0 ? '当前引用的 skills 已对齐' : state.missingReferencedSkills.join('、'))}</span>
+          </section>
+        </div>
+        <div class="dashboard-focus-actions">
+          ${buttonHtml({ action: 'open-cron-workbench', label: '进入作业台', kind: 'primary', attrs: { 'data-tab': 'detail' } })}
+          ${buttonHtml({ action: 'open-create-editor', label: '新建作业', disabled: Boolean(view.runningAction) })}
+          ${buttonHtml({ action: 'goto-skills', label: '查看 Skills' })}
+          ${buttonHtml({ action: 'goto-logs', label: '查看日志' })}
         </div>
       </section>
-    `;
-    bindEvents(view);
-    return;
-  }
 
-  const state = deriveState(view);
+      <aside class="dashboard-jump-panel">
+        <div class="workspace-main-header">
+          <div>
+            <strong>继续去哪里</strong>
+            <p class="workspace-main-copy">默认层只留 4 个高频入口，列表筛选和编辑表单继续放到工作台。</p>
+          </div>
+          ${pillHtml('常用 4 项', 'neutral')}
+        </div>
+        <div class="dashboard-jump-grid">
+          ${launcherCardHtml({
+            action: 'open-cron-workbench',
+            kicker: '作业',
+            title: '查看当前作业',
+            meta: selectedJob ? `${selectedJob.name} · ${selectedJob.scheduleDisplay}` : '先进入工作台再选择作业',
+            tone: selectedJob ? 'good' : 'warn',
+            attrs: { 'data-tab': 'detail' },
+          })}
+          ${launcherCardHtml({
+            action: 'open-create-editor',
+            kicker: '新建',
+            title: '写一条自动化',
+            meta: '进入编辑器后填写 schedule、prompt、投递和 skills',
+            tone: state.jobs.length === 0 ? 'warn' : 'neutral',
+          })}
+          ${launcherCardHtml({
+            action: 'goto-gateway',
+            kicker: '链路',
+            title: 'Gateway 与投递',
+            meta: gatewayRunning ? `${state.remoteJobs.length} 个远端作业等待验证` : '先补网关链路，再谈远端投递',
+            tone: gatewayRunning ? 'good' : 'warn',
+          })}
+          ${launcherCardHtml({
+            action: 'goto-diagnostics',
+            kicker: '排障',
+            title: '诊断与收口',
+            meta: state.warnings[0] || '进入诊断页继续看 skills、memory、gateway 和 CLI',
+            tone: state.warnings.length > 0 ? 'warn' : 'neutral',
+          })}
+        </div>
+      </aside>
+    </section>
+
+    <section class="config-section">
+      <div class="config-section-header">
+        <div>
+          <h2 class="config-section-title">当前边界</h2>
+          <p class="config-section-desc">默认层只保留选中作业和系统边界，不再把 jobs 列表、筛选器和编辑器全部压到第一屏。</p>
+        </div>
+        <div class="toolbar">
+          ${buttonHtml({ action: 'refresh', label: view.refreshing ? '同步中…' : '刷新', kind: 'primary', disabled: view.refreshing || Boolean(view.runningAction) })}
+        </div>
+      </div>
+      <div class="compact-overview-grid compact-overview-grid-dense">
+        <section class="shell-card shell-card-dense">
+          <div class="shell-card-header">
+            <strong>当前焦点作业</strong>
+            ${selectedJob ? pillHtml(selectedJob.state, cronTone(selectedJob)) : pillHtml('未选择', 'warn')}
+          </div>
+          ${
+            selectedJob
+              ? `
+                ${keyValueRowsHtml([
+                  { label: '作业名', value: selectedJob.name },
+                  { label: '调度', value: selectedJob.scheduleDisplay },
+                  { label: '投递', value: selectedJob.deliver },
+                  { label: 'Skills', value: selectedJob.skills.length ? selectedJob.skills.join(', ') : '未绑定' },
+                ])}
+                <p class="shell-card-copy top-gap">${escapeHtml(selectedPreview)}</p>
+              `
+              : `
+                <p class="shell-card-copy">当前还没有选中的作业。进入工作台后可以筛选、选择、编辑或立即触发作业。</p>
+                ${keyValueRowsHtml([
+                  { label: '作业总数', value: String(state.jobs.length) },
+                  { label: '下一步', value: state.jobs.length === 0 ? '先创建第一条作业' : '进入工作台后选中一条作业' },
+                ])}
+              `
+          }
+        </section>
+        <section class="shell-card shell-card-dense shell-card-muted">
+          <div class="shell-card-header">
+            <strong>系统边界</strong>
+            ${pillHtml(state.warnings.length > 0 ? `${state.warnings.length} 条提醒` : '当前稳定', state.warnings.length > 0 ? 'warn' : 'good')}
+          </div>
+          ${keyValueRowsHtml([
+            { label: 'jobs.json', value: view.snapshot.jobsPath || '—' },
+            { label: 'Gateway', value: view.dashboard.gateway?.gatewayState ?? '未检测到' },
+            { label: '记忆 Provider', value: view.dashboard.config.memoryProvider || 'builtin-file' },
+            { label: '下一步', value: state.warnings.length > 0 ? '先看诊断或 Gateway' : '进入工作台继续细看作业' },
+          ])}
+          ${
+            state.warnings.length > 0
+              ? `<div class="warning-stack top-gap">${state.warnings.slice(0, 2).map((warning) => `<div class="warning-item">${escapeHtml(warning)}</div>`).join('')}</div>`
+              : ''
+          }
+        </section>
+      </div>
+    </section>
+  `;
+}
+
+function renderWorkbenchSurface(view, state) {
   const selectedJob = state.selectedJob;
   const workbenchMain = view.workspaceTab === 'detail'
     ? renderDetailWorkspace(view, state)
     : view.workspaceTab === 'editor'
       ? renderEditorWorkspace(view, state)
       : renderOutputWorkspace(view, state);
-  const seed = relaySeed(view, selectedJob);
-  const logsIntent = buildLogsDrilldownIntent(seed, {
-    contains: selectedJob?.id || selectedJob?.deliver || selectedJob?.skills[0] || '',
-    description: selectedJob ? `查看作业 ${selectedJob.name} 相关日志。` : '继续核对自动化作业相关日志。',
-    logName: selectedJob && isRemoteDelivery(selectedJob.deliver) ? 'gateway.error' : 'agent',
-  });
-  const diagnosticsIntent = buildDiagnosticsDrilldownIntent(seed, {
-    description: selectedJob ? `围绕作业 ${selectedJob.name} 继续做自动化体检。` : '继续做自动化调度体检。',
-    suggestedCommand: selectedJob && isRemoteDelivery(selectedJob.deliver) ? 'gateway-status-deep' : 'config-check',
-  });
-  const configIntent = buildConfigDrilldownIntent(seed, {
-    focus: selectedJob?.skills.length ? 'toolsets' : 'context',
-    suggestedCommand: 'config-check',
-  });
-  const gatewayIntent = buildGatewayDrilldownIntent(seed, {
-    platformName: selectedJob && isRemoteDelivery(selectedJob.deliver) ? selectedJob.deliver : undefined,
-  });
-  const extensionsIntent = buildExtensionsDrilldownIntent(seed, {
-    query: selectedJob?.skills.join(' ') || '',
-    rawKind: selectedJob?.skills.length ? 'skills' : 'tools',
-    toolNames: selectedJob?.skills ?? [],
-  });
 
-  view.page.innerHTML = `
-    <div class="page-header">
+  return `
+    <div class="page-header page-header-compact">
       <div class="panel-title-row">
-        <h1 class="page-title">定时任务</h1>
-        ${infoTipHtml('这里不只是读取 jobs.json，而是把调度、skills、memory、gateway、delivery 串成真正可操作的自动化工作台。')}
+        <h1 class="page-title">定时任务工作台</h1>
+        ${infoTipHtml('完整的作业列表、筛选器、编辑器、最近输出和删除确认继续放在这里。默认入口层只保留调度判断和去向。')}
       </div>
-      <p class="page-desc">围绕 Hermes 的 cron/jobs.json、skills、memory、gateway 与 delivery 做闭环治理。</p>
+      <p class="page-desc">需要具体看作业列表、筛选、编辑或立即触发时，再进入这层。</p>
     </div>
+
+    ${renderSurfaceTabs(view)}
 
     <div class="stat-cards stat-cards-4">
       <section class="stat-card">
@@ -590,7 +775,7 @@ function renderPage(view) {
       <div class="config-section-header">
         <div>
           <h2 class="config-section-title">自动化总览</h2>
-          <p class="config-section-desc">总控视图，但内容完全围绕 Hermes 的自动化链路来组织。</p>
+          <p class="config-section-desc">进入工作台后，再完整查看 Hermes 自动化链路的结构状态。</p>
         </div>
       </div>
       <div class="compact-overview-grid">
@@ -644,7 +829,7 @@ function renderPage(view) {
       <div class="config-section-header">
         <div>
           <h2 class="config-section-title">调度工作台</h2>
-          <p class="config-section-desc">主区域只保留作业本身，筛选、列表和跳转入口放到侧边轨道。</p>
+          <p class="config-section-desc">主区域保留作业本身，筛选、列表和跳转入口放到侧边轨道。</p>
         </div>
         <div class="toolbar">
           ${pillHtml(view.workspaceTab, 'neutral')}
@@ -681,6 +866,71 @@ function renderPage(view) {
       </div>
     </section>
   `;
+}
+
+function renderPage(view) {
+  if (view.destroyed) {
+    return;
+  }
+
+  if (view.loading && !view.snapshot) {
+    renderSkeleton(view);
+    return;
+  }
+
+  if (view.error || !view.snapshot || !view.dashboard || !view.installation) {
+    view.page.innerHTML = `
+      <div class="page-header">
+        <div class="panel-title-row">
+          <h1 class="page-title">定时任务</h1>
+        </div>
+        <p class="page-desc">围绕 Hermes 自动化调度、skills、gateway 和 delivery 做统一治理。</p>
+      </div>
+      <section class="config-section">
+        <div class="config-section-header">
+          <div>
+            <h2 class="config-section-title">读取失败</h2>
+            <p class="config-section-desc">cron 工作台快照暂时不可用，可以直接重试。</p>
+          </div>
+        </div>
+        ${emptyStateHtml('未能读取 cron 工作台', view.error || '请稍后再试。')}
+        <div class="quick-actions">
+          ${buttonHtml({ action: 'refresh', label: '重新读取', kind: 'primary' })}
+        </div>
+      </section>
+    `;
+    bindEvents(view);
+    return;
+  }
+
+  const state = deriveState(view);
+  const selectedJob = state.selectedJob;
+  const seed = relaySeed(view, selectedJob);
+  const logsIntent = buildLogsDrilldownIntent(seed, {
+    contains: selectedJob?.id || selectedJob?.deliver || selectedJob?.skills[0] || '',
+    description: selectedJob ? `查看作业 ${selectedJob.name} 相关日志。` : '继续核对自动化作业相关日志。',
+    logName: selectedJob && isRemoteDelivery(selectedJob.deliver) ? 'gateway.error' : 'agent',
+  });
+  const diagnosticsIntent = buildDiagnosticsDrilldownIntent(seed, {
+    description: selectedJob ? `围绕作业 ${selectedJob.name} 继续做自动化体检。` : '继续做自动化调度体检。',
+    suggestedCommand: selectedJob && isRemoteDelivery(selectedJob.deliver) ? 'gateway-status-deep' : 'config-check',
+  });
+  const configIntent = buildConfigDrilldownIntent(seed, {
+    focus: selectedJob?.skills.length ? 'toolsets' : 'context',
+    suggestedCommand: 'config-check',
+  });
+  const gatewayIntent = buildGatewayDrilldownIntent(seed, {
+    platformName: selectedJob && isRemoteDelivery(selectedJob.deliver) ? selectedJob.deliver : undefined,
+  });
+  const extensionsIntent = buildExtensionsDrilldownIntent(seed, {
+    query: selectedJob?.skills.join(' ') || '',
+    rawKind: selectedJob?.skills.length ? 'skills' : 'tools',
+    toolNames: selectedJob?.skills ?? [],
+  });
+
+  view.page.innerHTML = (view.surfaceView || 'focus') === 'workbench'
+    ? renderWorkbenchSurface(view, state)
+    : renderFocusSurface(view, state);
 
   bindEvents(view, {
     configIntent,
@@ -926,6 +1176,17 @@ function bindEditorInputs(view) {
 function bindEvents(view, intents = {}) {
   bindEditorInputs(view);
 
+  view.page.querySelectorAll('[data-cron-surface]').forEach((element) => {
+    element.onclick = () => {
+      const nextView = element.getAttribute('data-cron-surface');
+      if (!nextView || nextView === view.surfaceView) {
+        return;
+      }
+      view.surfaceView = nextView;
+      renderPage(view);
+    };
+  });
+
   view.page.querySelector('#cron-delete-confirm')?.addEventListener('input', (event) => {
     view.deleteConfirm = event.target.value;
     const button = view.page.querySelector('[data-action="delete-job"]');
@@ -946,6 +1207,11 @@ function bindEvents(view, intents = {}) {
       switch (action) {
         case 'refresh':
           await refreshShellAndPage(view, deriveState(view).selectedJob?.id ?? null);
+          return;
+        case 'open-cron-workbench':
+          view.surfaceView = 'workbench';
+          view.workspaceTab = element.getAttribute('data-tab') || 'detail';
+          renderPage(view);
           return;
         case 'switch-workspace-tab':
           view.workspaceTab = element.getAttribute('data-tab') || 'detail';
@@ -969,6 +1235,7 @@ function bindEvents(view, intents = {}) {
           renderPage(view);
           return;
         case 'open-create-editor':
+          view.surfaceView = 'workbench';
           view.editorMode = 'create';
           view.draft = { ...EMPTY_DRAFT };
           view.workspaceTab = 'editor';
@@ -1091,6 +1358,7 @@ export async function render() {
     skills: [],
     snapshot: null,
     stateFilter: 'all',
+    surfaceView: 'focus',
     unsubscribe: null,
     workspaceTab: 'detail',
   };
