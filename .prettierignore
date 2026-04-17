@@ -1,0 +1,6 @@
+dist
+src-tauri
+*.min.js
+*.yaml
+*.md
+package.json

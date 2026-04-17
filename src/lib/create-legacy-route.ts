@@ -1,13 +1,18 @@
 import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
-import { consumePageIntent, getPageIntent, getPanelState, loadProfiles, navigate, notify, subscribePanelState } from './panel-state';
+import {
+  consumePageIntent,
+  getPageIntent,
+  getPanelState,
+  loadProfiles,
+  navigate,
+  notify,
+  subscribePanelState,
+} from './panel-state';
 import type { AppPageKey, PageProps } from '../pages/types';
 
-export function createLegacyRoute(
-  Component: React.ComponentType<PageProps>,
-  pageKey: AppPageKey,
-) {
+export function createLegacyRoute(Component: React.ComponentType<PageProps>, pageKey: AppPageKey) {
   let root: Root | null = null;
   let host: HTMLDivElement | null = null;
   let unsubscribe: (() => void) | null = null;
@@ -26,11 +31,11 @@ export function createLegacyRoute(
         pageIntent: getPageIntent(pageKey),
         profile: shell.selectedProfile,
         profiles: shell.profiles,
-        refreshProfiles: async (preferredProfile) => {
+        refreshProfiles: async preferredProfile => {
           await loadProfiles(preferredProfile);
         },
         key: `${pageKey}:${shell.selectedProfile}`,
-      }),
+      })
     );
   }
 

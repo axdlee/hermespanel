@@ -67,7 +67,7 @@ export function RuntimePostureView(props: {
       <p className="helper-text">{props.posture.summary}</p>
       {props.extraAside}
       <div className="health-grid">
-        {props.posture.items.map((item) => {
+        {props.posture.items.map(item => {
           const targetPage = item.page;
 
           return (
@@ -90,14 +90,17 @@ export function RuntimePostureView(props: {
       </div>
       {props.posture.priorities.length > 0 ? (
         <div className="warning-stack">
-          {props.posture.priorities.slice(0, 4).map((item) => (
+          {props.posture.priorities.slice(0, 4).map(item => (
             <div className="warning-item" key={`priority:${item.key}`}>
               {item.title}：{item.detail}
             </div>
           ))}
         </div>
       ) : (
-        <EmptyState title="当前无需优先修正" description="核心运行链路已具备继续验证与细化治理的基础。" />
+        <EmptyState
+          title="当前无需优先修正"
+          description="核心运行链路已具备继续验证与细化治理的基础。"
+        />
       )}
     </div>
   );

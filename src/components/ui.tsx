@@ -1,13 +1,13 @@
-import type { PropsWithChildren, ReactNode } from 'react';
+import { memo, type PropsWithChildren, type ReactNode } from 'react';
 
-export function Panel(
+export const Panel = memo(function Panel(
   props: PropsWithChildren<{
     title?: string;
     subtitle?: string;
     aside?: ReactNode;
     className?: string;
     tip?: ReactNode;
-  }>,
+  }>
 ) {
   return (
     <section className={`panel ${props.className ?? ''}`.trim()}>
@@ -28,9 +28,9 @@ export function Panel(
       {props.children}
     </section>
   );
-}
+});
 
-export function MetricCard(props: {
+export const MetricCard = memo(function MetricCard(props: {
   label: string;
   value: ReactNode;
   hint?: string;
@@ -42,9 +42,9 @@ export function MetricCard(props: {
       {props.hint && <span className="metric-hint">{props.hint}</span>}
     </div>
   );
-}
+});
 
-export function StatCard(props: {
+export const StatCard = memo(function StatCard(props: {
   label: string;
   value: ReactNode;
   meta?: ReactNode;
@@ -62,9 +62,9 @@ export function StatCard(props: {
       {props.actions ? <div className="stat-card-actions">{props.actions}</div> : null}
     </section>
   );
-}
+});
 
-export function OverviewCard(props: {
+export const OverviewCard = memo(function OverviewCard(props: {
   title: string;
   value: ReactNode;
   meta?: ReactNode;
@@ -81,44 +81,157 @@ export function OverviewCard(props: {
       </div>
     </section>
   );
-}
+});
 
-export function Pill(props: { tone?: 'neutral' | 'good' | 'warn' | 'bad'; children: ReactNode }) {
+export const Pill = memo(function Pill(props: {
+  tone?: 'neutral' | 'good' | 'warn' | 'bad';
+  children: ReactNode;
+}) {
   return <span className={`pill pill-${props.tone ?? 'neutral'}`}>{props.children}</span>;
-}
+});
 
-export function EmptyState(props: { title: string; description: string }) {
+export const EmptyState = memo(function EmptyState(props: { title: string; description: string }) {
   return (
     <div className="empty-state">
       <strong>{props.title}</strong>
       <p>{props.description}</p>
     </div>
   );
-}
+});
 
-export function LoadingState(props: { label?: string }) {
+export const LoadingState = memo(function LoadingState(props: {
+  label?: string;
+  skeleton?: boolean;
+}) {
+  if (props.skeleton) {
+    return (
+      <div className="loading-skeleton-wrapper">
+        <div className="skeleton-stat-cards">
+          <section className="skeleton-stat-card">
+            <div className="skeleton-text skeleton-text-short" />
+            <div className="skeleton-text skeleton-text-large" />
+            <div className="skeleton-text skeleton-text-medium" />
+          </section>
+          <section className="skeleton-stat-card">
+            <div className="skeleton-text skeleton-text-short" />
+            <div className="skeleton-text skeleton-text-large" />
+            <div className="skeleton-text skeleton-text-medium" />
+          </section>
+          <section className="skeleton-stat-card">
+            <div className="skeleton-text skeleton-text-short" />
+            <div className="skeleton-text skeleton-text-large" />
+            <div className="skeleton-text skeleton-text-medium" />
+          </section>
+          <section className="skeleton-stat-card">
+            <div className="skeleton-text skeleton-text-short" />
+            <div className="skeleton-text skeleton-text-large" />
+            <div className="skeleton-text skeleton-text-medium" />
+          </section>
+        </div>
+        <section className="skeleton-panel">
+          <header className="skeleton-panel-header">
+            <div className="skeleton-text skeleton-text-large" />
+            <div className="skeleton-text skeleton-text-medium" />
+          </header>
+          <div className="skeleton-panel-body">
+            <div className="skeleton-row">
+              <div className="skeleton-text skeleton-text-short" />
+              <div className="skeleton-text skeleton-text-medium" />
+            </div>
+            <div className="skeleton-row">
+              <div className="skeleton-text skeleton-text-short" />
+              <div className="skeleton-text skeleton-text-medium" />
+            </div>
+          </div>
+        </section>
+        <style>{`
+          .loading-skeleton-wrapper {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+          }
+          .skeleton-stat-cards {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+          }
+          .skeleton-stat-card {
+            padding: 16px;
+            border-radius: 8px;
+            background: var(--bg-secondary, #fafafa);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+          }
+          .skeleton-panel {
+            padding: 16px;
+            border-radius: 8px;
+            background: var(--bg-secondary, #fafafa);
+          }
+          .skeleton-panel-header {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 16px;
+          }
+          .skeleton-panel-body {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+          }
+          .skeleton-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+          }
+          .skeleton-text {
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: skeleton-loading 1.5s ease-in-out infinite;
+            border-radius: 4px;
+          }
+          .skeleton-text-short { height: 14px; width: 30%; }
+          .skeleton-text-medium { height: 14px; width: 50%; }
+          .skeleton-text-large { height: 20px; width: 60%; }
+          @keyframes skeleton-loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+          }
+          @media (prefers-color-scheme: dark) {
+            .skeleton-stat-card, .skeleton-panel {
+              background: #1a1a1a;
+            }
+            .skeleton-text {
+              background: linear-gradient(90deg, #2a2a2a 25%, #3a3a3a 50%, #2a2a2a 75%);
+              background-size: 200% 100%;
+            }
+          }
+        `}</style>
+      </div>
+    );
+  }
   return (
     <div className="empty-state">
       <strong>加载中</strong>
       <p>{props.label ?? '正在读取 Hermes 本地状态。'}</p>
     </div>
   );
-}
+});
 
-export function KeyValueRow(props: { label: string; value?: ReactNode }) {
+export const KeyValueRow = memo(function KeyValueRow(props: { label: string; value?: ReactNode }) {
   return (
     <div className="key-value-row">
       <span>{props.label}</span>
       <strong>{props.value ?? '—'}</strong>
     </div>
   );
-}
+});
 
-export function Toolbar(props: PropsWithChildren<{ className?: string }>) {
+export const Toolbar = memo(function Toolbar(props: PropsWithChildren<{ className?: string }>) {
   return <div className={`toolbar ${props.className ?? ''}`.trim()}>{props.children}</div>;
-}
+});
 
-export function ContextBanner(props: {
+export const ContextBanner = memo(function ContextBanner(props: {
   label?: string;
   title: string;
   description: string;
@@ -138,13 +251,15 @@ export function ContextBanner(props: {
       {props.actions ? <div className="context-banner-actions">{props.actions}</div> : null}
     </div>
   );
-}
+});
 
-export function Button(props: PropsWithChildren<{
-  onClick?: () => void;
-  kind?: 'primary' | 'secondary' | 'danger';
-  disabled?: boolean;
-}>) {
+export const Button = memo(function Button(
+  props: PropsWithChildren<{
+    onClick?: () => void;
+    kind?: 'primary' | 'secondary' | 'danger';
+    disabled?: boolean;
+  }>
+) {
   return (
     <button
       type="button"
@@ -155,13 +270,13 @@ export function Button(props: PropsWithChildren<{
       {props.children}
     </button>
   );
-}
+});
 
-export function InfoTip(props: { content: ReactNode; label?: string }) {
+export const InfoTip = memo(function InfoTip(props: { content: ReactNode; label?: string }) {
   return (
     <span className="info-tip" tabIndex={0} aria-label="更多信息">
       <span className="info-tip-trigger">{props.label ?? '?'}</span>
       <span className="info-tip-bubble">{props.content}</span>
     </span>
   );
-}
+});

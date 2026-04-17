@@ -2,7 +2,9 @@ import { NAV_GROUPS, PAGE_TITLES } from '../lib/panel-config';
 import { getPanelState, loadProfiles, loadShell, setSelectedProfile } from '../lib/panel-state';
 
 function activeGroupLabel(activePage) {
-  return NAV_GROUPS.find((group) => group.items.some((item) => item.key === activePage))?.label ?? '概览';
+  return (
+    NAV_GROUPS.find(group => group.items.some(item => item.key === activePage))?.label ?? '概览'
+  );
 }
 
 function gatewayLabel(state) {
@@ -40,12 +42,16 @@ export function renderTopbar(el) {
         <strong>${state.selectedProfile}</strong>
         <span>${state.selectedProfile === activeProfile ? '当前默认实例' : `默认实例 ${activeProfile}`}</span>
         <div class="topbar-health-strip topbar-health-strip-compact">
-          ${statuses.map((item) => `
+          ${statuses
+            .map(
+              item => `
             <span class="topbar-health-item topbar-health-${item.tone}">
               <span class="topbar-health-dot"></span>
               ${item.label}
             </span>
-          `).join('')}
+          `
+            )
+            .join('')}
         </div>
       </div>
     </div>
@@ -53,11 +59,15 @@ export function renderTopbar(el) {
       <label class="profile-switcher">
         <span>实例</span>
         <select class="select-input" id="topbar-profile-select" ${state.loadingProfiles || !state.profiles ? 'disabled' : ''}>
-          ${(state.profiles?.profiles ?? []).map((item) => `
+          ${(state.profiles?.profiles ?? [])
+            .map(
+              item => `
             <option value="${item.name}" ${item.name === state.selectedProfile ? 'selected' : ''}>
               ${item.name}${item.isActive ? ' · 当前默认' : ''}
             </option>
-          `).join('')}
+          `
+            )
+            .join('')}
         </select>
       </label>
       <div class="toolbar shell-toolbar">
@@ -68,7 +78,7 @@ export function renderTopbar(el) {
     </div>
   `;
 
-  el.querySelector('#topbar-profile-select')?.addEventListener('change', (event) => {
+  el.querySelector('#topbar-profile-select')?.addEventListener('change', event => {
     const value = event.target.value;
     void setSelectedProfile(value);
   });

@@ -16,7 +16,13 @@ import {
   notify,
   subscribePanelState,
 } from '../lib/panel-state';
-import { enabledToolCount, isRemoteDelivery, localRuntimeSkillCount, pluginsCount, totalToolCount } from '../lib/runtime';
+import {
+  enabledToolCount,
+  isRemoteDelivery,
+  localRuntimeSkillCount,
+  pluginsCount,
+  totalToolCount,
+} from '../lib/runtime';
 import {
   buttonHtml,
   commandResultHtml,
@@ -59,13 +65,15 @@ function structuredEnvDirty(view) {
   if (!view.data?.envWorkspace || !view.envDraft) {
     return false;
   }
-  return JSON.stringify(view.envDraft) !== JSON.stringify(cloneEnvWorkspace(view.data.envWorkspace));
+  return (
+    JSON.stringify(view.envDraft) !== JSON.stringify(cloneEnvWorkspace(view.data.envWorkspace))
+  );
 }
 
 function runtimeWarnings(data, snapshot, skills, extensions, cronSnapshot) {
   const warnings = [];
   const jobs = cronSnapshot?.jobs ?? [];
-  const remoteJobs = jobs.filter((job) => isRemoteDelivery(job.deliver));
+  const remoteJobs = jobs.filter(job => isRemoteDelivery(job.deliver));
   const runtimeLocalSkills = localRuntimeSkillCount(extensions);
 
   if (!data.summary.modelDefault || !data.summary.modelProvider) {
@@ -93,7 +101,9 @@ function runtimeWarnings(data, snapshot, skills, extensions, cronSnapshot) {
     warnings.push('Gateway 当前未运行，配置改动还没有在消息链路上得到验证。');
   }
   if (data.summary.memoryProvider && extensions?.memoryRuntime.provider.includes('none')) {
-    warnings.push(`配置声明了 memory provider「${data.summary.memoryProvider}」，但运行态仍像 built-in only。`);
+    warnings.push(
+      `配置声明了 memory provider「${data.summary.memoryProvider}」，但运行态仍像 built-in only。`
+    );
   }
   if (data.summary.toolsets.length > 0 && extensions && enabledToolCount(extensions) === 0) {
     warnings.push('配置里声明了 toolsets，但运行态没解析出已启用 tools，建议立刻体检。');
@@ -102,7 +112,9 @@ function runtimeWarnings(data, snapshot, skills, extensions, cronSnapshot) {
     warnings.push(`当前有 ${remoteJobs.length} 个远端作业依赖 Gateway，但网关不在 running 状态。`);
   }
   if (runtimeLocalSkills !== skills.length) {
-    warnings.push(`运行态 local skills 为 ${runtimeLocalSkills} 个，本地目录扫描到 ${skills.length} 个，存在安装态偏差。`);
+    warnings.push(
+      `运行态 local skills 为 ${runtimeLocalSkills} 个，本地目录扫描到 ${skills.length} 个，存在安装态偏差。`
+    );
   }
 
   return Array.from(new Set(warnings));
@@ -279,7 +291,9 @@ function renderSkeleton(view) {
       <p class="page-desc">正在同步 Hermes 配置文件、运行态摘要和扩展闭环信号。</p>
     </div>
     <div class="stat-cards">
-      ${Array.from({ length: 6 }).map(() => '<div class="stat-card loading-placeholder" style="min-height:124px"></div>').join('')}
+      ${Array.from({ length: 6 })
+        .map(() => '<div class="stat-card loading-placeholder" style="min-height:124px"></div>')
+        .join('')}
     </div>
   `;
 }
@@ -322,7 +336,7 @@ function renderPage(view) {
   const { data, snapshot, installation, extensions, cronSnapshot, skills } = view;
   const warnings = runtimeWarnings(data, snapshot, skills, extensions, cronSnapshot);
   const jobs = cronSnapshot?.jobs ?? [];
-  const remoteJobs = jobs.filter((job) => isRemoteDelivery(job.deliver));
+  const remoteJobs = jobs.filter(job => isRemoteDelivery(job.deliver));
   const enabledTools = enabledToolCount(extensions);
   const totalTools = totalToolCount(extensions);
   const localSkills = localRuntimeSkillCount(extensions);
@@ -335,14 +349,14 @@ function renderPage(view) {
     env.googleApiKey,
     env.hfToken,
     env.hermesGatewayToken,
-  ].filter((value) => String(value ?? '').trim()).length;
+  ].filter(value => String(value ?? '').trim()).length;
   const channelCount = [
     env.telegramBotToken,
     env.telegramHomeChannel,
     env.discordBotToken,
     env.discordHomeChannel,
     env.slackBotToken,
-  ].filter((value) => String(value ?? '').trim()).length;
+  ].filter(value => String(value ?? '').trim()).length;
   const configDirty = view.configYaml !== data.configYaml;
   const envDirty = view.envFile !== data.envFile;
   const structuredDirty = structuredConfigDirty(view);
@@ -436,7 +450,10 @@ function renderPage(view) {
             attrs: { 'data-tab': 'credentials', 'data-section': 'provider-credentials' },
             kicker: '凭证',
             title: '钥匙与通道',
-            meta: credentialsCount > 0 ? `${credentialsCount} 项关键凭证已写入。` : '先把关键凭证和通道变量补齐。',
+            meta:
+              credentialsCount > 0
+                ? `${credentialsCount} 项关键凭证已写入。`
+                : '先把关键凭证和通道变量补齐。',
             tone: credentialsCount > 0 ? 'good' : 'warn',
           })}
           ${launcherCardHtml({
@@ -444,7 +461,10 @@ function renderPage(view) {
             attrs: { 'data-tab': 'control', 'data-section': 'toolsets-overview' },
             kicker: '能力',
             title: 'Toolsets 与记忆',
-            meta: data.summary.toolsets.length > 0 ? `${data.summary.toolsets.length} 组能力已配置。` : '把工具面、记忆和外部技能目录理顺。',
+            meta:
+              data.summary.toolsets.length > 0
+                ? `${data.summary.toolsets.length} 组能力已配置。`
+                : '把工具面、记忆和外部技能目录理顺。',
           })}
           ${launcherCardHtml({
             action: 'goto-gateway',
@@ -473,14 +493,26 @@ function renderPage(view) {
       <div class="detail-list compact">
         ${[
           { label: '状态', value: modelReady ? '主配置已可用。' : '主配置尚未完成。' },
-          { label: '提醒', value: warnings[0] || (credentialsCount > 0 ? '可以整理能力与记忆。' : '请先补关键凭证和消息入口。') },
-          { label: '建议', value: !gatewayRunning ? '进入 Gateway 验证消息链路。' : '按需打开编辑页或验证页。' },
-        ].map((item) => `
+          {
+            label: '提醒',
+            value:
+              warnings[0] ||
+              (credentialsCount > 0 ? '可以整理能力与记忆。' : '请先补关键凭证和消息入口。'),
+          },
+          {
+            label: '建议',
+            value: !gatewayRunning ? '进入 Gateway 验证消息链路。' : '按需打开编辑页或验证页。',
+          },
+        ]
+          .map(
+            item => `
           <div class="key-value-row">
             <span>${escapeHtml(item.label)}</span>
             <strong>${escapeHtml(item.value)}</strong>
           </div>
-        `).join('')}
+        `
+          )
+          .join('')}
       </div>
     </section>
   `;
@@ -518,34 +550,100 @@ function renderPage(view) {
               <p class="workspace-main-copy">${escapeHtml(view.editorTab === 'config' ? data.configPath : view.editorTab === 'env' ? data.envPath : view.editorTab === 'credentials' ? data.envPath : '直接修改高频配置项并同步写回 config.yaml')}</p>
             </div>
             <div class="toolbar">
-              ${view.editorTab === 'control'
-                ? `<span id="structured-dirty-pill" class="pill pill-warn" ${structuredDirty ? '' : 'style="display:none"'}>未保存</span>`
-                : view.editorTab === 'credentials'
-                ? `<span id="credentials-dirty-pill" class="pill pill-warn" ${credentialsDirty ? '' : 'style="display:none"'}>未保存</span>`
-                : view.editorTab === 'config'
-                ? `<span id="config-dirty-pill" class="pill pill-warn" ${configDirty ? '' : 'style="display:none"'}>未保存</span>`
-                : `<span id="env-dirty-pill" class="pill pill-warn" ${envDirty ? '' : 'style="display:none"'}>未保存</span>`}
-              ${view.editorTab === 'control'
-                ? buttonHtml({ action: 'save-structured-config', label: view.saving === 'structured' ? '保存中…' : '保存控制面', kind: 'primary', disabled: Boolean(view.saving) || Boolean(view.runningDiagnostic) || Boolean(view.runningAction) })
-                : view.editorTab === 'credentials'
-                ? buttonHtml({ action: 'save-structured-env', label: view.saving === 'structured-env' ? '保存中…' : '保存凭证面', kind: 'primary', disabled: Boolean(view.saving) || Boolean(view.runningDiagnostic) || Boolean(view.runningAction) })
-                : view.editorTab === 'config'
-                ? buttonHtml({ action: 'save-config', label: view.saving === 'config' ? '保存中…' : '保存 YAML', kind: 'primary', disabled: Boolean(view.saving) || Boolean(view.runningDiagnostic) })
-                : buttonHtml({ action: 'save-env', label: view.saving === 'env' ? '保存中…' : '保存 ENV', kind: 'primary', disabled: Boolean(view.saving) || Boolean(view.runningDiagnostic) })}
-              ${view.editorTab === 'control'
-                ? buttonHtml({ action: 'reset-structured-config', label: '重置草稿', disabled: Boolean(view.saving) || Boolean(view.runningDiagnostic) || !structuredDirty })
-                : view.editorTab === 'credentials'
-                ? buttonHtml({ action: 'reset-structured-env', label: '重置草稿', disabled: Boolean(view.saving) || Boolean(view.runningDiagnostic) || !credentialsDirty })
-                : view.editorTab === 'config'
-                ? buttonHtml({ action: 'save-config-verify', label: view.saving === 'config' ? '保存中…' : '保存并体检', disabled: Boolean(view.saving) || Boolean(view.runningDiagnostic) })
-                : buttonHtml({ action: 'save-env-verify', label: view.saving === 'env' ? '保存中…' : '保存并体检', disabled: Boolean(view.saving) || Boolean(view.runningDiagnostic) })}
-              ${view.editorTab === 'control'
-                ? buttonHtml({ action: 'switch-editor-tab', label: '查看 YAML', attrs: { 'data-tab': 'config' } })
-                : view.editorTab === 'credentials'
-                ? buttonHtml({ action: 'switch-editor-tab', label: '查看 .env', attrs: { 'data-tab': 'env' } })
-                : view.editorTab === 'config'
-                ? buttonHtml({ action: 'open-config', label: '定位 config.yaml', disabled: actionBusy })
-                : buttonHtml({ action: 'open-env', label: '定位 .env', disabled: actionBusy })}
+              ${
+                view.editorTab === 'control'
+                  ? `<span id="structured-dirty-pill" class="pill pill-warn" ${structuredDirty ? '' : 'style="display:none"'}>未保存</span>`
+                  : view.editorTab === 'credentials'
+                    ? `<span id="credentials-dirty-pill" class="pill pill-warn" ${credentialsDirty ? '' : 'style="display:none"'}>未保存</span>`
+                    : view.editorTab === 'config'
+                      ? `<span id="config-dirty-pill" class="pill pill-warn" ${configDirty ? '' : 'style="display:none"'}>未保存</span>`
+                      : `<span id="env-dirty-pill" class="pill pill-warn" ${envDirty ? '' : 'style="display:none"'}>未保存</span>`
+              }
+              ${
+                view.editorTab === 'control'
+                  ? buttonHtml({
+                      action: 'save-structured-config',
+                      label: view.saving === 'structured' ? '保存中…' : '保存控制面',
+                      kind: 'primary',
+                      disabled:
+                        Boolean(view.saving) ||
+                        Boolean(view.runningDiagnostic) ||
+                        Boolean(view.runningAction),
+                    })
+                  : view.editorTab === 'credentials'
+                    ? buttonHtml({
+                        action: 'save-structured-env',
+                        label: view.saving === 'structured-env' ? '保存中…' : '保存凭证面',
+                        kind: 'primary',
+                        disabled:
+                          Boolean(view.saving) ||
+                          Boolean(view.runningDiagnostic) ||
+                          Boolean(view.runningAction),
+                      })
+                    : view.editorTab === 'config'
+                      ? buttonHtml({
+                          action: 'save-config',
+                          label: view.saving === 'config' ? '保存中…' : '保存 YAML',
+                          kind: 'primary',
+                          disabled: Boolean(view.saving) || Boolean(view.runningDiagnostic),
+                        })
+                      : buttonHtml({
+                          action: 'save-env',
+                          label: view.saving === 'env' ? '保存中…' : '保存 ENV',
+                          kind: 'primary',
+                          disabled: Boolean(view.saving) || Boolean(view.runningDiagnostic),
+                        })
+              }
+              ${
+                view.editorTab === 'control'
+                  ? buttonHtml({
+                      action: 'reset-structured-config',
+                      label: '重置草稿',
+                      disabled:
+                        Boolean(view.saving) || Boolean(view.runningDiagnostic) || !structuredDirty,
+                    })
+                  : view.editorTab === 'credentials'
+                    ? buttonHtml({
+                        action: 'reset-structured-env',
+                        label: '重置草稿',
+                        disabled:
+                          Boolean(view.saving) ||
+                          Boolean(view.runningDiagnostic) ||
+                          !credentialsDirty,
+                      })
+                    : view.editorTab === 'config'
+                      ? buttonHtml({
+                          action: 'save-config-verify',
+                          label: view.saving === 'config' ? '保存中…' : '保存并体检',
+                          disabled: Boolean(view.saving) || Boolean(view.runningDiagnostic),
+                        })
+                      : buttonHtml({
+                          action: 'save-env-verify',
+                          label: view.saving === 'env' ? '保存中…' : '保存并体检',
+                          disabled: Boolean(view.saving) || Boolean(view.runningDiagnostic),
+                        })
+              }
+              ${
+                view.editorTab === 'control'
+                  ? buttonHtml({
+                      action: 'switch-editor-tab',
+                      label: '查看 YAML',
+                      attrs: { 'data-tab': 'config' },
+                    })
+                  : view.editorTab === 'credentials'
+                    ? buttonHtml({
+                        action: 'switch-editor-tab',
+                        label: '查看 .env',
+                        attrs: { 'data-tab': 'env' },
+                      })
+                    : view.editorTab === 'config'
+                      ? buttonHtml({
+                          action: 'open-config',
+                          label: '定位 config.yaml',
+                          disabled: actionBusy,
+                        })
+                      : buttonHtml({ action: 'open-env', label: '定位 .env', disabled: actionBusy })
+              }
             </div>
           </div>
           ${renderEditorTabs(view, configDirty, envDirty, structuredDirty, credentialsDirty)}
@@ -557,17 +655,20 @@ function renderPage(view) {
           </div>
           <textarea class="editor large" data-editor="config" spellcheck="false" ${view.editorTab === 'config' ? '' : 'style="display:none"'}></textarea>
           <textarea class="editor large" data-editor="env" spellcheck="false" ${view.editorTab === 'env' ? '' : 'style="display:none"'}></textarea>
-          ${view.editorTab === 'config'
-            ? '<p class="helper-text config-editor-hint">保存 YAML 后建议立刻做一次配置体检。</p>'
-            : view.editorTab === 'env'
-            ? '<p class="helper-text config-editor-hint">ENV 保存后建议立刻验证。</p>'
-            : ''}
+          ${
+            view.editorTab === 'config'
+              ? '<p class="helper-text config-editor-hint">保存 YAML 后建议立刻做一次配置体检。</p>'
+              : view.editorTab === 'env'
+                ? '<p class="helper-text config-editor-hint">ENV 保存后建议立刻验证。</p>'
+                : ''
+          }
         </div>
       </div>
     </section>
   `;
-  const verifyBody = verifyView === 'result'
-    ? `
+  const verifyBody =
+    verifyView === 'result'
+      ? `
       <section class="config-section">
           <div class="config-section-header">
             <div>
@@ -578,8 +679,8 @@ function renderPage(view) {
         ${commandResultHtml(view.lastResult, '尚未执行动作', '保存、体检或执行历史迁移动作后，这里会保留最近一次原始回执。')}
       </section>
     `
-    : verifyView === 'links'
-      ? `
+      : verifyView === 'links'
+        ? `
         <section class="config-section">
           <div class="config-section-header">
             <div>
@@ -621,7 +722,7 @@ function renderPage(view) {
           </div>
         </section>
       `
-      : `
+        : `
         <div class="stat-cards stat-cards-4">
           <section class="stat-card">
             <div class="stat-card-header">
@@ -637,7 +738,7 @@ function renderPage(view) {
               ${statusDotHtml(data.summary.terminalBackend ? 'running' : 'warning')}
             </div>
             <div class="stat-card-value">${escapeHtml(data.summary.terminalBackend ? '已接通' : '待补齐')}</div>
-            <div class="stat-card-meta">${escapeHtml(data.summary.terminalBackend ? (data.summary.terminalCwd || '终端后端已声明') : '终端后端为空，很多工具动作会不稳定。')}</div>
+            <div class="stat-card-meta">${escapeHtml(data.summary.terminalBackend ? data.summary.terminalCwd || '终端后端已声明' : '终端后端为空，很多工具动作会不稳定。')}</div>
           </section>
           <section class="stat-card">
             <div class="stat-card-header">
@@ -667,11 +768,12 @@ function renderPage(view) {
     </section>
     ${verifyBody}
   `;
-  const surfaceContent = surfaceView === 'focus'
-    ? focusContent
-    : surfaceView === 'verify'
-      ? verifyContent
-      : workspaceContent;
+  const surfaceContent =
+    surfaceView === 'focus'
+      ? focusContent
+      : surfaceView === 'verify'
+        ? verifyContent
+        : workspaceContent;
 
   view.page.innerHTML = `
     <div class="page-header page-header-compact">
@@ -681,7 +783,9 @@ function renderPage(view) {
       <p class="page-desc">模型、凭证、通道与能力配置。</p>
     </div>
 
-    ${view.investigation ? `
+    ${
+      view.investigation
+        ? `
       <div class="context-banner context-banner-compact">
         <div class="context-banner-header">
           <div class="context-banner-copy">
@@ -696,19 +800,23 @@ function renderPage(view) {
           </div>
         </div>
         <div class="context-banner-actions toolbar">
-          ${view.investigation.suggestedCommand
-            ? buttonHtml({
-                action: 'run-intent-diagnostic',
-                label: '执行建议体检',
-                kind: 'primary',
-                disabled: Boolean(view.runningDiagnostic),
-              })
-            : ''}
+          ${
+            view.investigation.suggestedCommand
+              ? buttonHtml({
+                  action: 'run-intent-diagnostic',
+                  label: '执行建议体检',
+                  kind: 'primary',
+                  disabled: Boolean(view.runningDiagnostic),
+                })
+              : ''
+          }
           ${investigationPrimaryAction(view)}
           ${buttonHtml({ action: 'clear-investigation', label: '清除上下文' })}
         </div>
       </div>
-    ` : ''}
+    `
+        : ''
+    }
 
     <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
       ${surfaceTabHtml(surfaceView, 'focus', '常用')}
@@ -756,14 +864,15 @@ async function loadData(view, options = {}) {
 
   try {
     const profile = view.profile;
-    const [nextConfig, nextSnapshot, nextInstallation, nextSkills, nextExtensions, nextCron] = await Promise.all([
-      api.getConfigDocuments(profile),
-      api.getDashboardSnapshot(profile),
-      api.getInstallationSnapshot(profile),
-      api.listSkills(profile),
-      api.getExtensionsSnapshot(profile),
-      api.getCronJobs(profile),
-    ]);
+    const [nextConfig, nextSnapshot, nextInstallation, nextSkills, nextExtensions, nextCron] =
+      await Promise.all([
+        api.getConfigDocuments(profile),
+        api.getDashboardSnapshot(profile),
+        api.getInstallationSnapshot(profile),
+        api.listSkills(profile),
+        api.getExtensionsSnapshot(profile),
+        api.getCronJobs(profile),
+      ]);
 
     if (view.destroyed || profile !== view.profile) {
       return;
@@ -778,8 +887,10 @@ async function loadData(view, options = {}) {
     view.controlDraft = cloneWorkspace(nextConfig.workspace);
     view.envDraft = cloneEnvWorkspace(nextConfig.envWorkspace);
 
-    const keepConfigDraft = !refreshEditors && previousData ? previousConfig !== previousData.configYaml : false;
-    const keepEnvDraft = !refreshEditors && previousData ? previousEnv !== previousData.envFile : false;
+    const keepConfigDraft =
+      !refreshEditors && previousData ? previousConfig !== previousData.configYaml : false;
+    const keepEnvDraft =
+      !refreshEditors && previousData ? previousEnv !== previousData.envFile : false;
 
     view.configYaml = keepConfigDraft ? previousConfig : nextConfig.configYaml;
     view.envFile = keepEnvDraft ? previousEnv : nextConfig.envFile;
@@ -944,7 +1055,7 @@ async function runFinderAction(view, actionKey, label, path, revealInFinder = fa
       },
       path,
       revealInFinder,
-      setBusy: (value) => {
+      setBusy: value => {
         view.runningAction = value;
         renderPage(view);
       },
@@ -961,10 +1072,12 @@ function syncDirtyPills(view) {
   const structuredDirtyPill = view.page.querySelector('#structured-dirty-pill');
   const credentialsDirtyPill = view.page.querySelector('#credentials-dirty-pill');
   if (configDirtyPill) {
-    configDirtyPill.style.display = view.data && view.configYaml !== view.data.configYaml ? 'inline-flex' : 'none';
+    configDirtyPill.style.display =
+      view.data && view.configYaml !== view.data.configYaml ? 'inline-flex' : 'none';
   }
   if (envDirtyPill) {
-    envDirtyPill.style.display = view.data && view.envFile !== view.data.envFile ? 'inline-flex' : 'none';
+    envDirtyPill.style.display =
+      view.data && view.envFile !== view.data.envFile ? 'inline-flex' : 'none';
   }
   if (structuredDirtyPill) {
     structuredDirtyPill.style.display = structuredConfigDirty(view) ? 'inline-flex' : 'none';
@@ -989,7 +1102,10 @@ function appendSkillExternalDirs(view, values) {
   const before = view.controlDraft.skillsExternalDirs.length;
   replaceSkillExternalDirs(view, [...view.controlDraft.skillsExternalDirs, ...normalized]);
   const added = view.controlDraft.skillsExternalDirs.length - before;
-  notify('success', added > 0 ? `已加入 ${added} 个外部 Skills 目录。` : '目录已存在，未重复加入。');
+  notify(
+    'success',
+    added > 0 ? `已加入 ${added} 个外部 Skills 目录。` : '目录已存在，未重复加入。'
+  );
   return true;
 }
 
@@ -1006,14 +1122,12 @@ function toggleTopToolset(view, value) {
   const selected = uniqueValues(view.controlDraft.toolsets);
   replaceTopToolsets(
     view,
-    selected.includes(target)
-      ? selected.filter((item) => item !== target)
-      : [...selected, target],
+    selected.includes(target) ? selected.filter(item => item !== target) : [...selected, target]
   );
 }
 
 function replacePlatformBindings(view, bindings) {
-  view.controlDraft.platformToolsets = [...(bindings ?? [])].map((item) => ({
+  view.controlDraft.platformToolsets = [...(bindings ?? [])].map(item => ({
     platform: String(item?.platform ?? ''),
     toolsets: uniqueValues(item?.toolsets ?? []),
   }));
@@ -1050,7 +1164,12 @@ function addPlatformBinding(view, platformValue, toolsetsValue) {
   }
 
   const bindings = [...(view.controlDraft.platformToolsets ?? [])];
-  const existingIndex = bindings.findIndex((item) => String(item?.platform ?? '').trim().toLowerCase() === platform.toLowerCase());
+  const existingIndex = bindings.findIndex(
+    item =>
+      String(item?.platform ?? '')
+        .trim()
+        .toLowerCase() === platform.toLowerCase()
+  );
   if (existingIndex >= 0) {
     bindings[existingIndex] = {
       ...bindings[existingIndex],
@@ -1067,7 +1186,7 @@ function addPlatformBinding(view, platformValue, toolsetsValue) {
 function removePlatformBinding(view, index) {
   replacePlatformBindings(
     view,
-    (view.controlDraft.platformToolsets ?? []).filter((_, itemIndex) => itemIndex !== index),
+    (view.controlDraft.platformToolsets ?? []).filter((_, itemIndex) => itemIndex !== index)
   );
 }
 
@@ -1083,7 +1202,7 @@ function toggleBindingToolset(view, index, value) {
   const nextToolsets = uniqueValues(current.toolsets ?? []);
   updatePlatformBinding(view, index, {
     toolsets: nextToolsets.includes(target)
-      ? nextToolsets.filter((item) => item !== target)
+      ? nextToolsets.filter(item => item !== target)
       : [...nextToolsets, target],
   });
 }
@@ -1140,7 +1259,7 @@ function syncWithPanelState(view) {
 }
 
 function bindEvents(view) {
-  view.page.querySelectorAll('[data-config-surface]').forEach((element) => {
+  view.page.querySelectorAll('[data-config-surface]').forEach(element => {
     element.onclick = () => {
       const nextView = element.getAttribute('data-config-surface');
       if (!nextView || nextView === view.surfaceView) {
@@ -1151,7 +1270,7 @@ function bindEvents(view) {
     };
   });
 
-  view.page.querySelectorAll('[data-verify-view]').forEach((element) => {
+  view.page.querySelectorAll('[data-verify-view]').forEach(element => {
     element.onclick = () => {
       const nextView = element.getAttribute('data-verify-view');
       if (!nextView || nextView === view.verifyView) {
@@ -1162,7 +1281,7 @@ function bindEvents(view) {
     };
   });
 
-  view.page.querySelectorAll('[data-control-model-view]').forEach((element) => {
+  view.page.querySelectorAll('[data-control-model-view]').forEach(element => {
     element.onclick = () => {
       const nextView = element.getAttribute('data-control-model-view');
       if (!nextView || nextView === view.controlModelView) {
@@ -1170,12 +1289,17 @@ function bindEvents(view) {
       }
       view.controlModelView = nextView;
       view.editorTab = 'control';
-      view.activeWorkspaceSection = nextView === 'connect' ? 'model-presets' : nextView === 'detail' ? 'model-detail' : 'model-governance';
+      view.activeWorkspaceSection =
+        nextView === 'connect'
+          ? 'model-presets'
+          : nextView === 'detail'
+            ? 'model-detail'
+            : 'model-governance';
       renderPage(view);
     };
   });
 
-  view.page.querySelectorAll('[data-control-toolset-view]').forEach((element) => {
+  view.page.querySelectorAll('[data-control-toolset-view]').forEach(element => {
     element.onclick = () => {
       const nextView = element.getAttribute('data-control-toolset-view');
       if (!nextView || nextView === view.controlToolsetView) {
@@ -1183,13 +1307,14 @@ function bindEvents(view) {
       }
       view.controlToolsetView = nextView;
       view.editorTab = 'control';
-      view.activeWorkspaceSection = nextView === 'platform'
-        ? 'toolsets-detail'
-        : nextView === 'manual'
-          ? 'toolsets-manual'
-          : nextView === 'presets'
-            ? 'toolsets-presets'
-            : 'toolsets-overview';
+      view.activeWorkspaceSection =
+        nextView === 'platform'
+          ? 'toolsets-detail'
+          : nextView === 'manual'
+            ? 'toolsets-manual'
+            : nextView === 'presets'
+              ? 'toolsets-presets'
+              : 'toolsets-overview';
       renderPage(view);
     };
   });
@@ -1198,14 +1323,14 @@ function bindEvents(view) {
   const envEditor = view.page.querySelector('[data-editor="env"]');
 
   if (configEditor) {
-    configEditor.oninput = (event) => {
+    configEditor.oninput = event => {
       view.configYaml = event.target.value;
       syncDirtyPills(view);
     };
   }
 
   if (envEditor) {
-    envEditor.oninput = (event) => {
+    envEditor.oninput = event => {
       view.envFile = event.target.value;
       syncDirtyPills(view);
     };
@@ -1216,7 +1341,7 @@ function bindEvents(view) {
     if (!node) {
       return;
     }
-    node.addEventListener('input', (event) => {
+    node.addEventListener('input', event => {
       view.controlDraft[key] = event.target.value;
       syncDirtyPills(view);
     });
@@ -1227,7 +1352,7 @@ function bindEvents(view) {
     if (!node) {
       return;
     }
-    node.addEventListener('change', (event) => {
+    node.addEventListener('change', event => {
       view.controlDraft[key] = event.target.checked;
       syncDirtyPills(view);
     });
@@ -1238,7 +1363,7 @@ function bindEvents(view) {
     if (!node) {
       return;
     }
-    node.addEventListener('input', (event) => {
+    node.addEventListener('input', event => {
       view.envDraft[key] = event.target.value;
       syncDirtyPills(view);
     });
@@ -1249,7 +1374,7 @@ function bindEvents(view) {
     if (!node) {
       return;
     }
-    node.addEventListener('change', (event) => {
+    node.addEventListener('change', event => {
       view.envDraft[key] = event.target.checked;
       syncDirtyPills(view);
     });
@@ -1273,32 +1398,32 @@ function bindEvents(view) {
   bindControlCheckbox('#control-discord-auto-thread', 'discordAutoThread');
   bindControlCheckbox('#control-discord-reactions', 'discordReactions');
 
-  view.page.querySelector('#control-memory-char-limit')?.addEventListener('input', (event) => {
+  view.page.querySelector('#control-memory-char-limit')?.addEventListener('input', event => {
     view.controlDraft.memoryCharLimit = parseOptionalNumber(event.target.value);
     syncDirtyPills(view);
   });
 
-  view.page.querySelector('#control-user-char-limit')?.addEventListener('input', (event) => {
+  view.page.querySelector('#control-user-char-limit')?.addEventListener('input', event => {
     view.controlDraft.userCharLimit = parseOptionalNumber(event.target.value);
     syncDirtyPills(view);
   });
 
-  view.page.querySelector('#control-approvals-timeout')?.addEventListener('input', (event) => {
+  view.page.querySelector('#control-approvals-timeout')?.addEventListener('input', event => {
     view.controlDraft.approvalsTimeout = parseOptionalNumber(event.target.value);
     syncDirtyPills(view);
   });
 
-  view.page.querySelector('#control-approvals-mode')?.addEventListener('change', (event) => {
+  view.page.querySelector('#control-approvals-mode')?.addEventListener('change', event => {
     view.controlDraft.approvalsMode = event.target.value;
     syncDirtyPills(view);
   });
 
   const toolsetEntry = view.page.querySelector('#control-toolset-entry');
   if (toolsetEntry) {
-    toolsetEntry.addEventListener('input', (event) => {
+    toolsetEntry.addEventListener('input', event => {
       view.toolsetEntryInput = event.target.value;
     });
-    toolsetEntry.addEventListener('keydown', (event) => {
+    toolsetEntry.addEventListener('keydown', event => {
       if (event.key !== 'Enter') {
         return;
       }
@@ -1316,22 +1441,28 @@ function bindEvents(view) {
 
   const platformBindingPlatform = view.page.querySelector('#control-platform-binding-platform');
   if (platformBindingPlatform) {
-    platformBindingPlatform.addEventListener('input', (event) => {
+    platformBindingPlatform.addEventListener('input', event => {
       view.platformBindingPlatformInput = event.target.value;
     });
   }
 
   const platformBindingToolsets = view.page.querySelector('#control-platform-binding-toolsets');
   if (platformBindingToolsets) {
-    platformBindingToolsets.addEventListener('input', (event) => {
+    platformBindingToolsets.addEventListener('input', event => {
       view.platformBindingToolsetsInput = event.target.value;
     });
-    platformBindingToolsets.addEventListener('keydown', (event) => {
+    platformBindingToolsets.addEventListener('keydown', event => {
       if (event.key !== 'Enter' || (!event.metaKey && !event.ctrlKey)) {
         return;
       }
       event.preventDefault();
-      if (addPlatformBinding(view, view.platformBindingPlatformInput, view.platformBindingToolsetsInput)) {
+      if (
+        addPlatformBinding(
+          view,
+          view.platformBindingPlatformInput,
+          view.platformBindingToolsetsInput
+        )
+      ) {
         view.platformBindingPlatformInput = '';
         view.platformBindingToolsetsInput = '';
         renderPage(view);
@@ -1339,9 +1470,12 @@ function bindEvents(view) {
     });
   }
 
-  view.page.querySelectorAll('[data-binding-platform-index]').forEach((element) => {
-    element.addEventListener('input', (event) => {
-      const index = Number.parseInt(event.target.getAttribute('data-binding-platform-index') || '', 10);
+  view.page.querySelectorAll('[data-binding-platform-index]').forEach(element => {
+    element.addEventListener('input', event => {
+      const index = Number.parseInt(
+        event.target.getAttribute('data-binding-platform-index') || '',
+        10
+      );
       if (Number.isNaN(index)) {
         return;
       }
@@ -1349,9 +1483,12 @@ function bindEvents(view) {
     });
   });
 
-  view.page.querySelectorAll('[data-binding-toolsets-index]').forEach((element) => {
-    element.addEventListener('input', (event) => {
-      const index = Number.parseInt(event.target.getAttribute('data-binding-toolsets-index') || '', 10);
+  view.page.querySelectorAll('[data-binding-toolsets-index]').forEach(element => {
+    element.addEventListener('input', event => {
+      const index = Number.parseInt(
+        event.target.getAttribute('data-binding-toolsets-index') || '',
+        10
+      );
       if (Number.isNaN(index)) {
         return;
       }
@@ -1361,10 +1498,10 @@ function bindEvents(view) {
 
   const skillDirEntry = view.page.querySelector('#control-skill-dir-entry');
   if (skillDirEntry) {
-    skillDirEntry.addEventListener('input', (event) => {
+    skillDirEntry.addEventListener('input', event => {
       view.skillDirInput = event.target.value;
     });
-    skillDirEntry.addEventListener('keydown', (event) => {
+    skillDirEntry.addEventListener('keydown', event => {
       if (event.key !== 'Enter') {
         return;
       }
@@ -1379,10 +1516,10 @@ function bindEvents(view) {
 
   const skillDirBulk = view.page.querySelector('#control-skill-dir-bulk');
   if (skillDirBulk) {
-    skillDirBulk.addEventListener('input', (event) => {
+    skillDirBulk.addEventListener('input', event => {
       view.skillDirBulkInput = event.target.value;
     });
-    skillDirBulk.addEventListener('keydown', (event) => {
+    skillDirBulk.addEventListener('keydown', event => {
       if (event.key !== 'Enter' || (!event.metaKey && !event.ctrlKey)) {
         return;
       }
@@ -1415,27 +1552,27 @@ function bindEvents(view) {
   bindEnvValue('#env-terminal-modal-image', 'terminalModalImage');
   bindEnvCheckbox('#env-whatsapp-enabled', 'whatsappEnabled');
 
-  view.page.querySelector('#env-terminal-timeout')?.addEventListener('input', (event) => {
+  view.page.querySelector('#env-terminal-timeout')?.addEventListener('input', event => {
     view.envDraft.terminalTimeout = parseOptionalNumber(event.target.value);
     syncDirtyPills(view);
   });
 
-  view.page.querySelector('#env-terminal-lifetime-seconds')?.addEventListener('input', (event) => {
+  view.page.querySelector('#env-terminal-lifetime-seconds')?.addEventListener('input', event => {
     view.envDraft.terminalLifetimeSeconds = parseOptionalNumber(event.target.value);
     syncDirtyPills(view);
   });
 
-  view.page.querySelector('#env-browser-session-timeout')?.addEventListener('input', (event) => {
+  view.page.querySelector('#env-browser-session-timeout')?.addEventListener('input', event => {
     view.envDraft.browserSessionTimeout = parseOptionalNumber(event.target.value);
     syncDirtyPills(view);
   });
 
-  view.page.querySelector('#env-browser-inactivity-timeout')?.addEventListener('input', (event) => {
+  view.page.querySelector('#env-browser-inactivity-timeout')?.addEventListener('input', event => {
     view.envDraft.browserInactivityTimeout = parseOptionalNumber(event.target.value);
     syncDirtyPills(view);
   });
 
-  view.page.querySelectorAll('[data-action]').forEach((element) => {
+  view.page.querySelectorAll('[data-action]').forEach(element => {
     element.onclick = async () => {
       const action = element.getAttribute('data-action');
       if (!action) {
@@ -1459,7 +1596,7 @@ function bindEvents(view) {
           queueWorkspaceFocus(
             view,
             element.getAttribute('data-tab') || 'control',
-            element.getAttribute('data-section') || '',
+            element.getAttribute('data-section') || ''
           );
           return;
         case 'toggle-compatibility-actions':
@@ -1512,12 +1649,20 @@ function bindEvents(view) {
         case 'toggle-streaming-output':
           view.controlDraft.streamingEnabled = !view.controlDraft.streamingEnabled;
           renderPage(view);
-          notify('success', view.controlDraft.streamingEnabled ? '已开启流式输出。' : '已关闭流式输出。');
+          notify(
+            'success',
+            view.controlDraft.streamingEnabled ? '已开启流式输出。' : '已关闭流式输出。'
+          );
           return;
         case 'apply-base-url-value': {
           view.controlDraft.modelBaseUrl = String(element.getAttribute('data-value') || '').trim();
           renderPage(view);
-          notify('success', view.controlDraft.modelBaseUrl ? 'Base URL 已更新。' : '已清空 Base URL，改为跟随 provider 默认值。');
+          notify(
+            'success',
+            view.controlDraft.modelBaseUrl
+              ? 'Base URL 已更新。'
+              : '已清空 Base URL，改为跟随 provider 默认值。'
+          );
           return;
         }
         case 'apply-toolset-preset': {
@@ -1537,15 +1682,24 @@ function bindEvents(view) {
             return;
           }
           view.controlDraft.memoryEnabled = Boolean(preset.memoryEnabled);
-          view.controlDraft.userProfileEnabled = Boolean(preset.userProfileEnabled && preset.memoryEnabled);
-          view.controlDraft.memoryProvider = preset.memoryEnabled ? String(preset.provider || '') : '';
+          view.controlDraft.userProfileEnabled = Boolean(
+            preset.userProfileEnabled && preset.memoryEnabled
+          );
+          view.controlDraft.memoryProvider = preset.memoryEnabled
+            ? String(preset.provider || '')
+            : '';
           if (preset.memoryEnabled) {
             view.controlDraft.toolsets = uniqueValues([...view.controlDraft.toolsets, 'memory']);
           } else {
-            view.controlDraft.toolsets = view.controlDraft.toolsets.filter((item) => item !== 'memory');
+            view.controlDraft.toolsets = view.controlDraft.toolsets.filter(
+              item => item !== 'memory'
+            );
           }
           renderPage(view);
-          notify('success', preset.memoryEnabled ? `已切换到 ${preset.label}。` : '已关闭记忆与用户画像。');
+          notify(
+            'success',
+            preset.memoryEnabled ? `已切换到 ${preset.label}。` : '已关闭记忆与用户画像。'
+          );
           return;
         }
         case 'apply-terminal-preset': {
@@ -1632,7 +1786,13 @@ function bindEvents(view) {
           renderPage(view);
           return;
         case 'add-platform-binding': {
-          if (addPlatformBinding(view, view.platformBindingPlatformInput, view.platformBindingToolsetsInput)) {
+          if (
+            addPlatformBinding(
+              view,
+              view.platformBindingPlatformInput,
+              view.platformBindingToolsetsInput
+            )
+          ) {
             view.platformBindingPlatformInput = '';
             view.platformBindingToolsetsInput = '';
             renderPage(view);
@@ -1643,7 +1803,20 @@ function bindEvents(view) {
           const presetId = String(element.getAttribute('data-preset') || '').trim();
           const presetMap = {
             'cli-default': { platform: 'cli', toolsets: ['hermes-cli'] },
-            'cli-dev': { platform: 'cli', toolsets: ['web', 'browser', 'terminal', 'file', 'skills', 'todo', 'memory', 'session_search', 'code_execution'] },
+            'cli-dev': {
+              platform: 'cli',
+              toolsets: [
+                'web',
+                'browser',
+                'terminal',
+                'file',
+                'skills',
+                'todo',
+                'memory',
+                'session_search',
+                'code_execution',
+              ],
+            },
             'telegram-link': { platform: 'telegram', toolsets: ['hermes-telegram'] },
             'discord-link': { platform: 'discord', toolsets: ['hermes-discord'] },
             'slack-link': { platform: 'slack', toolsets: ['hermes-slack'] },
@@ -1701,7 +1874,7 @@ function bindEvents(view) {
           }
           replaceSkillExternalDirs(
             view,
-            view.controlDraft.skillsExternalDirs.filter((item) => item !== path),
+            view.controlDraft.skillsExternalDirs.filter(item => item !== path)
           );
           notify('success', '已从外部 Skills 目录列表移除。');
           renderPage(view);
@@ -1712,7 +1885,13 @@ function bindEvents(view) {
           if (!path) {
             return;
           }
-          await runFinderAction(view, 'finder:skills-external-dir', '外部 Skills 目录', path, false);
+          await runFinderAction(
+            view,
+            'finder:skills-external-dir',
+            '外部 Skills 目录',
+            path,
+            false
+          );
           return;
         }
         case 'toggle-skill-dir-bulk':
@@ -1720,7 +1899,10 @@ function bindEvents(view) {
           renderPage(view);
           return;
         case 'merge-skill-external-bulk': {
-          const added = appendSkillExternalDirs(view, splitLineValues(view.skillDirBulkInput || ''));
+          const added = appendSkillExternalDirs(
+            view,
+            splitLineValues(view.skillDirBulkInput || '')
+          );
           if (added) {
             view.skillDirBulkInput = '';
             view.showSkillDirBulk = false;
@@ -1756,7 +1938,12 @@ function bindEvents(view) {
           await saveDocument(view, 'env', true);
           return;
         case 'compat-config-migrate':
-          await runConfigCompatAction(view, 'config:compat-migrate', 'config-migrate', '迁移旧配置');
+          await runConfigCompatAction(
+            view,
+            'config:compat-migrate',
+            'config-migrate',
+            '迁移旧配置'
+          );
           return;
         case 'compat-claw-migrate':
           await runConfigCompatAction(view, 'config:claw-migrate', 'claw-migrate', '导入 OpenClaw');

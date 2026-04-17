@@ -75,7 +75,7 @@ export const PAGE_ROUTES: Record<AppPageKey, string> = {
 };
 
 const ROUTE_TO_PAGE = Object.fromEntries(
-  Object.entries(PAGE_ROUTES).map(([key, route]) => [route, key as AppPageKey]),
+  Object.entries(PAGE_ROUTES).map(([key, route]) => [route, key as AppPageKey])
 ) as Record<string, AppPageKey>;
 
 export function pageFromRoute(route: string): AppPageKey {

@@ -50,18 +50,21 @@ import type {
   SkillSaveRequest,
 } from '../types';
 
-const desktopOnlyMessage = '当前页面运行在浏览器预览环境，HermesPanel 的控制能力仅在 Tauri 桌面端可用。请使用 npm run tauri:dev 打开桌面客户端。';
+const desktopOnlyMessage =
+  '当前页面运行在浏览器预览环境，HermesPanel 的控制能力仅在 Tauri 桌面端可用。请使用 npm run tauri:dev 打开桌面客户端。';
 
 function resolveTauriInvoke() {
   if (typeof window === 'undefined') {
     return null;
   }
 
-  const runtime = (window as Window & {
-    __TAURI_INTERNALS__?: {
-      invoke?: typeof invoke;
-    };
-  }).__TAURI_INTERNALS__;
+  const runtime = (
+    window as Window & {
+      __TAURI_INTERNALS__?: {
+        invoke?: typeof invoke;
+      };
+    }
+  ).__TAURI_INTERNALS__;
 
   return typeof runtime?.invoke === 'function' ? invoke : null;
 }
@@ -110,10 +113,17 @@ export const api = {
     call<ConfigDocuments>('get_config_documents', withProfile(profile)),
   getExtensionsSnapshot: (profile?: string) =>
     call<ExtensionsSnapshot>('get_extensions_snapshot', withProfile(profile)),
-  runToolAction: (action: 'enable' | 'disable', platform: string, names: string[], profile?: string) =>
-    call<CommandRunResult>('run_tool_action', withProfile(profile, { action, platform, names })),
-  runPluginAction: (action: 'enable' | 'disable' | 'install' | 'update' | 'remove', name: string, profile?: string) =>
-    call<CommandRunResult>('run_plugin_action', withProfile(profile, { action, name })),
+  runToolAction: (
+    action: 'enable' | 'disable',
+    platform: string,
+    names: string[],
+    profile?: string
+  ) => call<CommandRunResult>('run_tool_action', withProfile(profile, { action, platform, names })),
+  runPluginAction: (
+    action: 'enable' | 'disable' | 'install' | 'update' | 'remove',
+    name: string,
+    profile?: string
+  ) => call<CommandRunResult>('run_plugin_action', withProfile(profile, { action, name })),
   createPlugin: (request: PluginCreateRequest, profile?: string) =>
     call<PluginCreateResult>('create_plugin', withProfile(profile, { request })),
   importPlugin: (request: PluginImportRequest, profile?: string) =>
@@ -158,9 +168,11 @@ export const api = {
   deleteLocalSkill: (request: SkillDeleteRequest, profile?: string) =>
     call<SkillDeleteResult>('delete_local_skill', withProfile(profile, { request })),
   runSkillAction: (action: string, value?: string | null, profile?: string) =>
-    call<CommandRunResult>('run_skill_action', withProfile(profile, { action, value: value || null })),
-  getCronJobs: (profile?: string) =>
-    call<CronJobsSnapshot>('get_cron_jobs', withProfile(profile)),
+    call<CommandRunResult>(
+      'run_skill_action',
+      withProfile(profile, { action, value: value || null })
+    ),
+  getCronJobs: (profile?: string) => call<CronJobsSnapshot>('get_cron_jobs', withProfile(profile)),
   createCronJob: (request: CronCreateRequest, profile?: string) =>
     call<CommandRunResult>('create_cron_job', withProfile(profile, { request })),
   updateCronJob: (request: CronUpdateRequest, profile?: string) =>
@@ -173,19 +185,14 @@ export const api = {
     call<CommandRunResult>('open_in_terminal', { request }),
   runCronAction: (action: string, jobId: string, profile?: string) =>
     call<CommandRunResult>('run_cron_action', withProfile(profile, { action, jobId })),
-  readLog: (
-    logName: string,
-    limit?: number,
-    level?: string,
-    contains?: string,
-    profile?: string,
-  ) => call<LogReadResult>('read_log', {
-    ...withProfile(profile),
-    logName,
-    limit,
-    level: level || null,
-    contains: contains || null,
-  }),
+  readLog: (logName: string, limit?: number, level?: string, contains?: string, profile?: string) =>
+    call<LogReadResult>('read_log', {
+      ...withProfile(profile),
+      logName,
+      limit,
+      level: level || null,
+      contains: contains || null,
+    }),
   listMemoryFiles: (profile?: string) =>
     call<MemoryFileSummary[]>('list_memory_files', withProfile(profile)),
   readMemoryFile: (key: string, profile?: string) =>

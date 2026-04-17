@@ -72,16 +72,19 @@ function severity(tone: RuntimePostureTone) {
   }
 }
 
-function summaryOrDefault(configDocuments?: ConfigDocuments | null, dashboard?: DashboardSnapshot | null) {
+function summaryOrDefault(
+  configDocuments?: ConfigDocuments | null,
+  dashboard?: DashboardSnapshot | null
+) {
   return configDocuments?.summary ?? dashboard?.config ?? DEFAULT_CONFIG;
 }
 
 function postureHeadline(items: RuntimePostureItem[]) {
-  const badCount = items.filter((item) => item.tone === 'bad').length;
-  const warnCount = items.filter((item) => item.tone === 'warn').length;
+  const badCount = items.filter(item => item.tone === 'bad').length;
+  const warnCount = items.filter(item => item.tone === 'warn').length;
   const worst = items.reduce<RuntimePostureTone>(
     (current, item) => (severity(item.tone) > severity(current) ? item.tone : current),
-    'good',
+    'good'
   );
 
   if (worst === 'bad') {
@@ -111,15 +114,17 @@ export function buildRuntimePosture(input: RuntimePostureInput): RuntimePostureS
   const extensions = input.extensions;
   const skills = input.skills ?? [];
   const jobs = input.cronSnapshot?.jobs ?? [];
-  const remoteJobs = jobs.filter((job) => isRemoteDelivery(job.deliver));
+  const remoteJobs = jobs.filter(job => isRemoteDelivery(job.deliver));
   const failingRemoteJobs = remoteJobs.filter(hasCronFailure);
   const gateway = dashboard?.gateway ?? null;
   const gatewayPlatforms = gateway?.platforms ?? [];
-  const unhealthyPlatforms = gatewayPlatforms.filter((platform) => platformTone(platform.state) !== 'good');
+  const unhealthyPlatforms = gatewayPlatforms.filter(
+    platform => platformTone(platform.state) !== 'good'
+  );
   const enabledTools = enabledToolCount(extensions);
   const totalTools = totalToolCount(extensions);
   const runtimeLocalSkills = localRuntimeSkillCount(extensions);
-  const missingMemoryFiles = dashboard?.memoryFiles.filter((item) => !item.exists) ?? [];
+  const missingMemoryFiles = dashboard?.memoryFiles.filter(item => !item.exists) ?? [];
   const sessionsCount = dashboard?.counts.sessions ?? 0;
   const toolsets = config.toolsets ?? [];
   const providerReady = Boolean(config.modelProvider && config.modelDefault);
@@ -130,11 +135,13 @@ export function buildRuntimePosture(input: RuntimePostureInput): RuntimePostureS
   const userProfileEnabled = config.userProfileEnabled !== false;
   const memoryProvider = config.memoryProvider || 'builtin-file';
   const memoryRuntimeMismatch = Boolean(
-    config.memoryProvider
-    && extensions
-    && extensions.memoryRuntime.provider.toLowerCase().includes('none'),
+    config.memoryProvider &&
+    extensions &&
+    extensions.memoryRuntime.provider.toLowerCase().includes('none')
   );
-  const localSkillMismatch = Boolean(extensions && skills.length > 0 && runtimeLocalSkills !== skills.length);
+  const localSkillMismatch = Boolean(
+    extensions && skills.length > 0 && runtimeLocalSkills !== skills.length
+  );
 
   const items: RuntimePostureItem[] = [
     {
@@ -166,29 +173,43 @@ export function buildRuntimePosture(input: RuntimePostureInput): RuntimePostureS
     {
       key: 'capability',
       title: 'Capability Surface',
-      tone: toolsets.length === 0 ? 'warn' : extensions && enabledTools === 0 ? 'bad' : localSkillMismatch ? 'warn' : 'good',
+      tone:
+        toolsets.length === 0
+          ? 'warn'
+          : extensions && enabledTools === 0
+            ? 'bad'
+            : localSkillMismatch
+              ? 'warn'
+              : 'good',
       summary: `${toolsets.length} 个 toolsets / ${enabledTools}${extensions ? ` / ${totalTools}` : ''} 个运行中 tools`,
-      detail: toolsets.length === 0
-        ? '当前没有配置 toolsets，模型看到的能力面会明显收窄。'
-        : extensions
-          ? localSkillMismatch
-            ? `CLI local skills = ${runtimeLocalSkills}，本地目录扫描 = ${skills.length}，安装态与文件态存在差异。`
-            : `运行时 skills ${extensions.runtimeSkills.length} 个，插件 ${extensions.plugins.installedCount} 个。`
-          : '首页未加载扩展运行态，这里只展示配置侧能力声明。',
+      detail:
+        toolsets.length === 0
+          ? '当前没有配置 toolsets，模型看到的能力面会明显收窄。'
+          : extensions
+            ? localSkillMismatch
+              ? `CLI local skills = ${runtimeLocalSkills}，本地目录扫描 = ${skills.length}，安装态与文件态存在差异。`
+              : `运行时 skills ${extensions.runtimeSkills.length} 个，插件 ${extensions.plugins.installedCount} 个。`
+            : '首页未加载扩展运行态，这里只展示配置侧能力声明。',
       page: 'extensions',
       actionLabel: '查看能力面',
     },
     {
       key: 'memory',
       title: 'Memory Loop',
-      tone: !memoryEnabled ? 'warn' : memoryRuntimeMismatch ? 'bad' : missingMemoryFiles.length > 0 || !userProfileEnabled ? 'warn' : 'good',
+      tone: !memoryEnabled
+        ? 'warn'
+        : memoryRuntimeMismatch
+          ? 'bad'
+          : missingMemoryFiles.length > 0 || !userProfileEnabled
+            ? 'warn'
+            : 'good',
       summary: `${memoryProvider} / memory ${memoryEnabled ? 'on' : 'off'} / user ${userProfileEnabled ? 'on' : 'off'}`,
       detail: !memoryEnabled
         ? '记忆能力当前关闭，长期人格与用户偏好不会稳定进入运行闭环。'
         : memoryRuntimeMismatch
           ? `配置声明了 ${memoryProvider}，但运行态未识别到对应 provider。`
           : missingMemoryFiles.length > 0
-            ? `缺失记忆文件：${missingMemoryFiles.map((item) => item.label).join('、')}。`
+            ? `缺失记忆文件：${missingMemoryFiles.map(item => item.label).join('、')}。`
             : 'SOUL / MEMORY / USER 文件与配置开关基本一致。',
       page: 'memory',
       actionLabel: '检查记忆环路',
@@ -214,7 +235,7 @@ export function buildRuntimePosture(input: RuntimePostureInput): RuntimePostureS
         : failingRemoteJobs.length > 0
           ? `${failingRemoteJobs.length} 个远端作业已经出现交付异常。`
           : unhealthyPlatforms.length > 0
-            ? `异常平台：${unhealthyPlatforms.map((platform) => platform.name).join('、')}。`
+            ? `异常平台：${unhealthyPlatforms.map(platform => platform.name).join('、')}。`
             : remoteJobs.length > 0
               ? '远端投递链路存在，建议持续联动日志与平台状态。'
               : '当前主要以前台 CLI / 本地链路为主，网关压力相对可控。',
@@ -224,18 +245,20 @@ export function buildRuntimePosture(input: RuntimePostureInput): RuntimePostureS
     {
       key: 'closure',
       title: 'Validation Closure',
-      tone: sessionsCount === 0 ? 'warn' : (dashboard?.counts.logFiles ?? 0) === 0 ? 'warn' : 'good',
+      tone:
+        sessionsCount === 0 ? 'warn' : (dashboard?.counts.logFiles ?? 0) === 0 ? 'warn' : 'good',
       summary: `${sessionsCount} 个 sessions / ${dashboard?.counts.logFiles ?? 0} 个日志文件`,
-      detail: sessionsCount === 0
-        ? '当前还没有真实会话回放，很多配置和能力面无法在本地完成闭环验证。'
-        : `最近已有会话与日志落盘，适合继续从 Sessions 与 Logs 做取证和回放。`,
+      detail:
+        sessionsCount === 0
+          ? '当前还没有真实会话回放，很多配置和能力面无法在本地完成闭环验证。'
+          : `最近已有会话与日志落盘，适合继续从 Sessions 与 Logs 做取证和回放。`,
       page: 'sessions',
       actionLabel: '查看会话闭环',
     },
   ];
 
   const priorities = [...items]
-    .filter((item) => item.tone === 'bad' || item.tone === 'warn')
+    .filter(item => item.tone === 'bad' || item.tone === 'warn')
     .sort((left, right) => severity(right.tone) - severity(left.tone));
   const headline = postureHeadline(items);
 

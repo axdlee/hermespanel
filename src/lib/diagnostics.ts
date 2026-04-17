@@ -20,7 +20,16 @@ export interface DiagnosticCommandDefinition {
   relatedLog: 'agent' | 'errors' | 'gateway' | 'gateway.error';
   kind: 'primary' | 'secondary';
   scope: 'runtime' | 'capability';
-  relatedPage: 'dashboard' | 'gateway' | 'config' | 'skills' | 'extensions' | 'memory' | 'logs' | 'cron' | 'diagnostics';
+  relatedPage:
+    | 'dashboard'
+    | 'gateway'
+    | 'config'
+    | 'skills'
+    | 'extensions'
+    | 'memory'
+    | 'logs'
+    | 'cron'
+    | 'diagnostics';
 }
 
 export const DIAGNOSTIC_COMMANDS: DiagnosticCommandDefinition[] = [
@@ -153,12 +162,18 @@ const GATEWAY_DIAGNOSTIC_KEYS = new Set<DiagnosticKind>([
   'config-check',
 ]);
 
-export const RUNTIME_DIAGNOSTIC_COMMANDS = DIAGNOSTIC_COMMANDS.filter((item) => item.scope === 'runtime');
+export const RUNTIME_DIAGNOSTIC_COMMANDS = DIAGNOSTIC_COMMANDS.filter(
+  item => item.scope === 'runtime'
+);
 
-export const CAPABILITY_DIAGNOSTIC_COMMANDS = DIAGNOSTIC_COMMANDS.filter((item) => item.scope === 'capability');
+export const CAPABILITY_DIAGNOSTIC_COMMANDS = DIAGNOSTIC_COMMANDS.filter(
+  item => item.scope === 'capability'
+);
 
-export const GATEWAY_DIAGNOSTIC_COMMANDS = DIAGNOSTIC_COMMANDS.filter((item) => GATEWAY_DIAGNOSTIC_KEYS.has(item.key));
+export const GATEWAY_DIAGNOSTIC_COMMANDS = DIAGNOSTIC_COMMANDS.filter(item =>
+  GATEWAY_DIAGNOSTIC_KEYS.has(item.key)
+);
 
 export function getDiagnosticCommand(key: string) {
-  return DIAGNOSTIC_COMMANDS.find((item) => item.key === key);
+  return DIAGNOSTIC_COMMANDS.find(item => item.key === key);
 }

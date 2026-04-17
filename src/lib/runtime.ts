@@ -29,7 +29,7 @@ export function platformTone(state?: string | null): RuntimeTone {
 }
 
 export function countConnectedPlatforms(platforms: GatewayPlatformState[]) {
-  return platforms.filter((platform) => platformTone(platform.state) === 'good').length;
+  return platforms.filter(platform => platformTone(platform.state) === 'good').length;
 }
 
 export function uniqueCount(values: string[]) {
@@ -45,7 +45,7 @@ export function totalToolCount(extensions?: ExtensionsSnapshot | null) {
 }
 
 export function localRuntimeSkillCount(extensions?: ExtensionsSnapshot | null) {
-  return extensions?.skillSourceCounts.find((item) => item.name === 'local')?.count ?? 0;
+  return extensions?.skillSourceCounts.find(item => item.name === 'local')?.count ?? 0;
 }
 
 export function pluginsCount(extensions?: ExtensionsSnapshot | null) {

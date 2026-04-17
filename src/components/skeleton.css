@@ -1,0 +1,252 @@
+.skeleton-sidebar,
+.skeleton-stat-card,
+.skeleton-panel,
+.skeleton-table,
+.skeleton-list,
+.skeleton-text,
+.skeleton-line,
+.skeleton-circle,
+.skeleton-pill {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 200% 100%;
+  animation: skeleton-loading 1.5s ease-in-out infinite;
+}
+
+@keyframes skeleton-loading {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.skeleton-text-default {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skeleton-line {
+  height: 14px;
+  border-radius: 4px;
+  width: 100%;
+}
+
+.skeleton-text-short {
+  height: 14px;
+  border-radius: 4px;
+  width: 30%;
+}
+
+.skeleton-text-medium {
+  height: 14px;
+  border-radius: 4px;
+  width: 50%;
+}
+
+.skeleton-text-long {
+  height: 14px;
+  border-radius: 4px;
+  width: 80%;
+}
+
+.skeleton-text-large {
+  height: 20px;
+  border-radius: 4px;
+  width: 60%;
+}
+
+.skeleton-circle {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+}
+
+.skeleton-circle-small {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+}
+
+.skeleton-pill {
+  height: 24px;
+  border-radius: 12px;
+  width: 60px;
+}
+
+.skeleton-pill-row {
+  display: flex;
+  gap: 8px;
+}
+
+/* Sidebar skeleton */
+.skeleton-sidebar {
+  width: 240px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--bg-secondary, #fafafa);
+}
+
+.skeleton-sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.skeleton-sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skeleton-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+}
+
+.skeleton-sidebar-status {
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--bg-tertiary, #f5f5f5);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Stat card skeleton */
+.skeleton-stat-card {
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--bg-secondary, #fafafa);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skeleton-stat-cards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+/* Panel skeleton */
+.skeleton-panel {
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--bg-secondary, #fafafa);
+}
+
+.skeleton-panel-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.skeleton-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.skeleton-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Table skeleton */
+.skeleton-table {
+  border-radius: 8px;
+  background: var(--bg-secondary, #fafafa);
+}
+
+.skeleton-table-header {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  padding: 12px 16px;
+  background: var(--bg-tertiary, #f5f5f5);
+}
+
+.skeleton-table-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color, #e0e0e0);
+}
+
+/* List skeleton */
+.skeleton-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.skeleton-list-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--bg-secondary, #fafafa);
+}
+
+/* Page skeleton */
+.skeleton-page {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* Content shell skeleton */
+.skeleton-content-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.skeleton-topbar {
+  padding: 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--bg-secondary, #fafafa);
+  border-bottom: 1px solid var(--border-color, #e0e0e0);
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+  .skeleton-sidebar,
+  .skeleton-stat-card,
+  .skeleton-panel,
+  .skeleton-table,
+  .skeleton-list,
+  .skeleton-text,
+  .skeleton-line,
+  .skeleton-circle,
+  .skeleton-pill {
+    background: linear-gradient(90deg, #2a2a2a 25%, #3a3a3a 50%, #2a2a2a 75%);
+    background-size: 200% 100%;
+  }
+
+  .skeleton-sidebar {
+    background: #1a1a1a;
+  }
+
+  .skeleton-sidebar-status,
+  .skeleton-table-header,
+  .skeleton-list-item {
+    background: #252525;
+  }
+
+  .skeleton-table-row {
+    border-bottom-color: #333;
+  }
+}

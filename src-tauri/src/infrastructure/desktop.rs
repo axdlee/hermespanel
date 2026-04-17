@@ -168,9 +168,10 @@ fn build_open_in_terminal_command(
 mod tests {
     use std::path::Path;
 
-    use super::{
-        build_open_in_finder_command, build_open_in_terminal_command, build_terminal_shell_command,
-    };
+    use super::build_terminal_shell_command;
+
+    #[cfg(target_os = "macos")]
+    use super::{build_open_in_finder_command, build_open_in_terminal_command};
 
     #[test]
     #[cfg(target_os = "macos")]

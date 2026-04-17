@@ -6,7 +6,12 @@ import { renderSidebar } from './components/sidebar.js';
 import { renderTopbar } from './components/topbar.js';
 import { SessionsPage } from './pages/SessionsPage';
 import { createLegacyRoute } from './lib/create-legacy-route';
-import { getPanelState, initializePanelState, subscribePanelState, syncRoute } from './lib/panel-state';
+import {
+  getPanelState,
+  initializePanelState,
+  subscribePanelState,
+  syncRoute,
+} from './lib/panel-state';
 import { getCurrentRoute, initRouter, registerRoute, setDefaultRoute } from './router.js';
 
 function registerLegacyRoutes() {

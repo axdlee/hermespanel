@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { Button, EmptyState, KeyValueRow, LoadingState, Panel, Pill, Toolbar } from '../components/ui';
+import {
+  Button,
+  EmptyState,
+  KeyValueRow,
+  LoadingState,
+  Panel,
+  Pill,
+  Toolbar,
+} from '../components/ui';
 import {
   buildConfigDrilldownIntent,
   buildDiagnosticsDrilldownIntent,
@@ -14,11 +22,6 @@ import type { DashboardSnapshot, SessionDetail, SessionMessage, SessionRecord } 
 import type {
   AppPageKey,
   ConfigFocus,
-  ConfigPageIntent,
-  DiagnosticsPageIntent,
-  ExtensionsPageIntent,
-  GatewayPageIntent,
-  LogsPageIntent,
   MemoryPageIntent,
   PageIntent,
   PageProps,
@@ -83,7 +86,8 @@ const TOOL_HEAVY_THRESHOLD = 6;
 const LONG_CONVERSATION_THRESHOLD = 14;
 const UNTITLED_COMPLEX_MESSAGE_THRESHOLD = 10;
 const UNTITLED_COMPLEX_TOOL_THRESHOLD = 4;
-const GATEWAY_SOURCE_PATTERN = /(gateway|telegram|discord|slack|feishu|dingtalk|wechat|wecom|line|whatsapp|remote|bot)/i;
+const GATEWAY_SOURCE_PATTERN =
+  /(gateway|telegram|discord|slack|feishu|dingtalk|wechat|wecom|line|whatsapp|remote|bot)/i;
 const MEMORY_PATTERN = /(memory|memories|user|profile|soul)/i;
 const DEFAULT_SESSION_LIST_LIMIT = 8;
 
@@ -99,9 +103,24 @@ const SESSIONS_OVERVIEW_VIEWS: Array<{
   icon: string;
   hint: string;
 }> = [
-  { key: 'launch', label: '常用去向', icon: '🚀', hint: '先决定是缩小范围、进风险页，还是直接回放消息。' },
-  { key: 'status', label: '当前判断', icon: '🌤️', hint: '先看命中数量和风险摘要，不把会话列表一起挤在同一层。' },
-  { key: 'browser', label: '会话浏览', icon: '🗂️', hint: '真正的列表浏览和当前焦点后置到这一层，需要时再展开。' },
+  {
+    key: 'launch',
+    label: '常用去向',
+    icon: '🚀',
+    hint: '先决定是缩小范围、进风险页，还是直接回放消息。',
+  },
+  {
+    key: 'status',
+    label: '当前判断',
+    icon: '🌤️',
+    hint: '先看命中数量和风险摘要，不把会话列表一起挤在同一层。',
+  },
+  {
+    key: 'browser',
+    label: '会话浏览',
+    icon: '🗂️',
+    hint: '真正的列表浏览和当前焦点后置到这一层，需要时再展开。',
+  },
 ];
 
 const SESSIONS_BROWSER_VIEWS: Array<{
@@ -111,7 +130,12 @@ const SESSIONS_BROWSER_VIEWS: Array<{
   hint: string;
 }> = [
   { key: 'pick', label: '选择会话', icon: '🗂️', hint: '先从短列表锁定目标，再进入更深层。' },
-  { key: 'focus', label: '查看焦点', icon: '🎯', hint: '只看当前焦点摘要和下一步动作，不和长列表同屏。' },
+  {
+    key: 'focus',
+    label: '查看焦点',
+    icon: '🎯',
+    hint: '只看当前焦点摘要和下一步动作，不和长列表同屏。',
+  },
 ];
 
 const SESSION_ANALYSIS_VIEWS: Array<{
@@ -121,9 +145,19 @@ const SESSION_ANALYSIS_VIEWS: Array<{
   hint: string;
 }> = [
   { key: 'signals', label: '风险信号', icon: '⚠️', hint: '先看这次会话到底命中了哪些结构性风险。' },
-  { key: 'recommendations', label: '联动建议', icon: '🧭', hint: '如果不想自己判断，就直接跟着建议入口继续下钻。' },
+  {
+    key: 'recommendations',
+    label: '联动建议',
+    icon: '🧭',
+    hint: '如果不想自己判断，就直接跟着建议入口继续下钻。',
+  },
   { key: 'tools', label: '工具聚合', icon: '🧰', hint: '看清这次会话真正依赖了哪些工具和能力。' },
-  { key: 'timeline', label: '最近工具', icon: '🕒', hint: '当怀疑会话中断时，优先看最后几次工具事件。' },
+  {
+    key: 'timeline',
+    label: '最近工具',
+    icon: '🕒',
+    hint: '当怀疑会话中断时，优先看最后几次工具事件。',
+  },
 ];
 
 function withinRecentWindow(startedAt: number, filter: RecentFilter) {
@@ -217,7 +251,7 @@ function buttonKindForTone(tone: SignalTone): 'primary' | 'secondary' | 'danger'
 
 function uniqueSignals(signals: SessionSignal[]) {
   const seen = new Set<string>();
-  return signals.filter((signal) => {
+  return signals.filter(signal => {
     if (seen.has(signal.key)) {
       return false;
     }
@@ -240,12 +274,17 @@ function buildRecordSignals(session: SessionRecord): SessionSignal[] {
     });
   }
 
-  if (!session.title && (session.messageCount >= UNTITLED_COMPLEX_MESSAGE_THRESHOLD || session.toolCallCount >= UNTITLED_COMPLEX_TOOL_THRESHOLD)) {
+  if (
+    !session.title &&
+    (session.messageCount >= UNTITLED_COMPLEX_MESSAGE_THRESHOLD ||
+      session.toolCallCount >= UNTITLED_COMPLEX_TOOL_THRESHOLD)
+  ) {
     signals.push({
       key: 'untitled-complex',
       label: '无标题复杂会话',
       tone: 'warn',
-      description: '没有标题，但消息量或工具调用已经不低，这通常是一段值得标注和回放的真实运行轨迹。',
+      description:
+        '没有标题，但消息量或工具调用已经不低，这通常是一段值得标注和回放的真实运行轨迹。',
       page: 'sessions',
       actionLabel: '继续深挖',
     });
@@ -379,7 +418,10 @@ function summarizeTools(messages: SessionMessage[]) {
 
   return {
     aggregates: Array.from(aggregates.values()).sort(
-      (left, right) => right.count - left.count || (right.lastAt ?? 0) - (left.lastAt ?? 0) || left.name.localeCompare(right.name),
+      (left, right) =>
+        right.count - left.count ||
+        (right.lastAt ?? 0) - (left.lastAt ?? 0) ||
+        left.name.localeCompare(right.name)
     ),
     recentEvents: events.slice(-8).reverse(),
   };
@@ -388,7 +430,7 @@ function summarizeTools(messages: SessionMessage[]) {
 function buildDetailSignals(
   detail: SessionDetail,
   portrait: SessionPortrait,
-  snapshot: DashboardSnapshot | null,
+  snapshot: DashboardSnapshot | null
 ): SessionSignal[] {
   const signals = [...buildRecordSignals(detail.session)];
 
@@ -408,18 +450,24 @@ function buildDetailSignals(
       key: 'ended-on-tool',
       label: '会话停在工具侧',
       tone: 'bad',
-      description: '最后一条消息仍然是 tool，说明可能中断在工具执行后、模型回填前，应该联动日志一起看。',
+      description:
+        '最后一条消息仍然是 tool，说明可能中断在工具执行后、模型回填前，应该联动日志一起看。',
       page: 'logs',
       actionLabel: '查看日志',
     });
   }
 
-  if (detail.session.toolCallCount === 0 && detail.session.messageCount >= LONG_CONVERSATION_THRESHOLD && (snapshot?.config.toolsets.length ?? 0) > 0) {
+  if (
+    detail.session.toolCallCount === 0 &&
+    detail.session.messageCount >= LONG_CONVERSATION_THRESHOLD &&
+    (snapshot?.config.toolsets.length ?? 0) > 0
+  ) {
     signals.push({
       key: 'configured-but-unused-tools',
       label: '已声明 toolsets 但未触达工具层',
       tone: 'warn',
-      description: '当前 profile 明明有 toolsets，但这次长会话完全没有进入工具层，建议核对模型、backend 和 toolsets 编排。',
+      description:
+        '当前 profile 明明有 toolsets，但这次长会话完全没有进入工具层，建议核对模型、backend 和 toolsets 编排。',
       page: 'config',
       actionLabel: '核对配置',
     });
@@ -454,7 +502,7 @@ function buildRecommendations(
   detail: SessionDetail,
   portrait: SessionPortrait,
   tools: ToolAggregate[],
-  snapshot: DashboardSnapshot | null,
+  snapshot: DashboardSnapshot | null
 ): SessionSignal[] {
   const recommendations: SessionSignal[] = [];
 
@@ -463,7 +511,12 @@ function buildRecommendations(
       key: 'recommend-extensions',
       label: '先核对扩展运行态',
       tone: 'good',
-      description: `这次会话出现了 ${portrait.toolCount} 条工具消息，最近活跃工具是 ${tools.slice(0, 3).map((item) => item.name).join('、') || '工具层'}。`,
+      description: `这次会话出现了 ${portrait.toolCount} 条工具消息，最近活跃工具是 ${
+        tools
+          .slice(0, 3)
+          .map(item => item.name)
+          .join('、') || '工具层'
+      }。`,
       page: 'extensions',
       actionLabel: '进入扩展页',
     });
@@ -481,15 +534,16 @@ function buildRecommendations(
   }
 
   if (
-    tools.some((item) => MEMORY_PATTERN.test(item.name))
-    || MEMORY_PATTERN.test(detail.session.preview)
-    || MEMORY_PATTERN.test(detail.session.title ?? '')
+    tools.some(item => MEMORY_PATTERN.test(item.name)) ||
+    MEMORY_PATTERN.test(detail.session.preview) ||
+    MEMORY_PATTERN.test(detail.session.title ?? '')
   ) {
     recommendations.push({
       key: 'recommend-memory',
       label: '检查记忆轨迹',
       tone: 'warn',
-      description: '会话里有 memory / profile / soul 相关痕迹，建议对照记忆文件与 provider 生效状态一起看。',
+      description:
+        '会话里有 memory / profile / soul 相关痕迹，建议对照记忆文件与 provider 生效状态一起看。',
       page: 'memory',
       actionLabel: '进入记忆页',
     });
@@ -513,7 +567,8 @@ function buildRecommendations(
       key: 'recommend-diagnostics',
       label: '补一轮运行体检',
       tone: 'warn',
-      description: '这次会话带有中断或异常信号，联动 Diagnostics 和 Logs 更容易判定问题是在环境层还是能力层。',
+      description:
+        '这次会话带有中断或异常信号，联动 Diagnostics 和 Logs 更容易判定问题是在环境层还是能力层。',
       page: 'diagnostics',
       actionLabel: '进入诊断页',
     });
@@ -524,7 +579,8 @@ function buildRecommendations(
       key: 'recommend-dashboard',
       label: '回到总览继续观察',
       tone: 'good',
-      description: '当前没有发现特别突出的异常，会话更像一次正常运行记录，可以回 Dashboard 看整体运行态。',
+      description:
+        '当前没有发现特别突出的异常，会话更像一次正常运行记录，可以回 Dashboard 看整体运行态。',
       page: 'dashboard',
       actionLabel: '进入总览页',
     });
@@ -537,14 +593,18 @@ function sessionDisplayTitle(session: SessionRecord) {
   return session.title || truncate(session.preview || session.id, 48);
 }
 
-function buildSessionContext(detail: SessionDetail, tools: ToolAggregate[], reason: string): SessionNavigationContext {
+function buildSessionContext(
+  detail: SessionDetail,
+  tools: ToolAggregate[],
+  reason: string
+): SessionNavigationContext {
   return {
     sessionId: detail.session.id,
     title: `${sessionDisplayTitle(detail.session)} · ${reason}`,
     source: detail.session.source,
     model: detail.session.model,
     preview: truncate(detail.session.preview || detail.session.id, 120),
-    toolNames: tools.slice(0, 4).map((item) => item.name),
+    toolNames: tools.slice(0, 4).map(item => item.name),
   };
 }
 
@@ -581,8 +641,15 @@ function suggestDiagnostic(detail: SessionDetail) {
   return 'doctor';
 }
 
-function detectMemorySlot(detail: SessionDetail, tools: ToolAggregate[]): MemoryPageIntent['selectedKey'] {
-  const combined = [detail.session.title ?? '', detail.session.preview, ...tools.map((item) => item.name)]
+function detectMemorySlot(
+  detail: SessionDetail,
+  tools: ToolAggregate[]
+): MemoryPageIntent['selectedKey'] {
+  const combined = [
+    detail.session.title ?? '',
+    detail.session.preview,
+    ...tools.map(item => item.name),
+  ]
     .join(' ')
     .toLowerCase();
   if (/(user|profile)/.test(combined)) {
@@ -609,7 +676,7 @@ function buildSessionPageIntent(
   detail: SessionDetail,
   portrait: SessionPortrait,
   tools: ToolAggregate[],
-  reason: string,
+  reason: string
 ): PageIntent | null {
   const context = buildSessionContext(detail, tools, reason);
   const headline = `来自 Sessions 的会话下钻`;
@@ -641,8 +708,8 @@ function buildSessionPageIntent(
   if (page === 'extensions') {
     return buildExtensionsDrilldownIntent(seed, {
       rawKind: 'tools',
-      query: tools.map((item) => item.name).join(' '),
-      toolNames: tools.slice(0, 4).map((item) => item.name),
+      query: tools.map(item => item.name).join(' '),
+      toolNames: tools.slice(0, 4).map(item => item.name),
     });
   }
 
@@ -703,7 +770,8 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
       setSessions(nextSessions);
       setSnapshot(nextSnapshot);
 
-      const fallbackId = nextSessions.find((item) => item.id === selected?.session.id)?.id ?? nextSessions[0]?.id;
+      const fallbackId =
+        nextSessions.find(item => item.id === selected?.session.id)?.id ?? nextSessions[0]?.id;
       if (fallbackId) {
         const detail = await api.getSessionDetail(fallbackId, profile);
         setSelected(detail);
@@ -734,7 +802,7 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
       const result = await api.openInFinder({ path, revealInFinder });
       notify(
         result.success ? 'success' : 'error',
-        result.success ? `${label} 已在 Finder 中打开。` : `${label} 打开失败，请检查命令输出。`,
+        result.success ? `${label} 已在 Finder 中打开。` : `${label} 打开失败，请检查命令输出。`
       );
     } catch (reason) {
       notify('error', String(reason));
@@ -759,17 +827,20 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
   }, [profile]);
 
   const sourceOptions = useMemo(
-    () => ['all', ...Array.from(new Set(sessions.map((item) => item.source))).sort()],
-    [sessions],
+    () => ['all', ...Array.from(new Set(sessions.map(item => item.source))).sort()],
+    [sessions]
   );
   const modelOptions = useMemo(
-    () => ['all', ...Array.from(new Set(sessions.map((item) => item.model).filter(Boolean) as string[])).sort()],
-    [sessions],
+    () => [
+      'all',
+      ...Array.from(new Set(sessions.map(item => item.model).filter(Boolean) as string[])).sort(),
+    ],
+    [sessions]
   );
 
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase();
-    return sessions.filter((item) => {
+    return sessions.filter(item => {
       if (sourceFilter !== 'all' && item.source !== sourceFilter) {
         return false;
       }
@@ -795,7 +866,7 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
     }
 
     const term = messageQuery.trim().toLowerCase();
-    return selected.messages.filter((message) => {
+    return selected.messages.filter(message => {
       const toolLike = isToolMessage(message);
       const role = normalizeRole(message.role);
       if (messageFilter === 'user' && role !== 'user') {
@@ -818,40 +889,49 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
   }, [messageFilter, messageQuery, selected]);
 
   const sessionAssessments = useMemo(
-    () => new Map(sessions.map((session) => [session.id, assessSession(session)])),
-    [sessions],
+    () => new Map(sessions.map(session => [session.id, assessSession(session)])),
+    [sessions]
   );
-  const riskySessions = filtered.filter((item) => (sessionAssessments.get(item.id)?.score ?? 0) > 0);
-  const toolHeavySessions = filtered.filter((item) => item.toolCallCount >= TOOL_HEAVY_THRESHOLD);
-  const longNoToolSessions = filtered.filter((item) => item.messageCount >= LONG_CONVERSATION_THRESHOLD && item.toolCallCount === 0);
-  const gatewayLikeSessions = filtered.filter((item) => isGatewayLikeSource(item.source));
+  const riskySessions = filtered.filter(item => (sessionAssessments.get(item.id)?.score ?? 0) > 0);
+  const toolHeavySessions = filtered.filter(item => item.toolCallCount >= TOOL_HEAVY_THRESHOLD);
+  const longNoToolSessions = filtered.filter(
+    item => item.messageCount >= LONG_CONVERSATION_THRESHOLD && item.toolCallCount === 0
+  );
+  const gatewayLikeSessions = filtered.filter(item => isGatewayLikeSource(item.source));
   const stateDbPath = snapshot ? `${snapshot.hermesHome}/state.db` : '';
 
   const selectedAssessment = useMemo(
     () => (selected ? assessSession(selected.session) : null),
-    [selected],
+    [selected]
   );
   const selectedPortrait = useMemo(
     () => (selected ? buildSessionPortrait(selected.messages) : null),
-    [selected],
+    [selected]
   );
-  const selectedTools = useMemo(
-    () => summarizeTools(selected?.messages ?? []),
-    [selected],
-  );
+  const selectedTools = useMemo(() => summarizeTools(selected?.messages ?? []), [selected]);
   const selectedSignals = useMemo(
-    () => (selected && selectedPortrait ? buildDetailSignals(selected, selectedPortrait, snapshot) : []),
-    [selected, selectedPortrait, snapshot],
+    () =>
+      selected && selectedPortrait ? buildDetailSignals(selected, selectedPortrait, snapshot) : [],
+    [selected, selectedPortrait, snapshot]
   );
   const selectedRecommendations = useMemo(
-    () => (selected && selectedPortrait ? buildRecommendations(selected, selectedPortrait, selectedTools.aggregates, snapshot) : []),
-    [selected, selectedPortrait, selectedTools.aggregates, snapshot],
+    () =>
+      selected && selectedPortrait
+        ? buildRecommendations(selected, selectedPortrait, selectedTools.aggregates, snapshot)
+        : [],
+    [selected, selectedPortrait, selectedTools.aggregates, snapshot]
   );
   const primaryRecommendation = selectedRecommendations[0] ?? null;
   const overviewWarnings = [
-    filtered.length === 0 ? '当前筛选条件下没有任何会话，建议先恢复筛选范围，再重新定位问题。' : null,
-    riskySessions.length > 0 ? `当前筛选结果里有 ${riskySessions.length} 条高风险会话，建议优先处理这些记录。` : null,
-    longNoToolSessions.length > 0 ? `有 ${longNoToolSessions.length} 条长对话没有进入工具层，更适合先回配置中心核对模型、backend 和 toolsets。` : null,
+    filtered.length === 0
+      ? '当前筛选条件下没有任何会话，建议先恢复筛选范围，再重新定位问题。'
+      : null,
+    riskySessions.length > 0
+      ? `当前筛选结果里有 ${riskySessions.length} 条高风险会话，建议优先处理这些记录。`
+      : null,
+    longNoToolSessions.length > 0
+      ? `有 ${longNoToolSessions.length} 条长对话没有进入工具层，更适合先回配置中心核对模型、backend 和 toolsets。`
+      : null,
     gatewayLikeSessions.length > 0 && snapshot?.gateway?.gatewayState !== 'running'
       ? `有 ${gatewayLikeSessions.length} 条会话看起来来自 Gateway 或消息平台入口，但当前 Gateway 还不是 running。`
       : null,
@@ -860,38 +940,46 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
       : null,
   ].filter((item): item is string => Boolean(item));
   const visibleOverviewWarnings = overviewWarnings.slice(0, 4);
-  const remainingOverviewWarningCount = Math.max(0, overviewWarnings.length - visibleOverviewWarnings.length);
-  const sessionStartReadiness = filtered.length === 0
-    ? '先放宽筛选'
-    : !selected
-      ? '先选一条会话'
-      : selectedSignals.length > 0
-        ? '优先看风险联动'
-        : '可以直接回放';
-  const sessionStartHint = filtered.length === 0
-    ? '当前筛选没有命中任何会话，建议先恢复全部筛选，或切换来源、模型与时间窗。'
-    : !selected
-      ? '会话页的第一步不是看消息，而是先选中一条真正值得继续深挖的记录。'
-      : selectedSignals.length > 0
-        ? `当前焦点会话命中了 ${selectedSignals.length} 个风险信号，更适合先去“风险与联动”。`
-        : '当前焦点会话没有明显结构性风险，可以直接进入消息回放查看完整内容。';
+  const remainingOverviewWarningCount = Math.max(
+    0,
+    overviewWarnings.length - visibleOverviewWarnings.length
+  );
+  const sessionStartReadiness =
+    filtered.length === 0
+      ? '先放宽筛选'
+      : !selected
+        ? '先选一条会话'
+        : selectedSignals.length > 0
+          ? '优先看风险联动'
+          : '可以直接回放';
+  const sessionStartHint =
+    filtered.length === 0
+      ? '当前筛选没有命中任何会话，建议先恢复全部筛选，或切换来源、模型与时间窗。'
+      : !selected
+        ? '会话页的第一步不是看消息，而是先选中一条真正值得继续深挖的记录。'
+        : selectedSignals.length > 0
+          ? `当前焦点会话命中了 ${selectedSignals.length} 个风险信号，更适合先去“风险与联动”。`
+          : '当前焦点会话没有明显结构性风险，可以直接进入消息回放查看完整内容。';
   const visibleSessions = useMemo(() => {
     if (showAllSessions || filtered.length <= DEFAULT_SESSION_LIST_LIMIT) {
       return filtered;
     }
 
     const compactItems = filtered.slice(0, DEFAULT_SESSION_LIST_LIMIT);
-    if (!selected || compactItems.some((item) => item.id === selected.session.id)) {
+    if (!selected || compactItems.some(item => item.id === selected.session.id)) {
       return compactItems;
     }
 
-    const selectedRecord = filtered.find((item) => item.id === selected.session.id);
+    const selectedRecord = filtered.find(item => item.id === selected.session.id);
     return selectedRecord ? [...compactItems, selectedRecord] : compactItems;
   }, [filtered, selected, showAllSessions]);
   const hiddenSessionCount = Math.max(0, filtered.length - visibleSessions.length);
-  const activeAnalysisView = SESSION_ANALYSIS_VIEWS.find((item) => item.key === analysisView) ?? SESSION_ANALYSIS_VIEWS[0];
-  const activeOverviewView = SESSIONS_OVERVIEW_VIEWS.find((item) => item.key === overviewView) ?? SESSIONS_OVERVIEW_VIEWS[0];
-  const activeBrowserView = SESSIONS_BROWSER_VIEWS.find((item) => item.key === browserView) ?? SESSIONS_BROWSER_VIEWS[0];
+  const activeAnalysisView =
+    SESSION_ANALYSIS_VIEWS.find(item => item.key === analysisView) ?? SESSION_ANALYSIS_VIEWS[0];
+  const activeOverviewView =
+    SESSIONS_OVERVIEW_VIEWS.find(item => item.key === overviewView) ?? SESSIONS_OVERVIEW_VIEWS[0];
+  const activeBrowserView =
+    SESSIONS_BROWSER_VIEWS.find(item => item.key === browserView) ?? SESSIONS_BROWSER_VIEWS[0];
 
   function resetListFilters() {
     setQuery('');
@@ -907,7 +995,13 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
       return;
     }
 
-    const intent = buildSessionPageIntent(page, selected, selectedPortrait, selectedTools.aggregates, reason);
+    const intent = buildSessionPageIntent(
+      page,
+      selected,
+      selectedPortrait,
+      selectedTools.aggregates,
+      reason
+    );
     navigate(page, intent);
   }
 
@@ -917,38 +1011,69 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
   const currentSessionSection = (
     <Panel
       title="当前焦点"
-      subtitle={selected ? '先确认这次会话是不是你真正要追的那一条，再决定去日志、诊断还是消息回放。' : '先从会话列表里选一条记录。'}
-      aside={selected ? (
-        <Toolbar>
-          <Button onClick={() => setBrowserView('pick')}>回到列表</Button>
-          <Button onClick={() => navigateFromSelection('logs', '查看当前会话的相关日志输出。')}>查看日志</Button>
-          <Button onClick={() => navigateFromSelection('diagnostics', '结合会话风险信号继续做运行态诊断。')}>做诊断</Button>
-          <Button onClick={() => setActiveTab('messages')}>看消息</Button>
-        </Toolbar>
-      ) : undefined}
+      subtitle={
+        selected
+          ? '先确认这次会话是不是你真正要追的那一条，再决定去日志、诊断还是消息回放。'
+          : '先从会话列表里选一条记录。'
+      }
+      aside={
+        selected ? (
+          <Toolbar>
+            <Button onClick={() => setBrowserView('pick')}>回到列表</Button>
+            <Button onClick={() => navigateFromSelection('logs', '查看当前会话的相关日志输出。')}>
+              查看日志
+            </Button>
+            <Button
+              onClick={() =>
+                navigateFromSelection('diagnostics', '结合会话风险信号继续做运行态诊断。')
+              }
+            >
+              做诊断
+            </Button>
+            <Button onClick={() => setActiveTab('messages')}>看消息</Button>
+          </Toolbar>
+        ) : undefined
+      }
     >
       {selected && selectedPortrait ? (
         <>
           <div className="workspace-summary-strip">
             <section className="summary-mini-card">
               <span className="summary-mini-label">当前会话</span>
-              <strong className="summary-mini-value">{sessionDisplayTitle(selected.session)}</strong>
-              <span className="summary-mini-meta">{selected.session.source} · {selected.session.model || '模型未记录'}</span>
+              <strong className="summary-mini-value">
+                {sessionDisplayTitle(selected.session)}
+              </strong>
+              <span className="summary-mini-meta">
+                {selected.session.source} · {selected.session.model || '模型未记录'}
+              </span>
             </section>
             <section className="summary-mini-card">
               <span className="summary-mini-label">消息与工具</span>
-              <strong className="summary-mini-value">{selected.session.messageCount} / {selected.session.toolCallCount}</strong>
-              <span className="summary-mini-meta">消息数 / 工具调用数 · {selectedPortrait.uniqueTools} 种工具</span>
+              <strong className="summary-mini-value">
+                {selected.session.messageCount} / {selected.session.toolCallCount}
+              </strong>
+              <span className="summary-mini-meta">
+                消息数 / 工具调用数 · {selectedPortrait.uniqueTools} 种工具
+              </span>
             </section>
             <section className="summary-mini-card">
               <span className="summary-mini-label">当前状态</span>
-              <strong className="summary-mini-value">{loadingDetail ? '读取中' : selectedAssessment?.primaryLabel ?? '已加载'}</strong>
-              <span className="summary-mini-meta">{selectedSignals.length} 个风险信号 · 非 user 占比 {formatPercent(selectedPortrait.nonUserRatio)}</span>
+              <strong className="summary-mini-value">
+                {loadingDetail ? '读取中' : (selectedAssessment?.primaryLabel ?? '已加载')}
+              </strong>
+              <span className="summary-mini-meta">
+                {selectedSignals.length} 个风险信号 · 非 user 占比{' '}
+                {formatPercent(selectedPortrait.nonUserRatio)}
+              </span>
             </section>
             <section className="summary-mini-card">
               <span className="summary-mini-label">时间范围</span>
-              <strong className="summary-mini-value">{formatEpoch(selected.session.startedAt)}</strong>
-              <span className="summary-mini-meta">结束于 {formatEpoch(selected.session.endedAt)}</span>
+              <strong className="summary-mini-value">
+                {formatEpoch(selected.session.startedAt)}
+              </strong>
+              <span className="summary-mini-meta">
+                结束于 {formatEpoch(selected.session.endedAt)}
+              </span>
             </section>
           </div>
           <p className="helper-text top-gap">
@@ -956,7 +1081,10 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
           </p>
         </>
       ) : (
-        <EmptyState title="未选择会话" description="从下方会话列表选择一条记录后，这里会显示当前摘要和推荐去向。" />
+        <EmptyState
+          title="未选择会话"
+          description="从下方会话列表选择一条记录后，这里会显示当前摘要和推荐去向。"
+        />
       )}
     </Panel>
   );
@@ -968,14 +1096,17 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
         subtitle="总览页拆成二级工作面，默认只展开一个主区块，不再把筛选、列表和当前焦点同时铺开。"
       >
         <div className="workspace-shortcut-grid dashboard-launcher-grid">
-          {SESSIONS_OVERVIEW_VIEWS.map((item) => (
+          {SESSIONS_OVERVIEW_VIEWS.map(item => (
             <button
               key={item.key}
               type="button"
               className={`workspace-shortcut-card dashboard-shortcut-card ${overviewView === item.key ? 'active' : ''}`}
               onClick={() => setOverviewView(item.key)}
             >
-              <strong><span className="dashboard-shortcut-icon">{item.icon}</span>{item.label}</strong>
+              <strong>
+                <span className="dashboard-shortcut-icon">{item.icon}</span>
+                {item.label}
+              </strong>
               <span>{item.hint}</span>
             </button>
           ))}
@@ -993,11 +1124,13 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
               type="button"
               className={`workspace-shortcut-card dashboard-shortcut-card ${showAdvancedFilters ? 'active' : ''}`}
               onClick={() => {
-                setShowAdvancedFilters((value) => !value);
+                setShowAdvancedFilters(value => !value);
                 setOverviewView('status');
               }}
             >
-              <strong><span className="dashboard-shortcut-icon">🔎</span>缩小范围</strong>
+              <strong>
+                <span className="dashboard-shortcut-icon">🔎</span>缩小范围
+              </strong>
               <span>
                 {showAdvancedFilters
                   ? '当前已展开来源、模型和时间筛选'
@@ -1010,8 +1143,14 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
               onClick={() => setActiveTab('analysis')}
               disabled={!selected}
             >
-              <strong><span className="dashboard-shortcut-icon">⚠️</span>风险与联动</strong>
-              <span>{selected ? `${selectedSignals.length} 个风险信号待查看` : '先选择一条会话再看结构判断'}</span>
+              <strong>
+                <span className="dashboard-shortcut-icon">⚠️</span>风险与联动
+              </strong>
+              <span>
+                {selected
+                  ? `${selectedSignals.length} 个风险信号待查看`
+                  : '先选择一条会话再看结构判断'}
+              </span>
             </button>
             <button
               type="button"
@@ -1019,23 +1158,36 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
               onClick={() => setActiveTab('messages')}
               disabled={!selected}
             >
-              <strong><span className="dashboard-shortcut-icon">💬</span>消息回放</strong>
-              <span>{selected ? `${filteredMessages.length} 条消息可继续回放` : '先锁定一条会话再看原文'}</span>
+              <strong>
+                <span className="dashboard-shortcut-icon">💬</span>消息回放
+              </strong>
+              <span>
+                {selected
+                  ? `${filteredMessages.length} 条消息可继续回放`
+                  : '先锁定一条会话再看原文'}
+              </span>
             </button>
             <button
               type="button"
               className="workspace-shortcut-card dashboard-shortcut-card"
               onClick={() => {
                 if (primaryRecommendation?.page) {
-                  navigateFromSelection(primaryRecommendation.page, primaryRecommendation.description);
+                  navigateFromSelection(
+                    primaryRecommendation.page,
+                    primaryRecommendation.description
+                  );
                   return;
                 }
                 setOverviewView('browser');
               }}
               disabled={!selected && !primaryRecommendation}
             >
-              <strong><span className="dashboard-shortcut-icon">🧭</span>继续处理</strong>
-              <span>{primaryRecommendation?.description ?? '选中后会出现最适合继续下钻的入口'}</span>
+              <strong>
+                <span className="dashboard-shortcut-icon">🧭</span>继续处理
+              </strong>
+              <span>
+                {primaryRecommendation?.description ?? '选中后会出现最适合继续下钻的入口'}
+              </span>
             </button>
           </div>
           <p className="helper-text top-gap">
@@ -1054,32 +1206,42 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
               className="search-input"
               placeholder="搜索标题、预览、来源或模型"
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={event => setQuery(event.target.value)}
             />
-            <Button onClick={() => setShowAdvancedFilters((value) => !value)}>
+            <Button onClick={() => setShowAdvancedFilters(value => !value)}>
               {showAdvancedFilters ? '收起筛选' : '更多筛选'}
             </Button>
-            <Button onClick={resetListFilters}>
-              重置
-            </Button>
+            <Button onClick={resetListFilters}>重置</Button>
           </Toolbar>
           {showAdvancedFilters ? (
             <Toolbar>
-              <select className="select-input" value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)}>
-                {sourceOptions.map((item) => (
+              <select
+                className="select-input"
+                value={sourceFilter}
+                onChange={event => setSourceFilter(event.target.value)}
+              >
+                {sourceOptions.map(item => (
                   <option key={item} value={item}>
                     {item === 'all' ? '全部来源' : item}
                   </option>
                 ))}
               </select>
-              <select className="select-input" value={modelFilter} onChange={(event) => setModelFilter(event.target.value)}>
-                {modelOptions.map((item) => (
+              <select
+                className="select-input"
+                value={modelFilter}
+                onChange={event => setModelFilter(event.target.value)}
+              >
+                {modelOptions.map(item => (
                   <option key={item} value={item}>
                     {item === 'all' ? '全部模型' : item}
                   </option>
                 ))}
               </select>
-              <select className="select-input" value={recentFilter} onChange={(event) => setRecentFilter(event.target.value as RecentFilter)}>
+              <select
+                className="select-input"
+                value={recentFilter}
+                onChange={event => setRecentFilter(event.target.value as RecentFilter)}
+              >
                 <option value="all">全部时间</option>
                 <option value="24h">最近 24 小时</option>
                 <option value="7d">最近 7 天</option>
@@ -1088,7 +1250,9 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
             </Toolbar>
           ) : (
             <p className="helper-text top-gap">
-              当前筛选：{sourceFilter === 'all' ? '全部来源' : sourceFilter} · {modelFilter === 'all' ? '全部模型' : modelFilter} · {recentFilter === 'all' ? '全部时间' : recentFilter}
+              当前筛选：{sourceFilter === 'all' ? '全部来源' : sourceFilter} ·{' '}
+              {modelFilter === 'all' ? '全部模型' : modelFilter} ·{' '}
+              {recentFilter === 'all' ? '全部时间' : recentFilter}
             </p>
           )}
           <div className="workspace-summary-strip top-gap">
@@ -1116,14 +1280,16 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
           {visibleOverviewWarnings.length > 0 ? (
             <>
               <div className="warning-stack top-gap">
-                {visibleOverviewWarnings.map((warning) => (
+                {visibleOverviewWarnings.map(warning => (
                   <div className="warning-item" key={warning}>
                     {warning}
                   </div>
                 ))}
               </div>
               {remainingOverviewWarningCount > 0 ? (
-                <p className="helper-text top-gap">其余 {remainingOverviewWarningCount} 条提醒继续收在“风险与联动”和“消息与回放”里。</p>
+                <p className="helper-text top-gap">
+                  其余 {remainingOverviewWarningCount} 条提醒继续收在“风险与联动”和“消息与回放”里。
+                </p>
               ) : null}
             </>
           ) : (
@@ -1132,8 +1298,13 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
             </p>
           )}
           <Toolbar>
-            <Button kind="primary" onClick={() => setOverviewView('browser')}>打开会话浏览</Button>
-            <Button onClick={() => setActiveTab(selected ? 'analysis' : 'messages')} disabled={!selected}>
+            <Button kind="primary" onClick={() => setOverviewView('browser')}>
+              打开会话浏览
+            </Button>
+            <Button
+              onClick={() => setActiveTab(selected ? 'analysis' : 'messages')}
+              disabled={!selected}
+            >
               {selected ? '继续下一层' : '先选择一条会话'}
             </Button>
           </Toolbar>
@@ -1142,20 +1313,26 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
 
       {overviewView === 'browser' ? (
         <div className="page-stack">
-          <Panel
-            title="会话浏览入口"
-            subtitle="浏览层继续拆成二级工作面，列表和焦点不再同屏出现。"
-          >
+          <Panel title="会话浏览入口" subtitle="浏览层继续拆成二级工作面，列表和焦点不再同屏出现。">
             <div className="workspace-shortcut-grid dashboard-launcher-grid">
-              {SESSIONS_BROWSER_VIEWS.map((item) => (
+              {SESSIONS_BROWSER_VIEWS.map(item => (
                 <button
                   key={item.key}
                   type="button"
                   className={`workspace-shortcut-card dashboard-shortcut-card ${browserView === item.key ? 'active' : ''}`}
                   onClick={() => setBrowserView(item.key)}
                 >
-                  <strong><span className="dashboard-shortcut-icon">{item.icon}</span>{item.label}</strong>
-                  <span>{item.key === 'focus' ? (selected ? sessionDisplayTitle(selected.session) : '先从列表中选一条') : item.hint}</span>
+                  <strong>
+                    <span className="dashboard-shortcut-icon">{item.icon}</span>
+                    {item.label}
+                  </strong>
+                  <span>
+                    {item.key === 'focus'
+                      ? selected
+                        ? sessionDisplayTitle(selected.session)
+                        : '先从列表中选一条'
+                      : item.hint}
+                  </span>
                 </button>
               ))}
             </div>
@@ -1166,19 +1343,24 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
             <Panel
               title="会话列表"
               subtitle="默认先看最值得注意的一小段记录，完整列表按需展开。"
-              aside={filtered.length > DEFAULT_SESSION_LIST_LIMIT ? (
-                <Toolbar>
-                  <Button onClick={() => setShowAllSessions((value) => !value)}>
-                    {showAllSessions ? '收起列表' : `展开更多（${hiddenSessionCount}）`}
-                  </Button>
-                </Toolbar>
-              ) : undefined}
+              aside={
+                filtered.length > DEFAULT_SESSION_LIST_LIMIT ? (
+                  <Toolbar>
+                    <Button onClick={() => setShowAllSessions(value => !value)}>
+                      {showAllSessions ? '收起列表' : `展开更多（${hiddenSessionCount}）`}
+                    </Button>
+                  </Toolbar>
+                ) : undefined
+              }
             >
               {filtered.length === 0 ? (
-                <EmptyState title="没有匹配会话" description="换个关键词、来源、模型或时间窗再试试。" />
+                <EmptyState
+                  title="没有匹配会话"
+                  description="换个关键词、来源、模型或时间窗再试试。"
+                />
               ) : (
                 <div className="list-stack">
-                  {visibleSessions.map((session) => {
+                  {visibleSessions.map(session => {
                     const assessment = sessionAssessments.get(session.id) ?? assessSession(session);
                     return (
                       <button
@@ -1191,7 +1373,9 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
                         type="button"
                       >
                         <div className="list-card-title">
-                          <strong>{session.title || truncate(session.preview || session.id, 44)}</strong>
+                          <strong>
+                            {session.title || truncate(session.preview || session.id, 44)}
+                          </strong>
                           <div className="pill-row">
                             <Pill>{session.source}</Pill>
                             <Pill tone={session.toolCallCount > 0 ? 'good' : 'neutral'}>
@@ -1215,7 +1399,9 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
                 </div>
               )}
               {hiddenSessionCount > 0 && !showAllSessions ? (
-                <p className="helper-text top-gap">其余 {hiddenSessionCount} 条会话已暂时收起，需要时再展开。</p>
+                <p className="helper-text top-gap">
+                  其余 {hiddenSessionCount} 条会话已暂时收起，需要时再展开。
+                </p>
               ) : null}
             </Panel>
           ) : null}
@@ -1227,27 +1413,39 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
   );
 
   const analysisSection = (
-    <Panel title="风险与联动" subtitle="默认一次只展开一个分析子模块，避免把工具、信号、建议和时间线同时铺满。">
+    <Panel
+      title="风险与联动"
+      subtitle="默认一次只展开一个分析子模块，避免把工具、信号、建议和时间线同时铺满。"
+    >
       {selected && selectedPortrait ? (
         <div className="page-stack">
           <div className="workspace-summary-strip">
             <section className="summary-mini-card">
               <span className="summary-mini-label">角色分布</span>
-              <strong className="summary-mini-value">{selectedPortrait.userCount}/{selectedPortrait.assistantCount}/{selectedPortrait.toolCount}</strong>
+              <strong className="summary-mini-value">
+                {selectedPortrait.userCount}/{selectedPortrait.assistantCount}/
+                {selectedPortrait.toolCount}
+              </strong>
               <span className="summary-mini-meta">
-                user / assistant / tool{selectedPortrait.otherCount > 0 ? ` · other ${selectedPortrait.otherCount}` : ''}
+                user / assistant / tool
+                {selectedPortrait.otherCount > 0 ? ` · other ${selectedPortrait.otherCount}` : ''}
               </span>
             </section>
             <section className="summary-mini-card">
               <span className="summary-mini-label">工具覆盖</span>
-              <strong className="summary-mini-value">{formatPercent(selectedPortrait.toolRatio)}</strong>
+              <strong className="summary-mini-value">
+                {formatPercent(selectedPortrait.toolRatio)}
+              </strong>
               <span className="summary-mini-meta">
-                {selectedPortrait.uniqueTools} 种工具 · 最近工具 {formatEpoch(selectedPortrait.lastToolAt)}
+                {selectedPortrait.uniqueTools} 种工具 · 最近工具{' '}
+                {formatEpoch(selectedPortrait.lastToolAt)}
               </span>
             </section>
             <section className="summary-mini-card">
               <span className="summary-mini-label">交互密度</span>
-              <strong className="summary-mini-value">{formatPercent(selectedPortrait.nonUserRatio)}</strong>
+              <strong className="summary-mini-value">
+                {formatPercent(selectedPortrait.nonUserRatio)}
+              </strong>
               <span className="summary-mini-meta">非 user 越高，越像 agent 自主链路</span>
             </section>
             <section className="summary-mini-card">
@@ -1257,14 +1455,21 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
             </section>
           </div>
           <div className="workspace-shortcut-grid dashboard-launcher-grid">
-            {SESSION_ANALYSIS_VIEWS.map((item) => {
-              const meta = item.key === 'signals'
-                ? (selectedSignals.length > 0 ? `${selectedSignals.length} 个风险信号` : '当前没有明显风险信号')
-                : item.key === 'recommendations'
-                  ? (primaryRecommendation?.description ?? '会根据当前会话给出继续下钻入口')
-                  : item.key === 'tools'
-                    ? (selectedTools.aggregates.length > 0 ? `${selectedTools.aggregates.length} 个工具被命中` : '当前没有工具轨迹')
-                    : (selectedTools.recentEvents.length > 0 ? `${selectedTools.recentEvents.length} 条最近工具事件` : '当前没有工具时间线');
+            {SESSION_ANALYSIS_VIEWS.map(item => {
+              const meta =
+                item.key === 'signals'
+                  ? selectedSignals.length > 0
+                    ? `${selectedSignals.length} 个风险信号`
+                    : '当前没有明显风险信号'
+                  : item.key === 'recommendations'
+                    ? (primaryRecommendation?.description ?? '会根据当前会话给出继续下钻入口')
+                    : item.key === 'tools'
+                      ? selectedTools.aggregates.length > 0
+                        ? `${selectedTools.aggregates.length} 个工具被命中`
+                        : '当前没有工具轨迹'
+                      : selectedTools.recentEvents.length > 0
+                        ? `${selectedTools.recentEvents.length} 条最近工具事件`
+                        : '当前没有工具时间线';
 
               return (
                 <button
@@ -1273,7 +1478,10 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
                   className={`workspace-shortcut-card dashboard-shortcut-card ${analysisView === item.key ? 'active' : ''}`}
                   onClick={() => setAnalysisView(item.key)}
                 >
-                  <strong><span className="dashboard-shortcut-icon">{item.icon}</span>{item.label}</strong>
+                  <strong>
+                    <span className="dashboard-shortcut-icon">{item.icon}</span>
+                    {item.label}
+                  </strong>
                   <span>{meta}</span>
                 </button>
               );
@@ -1282,12 +1490,19 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
           <p className="helper-text">{activeAnalysisView.hint}</p>
 
           {analysisView === 'signals' ? (
-            <Panel className="panel-nested" title="风险信号" subtitle="这些判断基于摘要字段和消息结构，只负责提示，不替代原始日志。">
+            <Panel
+              className="panel-nested"
+              title="风险信号"
+              subtitle="这些判断基于摘要字段和消息结构，只负责提示，不替代原始日志。"
+            >
               {selectedSignals.length === 0 ? (
-                <EmptyState title="没有明显风险信号" description="当前会话更像一次正常运行记录，可以直接看消息流或返回总览。" />
+                <EmptyState
+                  title="没有明显风险信号"
+                  description="当前会话更像一次正常运行记录，可以直接看消息流或返回总览。"
+                />
               ) : (
                 <div className="list-stack">
-                  {selectedSignals.map((signal) => (
+                  {selectedSignals.map(signal => (
                     <div className="list-card" key={signal.key}>
                       <div className="list-card-title">
                         <strong>{signal.label}</strong>
@@ -1296,7 +1511,10 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
                       <p>{signal.description}</p>
                       {signal.page ? (
                         <Toolbar>
-                          <Button kind={buttonKindForTone(signal.tone)} onClick={() => navigateFromSelection(signal.page!, signal.description)}>
+                          <Button
+                            kind={buttonKindForTone(signal.tone)}
+                            onClick={() => navigateFromSelection(signal.page!, signal.description)}
+                          >
                             {signal.actionLabel ?? `进入${pageLabel(signal.page)}`}
                           </Button>
                         </Toolbar>
@@ -1309,9 +1527,13 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
           ) : null}
 
           {analysisView === 'recommendations' ? (
-            <Panel className="panel-nested" title="联动建议" subtitle="根据来源、工具和记忆痕迹，给出最可能继续深挖的工作台入口。">
+            <Panel
+              className="panel-nested"
+              title="联动建议"
+              subtitle="根据来源、工具和记忆痕迹，给出最可能继续深挖的工作台入口。"
+            >
               <div className="list-stack">
-                {selectedRecommendations.map((item) => (
+                {selectedRecommendations.map(item => (
                   <div className="list-card" key={item.key}>
                     <div className="list-card-title">
                       <strong>{item.label}</strong>
@@ -1320,7 +1542,10 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
                     <p>{item.description}</p>
                     {item.page ? (
                       <Toolbar>
-                        <Button kind={buttonKindForTone(item.tone)} onClick={() => navigateFromSelection(item.page!, item.description)}>
+                        <Button
+                          kind={buttonKindForTone(item.tone)}
+                          onClick={() => navigateFromSelection(item.page!, item.description)}
+                        >
                           {item.actionLabel ?? `进入${pageLabel(item.page)}`}
                         </Button>
                       </Toolbar>
@@ -1332,12 +1557,19 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
           ) : null}
 
           {analysisView === 'tools' ? (
-            <Panel className="panel-nested" title="工具调用聚合" subtitle="按工具名聚合调用频次，帮助你看清这次会话真正依赖了哪些能力。">
+            <Panel
+              className="panel-nested"
+              title="工具调用聚合"
+              subtitle="按工具名聚合调用频次，帮助你看清这次会话真正依赖了哪些能力。"
+            >
               {selectedTools.aggregates.length === 0 ? (
-                <EmptyState title="没有工具轨迹" description="这次会话没有解析到 tool 消息，可以优先回配置页核对工具面。" />
+                <EmptyState
+                  title="没有工具轨迹"
+                  description="这次会话没有解析到 tool 消息，可以优先回配置页核对工具面。"
+                />
               ) : (
                 <div className="list-stack">
-                  {selectedTools.aggregates.slice(0, 8).map((item) => (
+                  {selectedTools.aggregates.slice(0, 8).map(item => (
                     <div className="list-card" key={item.name}>
                       <div className="list-card-title">
                         <strong>{item.name}</strong>
@@ -1355,12 +1587,19 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
           ) : null}
 
           {analysisView === 'timeline' ? (
-            <Panel className="panel-nested" title="最近工具时间线" subtitle="结合最后几次 tool 事件，快速判断会话停在了哪一层。">
+            <Panel
+              className="panel-nested"
+              title="最近工具时间线"
+              subtitle="结合最后几次 tool 事件，快速判断会话停在了哪一层。"
+            >
               {selectedTools.recentEvents.length === 0 ? (
-                <EmptyState title="暂无工具事件" description="当前会话没有 tool 时间线，重点去看模型和配置层。" />
+                <EmptyState
+                  title="暂无工具事件"
+                  description="当前会话没有 tool 时间线，重点去看模型和配置层。"
+                />
               ) : (
                 <div className="list-stack">
-                  {selectedTools.recentEvents.map((event) => (
+                  {selectedTools.recentEvents.map(event => (
                     <div className="list-card" key={event.key}>
                       <div className="list-card-title">
                         <strong>{event.name}</strong>
@@ -1379,7 +1618,10 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
           ) : null}
         </div>
       ) : (
-        <EmptyState title="未选择会话" description="先在“会话总览”里选择一条记录，再来这里看风险和工具细节。" />
+        <EmptyState
+          title="未选择会话"
+          description="先在“会话总览”里选择一条记录，再来这里看风险和工具细节。"
+        />
       )}
     </Panel>
   );
@@ -1388,19 +1630,19 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
     <Panel
       title="消息流"
       subtitle="只保留消息正文和筛选器，适合专注回放一次会话到底发生了什么。"
-      aside={(
+      aside={
         <Toolbar>
           <input
             className="search-input"
             placeholder="搜索消息内容或工具名"
             value={messageQuery}
-            onChange={(event) => setMessageQuery(event.target.value)}
+            onChange={event => setMessageQuery(event.target.value)}
             disabled={!selected}
           />
           <select
             className="select-input"
             value={messageFilter}
-            onChange={(event) => setMessageFilter(event.target.value as MessageFilter)}
+            onChange={event => setMessageFilter(event.target.value as MessageFilter)}
             disabled={!selected}
           >
             <option value="all">全部消息</option>
@@ -1409,7 +1651,7 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
             <option value="tool">仅 tool</option>
           </select>
         </Toolbar>
-      )}
+      }
     >
       {selected ? (
         filteredMessages.length === 0 ? (
@@ -1424,7 +1666,10 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
             </div>
             <div className="transcript">
               {filteredMessages.map((message: SessionMessage) => (
-                <article className={`message-bubble role-${normalizeRole(message.role)}`} key={message.id}>
+                <article
+                  className={`message-bubble role-${normalizeRole(message.role)}`}
+                  key={message.id}
+                >
                   <div className="message-meta">
                     <span>{normalizeRole(message.role) || 'unknown'}</span>
                     <span>{formatEpoch(message.timestamp)}</span>
@@ -1437,7 +1682,10 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
           </div>
         )
       ) : (
-        <EmptyState title="未选择会话" description="先在“会话总览”里选择一条记录，再来这里看消息流。" />
+        <EmptyState
+          title="未选择会话"
+          description="先在“会话总览”里选择一条记录，再来这里看消息流。"
+        />
       )}
     </Panel>
   );
@@ -1447,17 +1695,21 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
       <Panel
         title="会话工作台"
         subtitle="先用常用总览锁定一条会话，再按需进入风险联动或消息回放，避免一开始就掉进细节里。"
-        aside={(
+        aside={
           <Toolbar>
             <Button onClick={() => void loadList()}>刷新</Button>
-            <Button onClick={() => stateDbPath && void openInFinder(stateDbPath, 'state.db', true)} disabled={!stateDbPath}>
+            <Button
+              onClick={() => stateDbPath && void openInFinder(stateDbPath, 'state.db', true)}
+              disabled={!stateDbPath}
+            >
               定位 state.db
             </Button>
           </Toolbar>
-        )}
+        }
       >
         <p className="helper-text">
-          这里展示的是 Hermes 已落盘的真实会话，不依赖 Gateway 在线状态，也不改写任何原始记录。默认顺序：先筛选，再锁定焦点，最后按需看风险或消息。
+          这里展示的是 Hermes 已落盘的真实会话，不依赖 Gateway
+          在线状态，也不改写任何原始记录。默认顺序：先筛选，再锁定焦点，最后按需看风险或消息。
         </p>
         <div className="workspace-summary-strip">
           <section className="summary-mini-card">
@@ -1473,18 +1725,25 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
           <section className="summary-mini-card">
             <span className="summary-mini-label">当前命中</span>
             <strong className="summary-mini-value">{filtered.length}</strong>
-            <span className="summary-mini-meta">{riskySessions.length} 条高风险 · {toolHeavySessions.length} 条高工具</span>
+            <span className="summary-mini-meta">
+              {riskySessions.length} 条高风险 · {toolHeavySessions.length} 条高工具
+            </span>
           </section>
           <section className="summary-mini-card">
             <span className="summary-mini-label">当前焦点</span>
-            <strong className="summary-mini-value">{selected ? sessionDisplayTitle(selected.session) : '尚未选择'}</strong>
-            <span className="summary-mini-meta">{snapshot?.gateway?.gatewayState ?? '未检测到'} · {snapshot?.config.modelDefault ?? '模型未记录'}</span>
+            <strong className="summary-mini-value">
+              {selected ? sessionDisplayTitle(selected.session) : '尚未选择'}
+            </strong>
+            <span className="summary-mini-meta">
+              {snapshot?.gateway?.gatewayState ?? '未检测到'} ·{' '}
+              {snapshot?.config.modelDefault ?? '模型未记录'}
+            </span>
           </section>
         </div>
       </Panel>
 
       <div className="tab-bar">
-        {SESSIONS_TABS.map((tab) => (
+        {SESSIONS_TABS.map(tab => (
           <button
             key={tab.key}
             type="button"
@@ -1493,8 +1752,12 @@ export function SessionsPage({ notify, profile, navigate }: PageProps) {
             title={tab.hint}
           >
             {tab.label}
-            {tab.key === 'analysis' && selectedSignals.length > 0 ? <span className="tab-dirty-dot" /> : null}
-            {tab.key === 'messages' && (messageQuery.trim() || messageFilter !== 'all') ? <span className="tab-dirty-dot" /> : null}
+            {tab.key === 'analysis' && selectedSignals.length > 0 ? (
+              <span className="tab-dirty-dot" />
+            ) : null}
+            {tab.key === 'messages' && (messageQuery.trim() || messageFilter !== 'all') ? (
+              <span className="tab-dirty-dot" />
+            ) : null}
           </button>
         ))}
       </div>

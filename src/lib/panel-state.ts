@@ -51,14 +51,14 @@ const state: PanelState = {
 };
 
 function emit() {
-  listeners.forEach((listener) => listener());
+  listeners.forEach(listener => listener());
 }
 
 function preferredProfileName(snapshot: ProfilesSnapshot, preferred?: string) {
-  if (preferred && snapshot.profiles.some((item) => item.name === preferred)) {
+  if (preferred && snapshot.profiles.some(item => item.name === preferred)) {
     return preferred;
   }
-  if (snapshot.profiles.some((item) => item.name === snapshot.activeProfile)) {
+  if (snapshot.profiles.some(item => item.name === snapshot.activeProfile)) {
     return snapshot.activeProfile;
   }
   return snapshot.profiles[0]?.name ?? 'default';
@@ -77,7 +77,10 @@ export function notify(tone: NoticeTone, message: string) {
   showToast({ tone, message });
 }
 
-export async function loadShell(profileName = state.selectedProfile, options?: { silent?: boolean }) {
+export async function loadShell(
+  profileName = state.selectedProfile,
+  options?: { silent?: boolean }
+) {
   if (options?.silent) {
     state.refreshingShell = true;
   } else {
@@ -110,7 +113,10 @@ export async function loadProfiles(preferredProfile?: string) {
   try {
     const snapshot = await api.getProfilesSnapshot();
     state.profiles = snapshot;
-    state.selectedProfile = preferredProfileName(snapshot, preferredProfile ?? state.selectedProfile);
+    state.selectedProfile = preferredProfileName(
+      snapshot,
+      preferredProfile ?? state.selectedProfile
+    );
     emit();
     await loadShell(state.selectedProfile, { silent: true });
     return snapshot;
@@ -134,7 +140,10 @@ export async function setSelectedProfile(profileName: string) {
 }
 
 export async function makeSelectedProfileActive() {
-  if (!state.selectedProfile || state.selectedProfile === (state.profiles?.activeProfile ?? 'default')) {
+  if (
+    !state.selectedProfile ||
+    state.selectedProfile === (state.profiles?.activeProfile ?? 'default')
+  ) {
     return;
   }
 

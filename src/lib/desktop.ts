@@ -28,7 +28,11 @@ interface TerminalActionOptions extends DesktopActionBase {
   confirmMessage?: string;
 }
 
-export function resolveScopedCommand(command: string, profile: string, scope: CommandScope = 'profile') {
+export function resolveScopedCommand(
+  command: string,
+  profile: string,
+  scope: CommandScope = 'profile'
+) {
   if (scope === 'global' || profile === 'default' || !command.startsWith('hermes ')) {
     return command;
   }
@@ -46,7 +50,9 @@ export async function openFinderLocation(options: FinderActionOptions) {
     options.onResult?.(options.label, result);
     options.notify(
       result.success ? 'success' : 'error',
-      result.success ? `${options.label} 已在 Finder 中打开。` : `${options.label} 打开失败，请检查命令输出。`,
+      result.success
+        ? `${options.label} 已在 Finder 中打开。`
+        : `${options.label} 打开失败，请检查命令输出。`
     );
     return result;
   } catch (reason) {
@@ -63,7 +69,11 @@ export async function handoffToTerminal(options: TerminalActionOptions) {
   }
 
   const actionKey = options.actionKey ?? `terminal:${options.label}`;
-  const finalCommand = resolveScopedCommand(options.command, options.profile, options.scope ?? 'profile');
+  const finalCommand = resolveScopedCommand(
+    options.command,
+    options.profile,
+    options.scope ?? 'profile'
+  );
 
   options.setBusy?.(actionKey);
   try {
@@ -76,7 +86,7 @@ export async function handoffToTerminal(options: TerminalActionOptions) {
       result.success ? 'success' : 'error',
       result.success
         ? `${options.label} 已交给 Terminal 执行，完成后回到面板刷新即可。`
-        : `${options.label} 打开 Terminal 失败，请检查系统权限或命令路径。`,
+        : `${options.label} 打开 Terminal 失败，请检查系统权限或命令路径。`
     );
     return result;
   } catch (reason) {

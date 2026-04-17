@@ -11,7 +11,8 @@ import type {
   SessionNavigationContext,
 } from '../pages/types';
 
-const GATEWAY_SOURCE_PATTERN = /(gateway|telegram|discord|slack|feishu|dingtalk|wechat|wecom|line|whatsapp|remote|bot)/i;
+const GATEWAY_SOURCE_PATTERN =
+  /(gateway|telegram|discord|slack|feishu|dingtalk|wechat|wecom|line|whatsapp|remote|bot)/i;
 
 export interface DrilldownSeed {
   sourcePage: AppPageKey;
@@ -70,7 +71,7 @@ function buildBase(seed: DrilldownSeed, options?: DrilldownBaseOptions) {
 }
 
 function primaryTool(context?: SessionNavigationContext) {
-  return context?.toolNames.find((item) => item.trim().length > 0);
+  return context?.toolNames.find(item => item.trim().length > 0);
 }
 
 function gatewayLikeContext(context?: SessionNavigationContext) {
@@ -94,7 +95,10 @@ function fallbackLogContains(context?: SessionNavigationContext) {
   return primaryTool(context) ?? '';
 }
 
-export function inferDiagnosticCommand(logName?: string, context?: SessionNavigationContext): DiagnosticKind {
+export function inferDiagnosticCommand(
+  logName?: string,
+  context?: SessionNavigationContext
+): DiagnosticKind {
   const normalized = logName?.trim().toLowerCase() ?? '';
   if (normalized === 'gateway.error') {
     return 'gateway-status-deep';
@@ -111,7 +115,10 @@ export function inferDiagnosticCommand(logName?: string, context?: SessionNaviga
   return 'config-check';
 }
 
-export function buildLogsDrilldownIntent(seed: DrilldownSeed, options?: LogsDrilldownOptions): LogsPageIntent {
+export function buildLogsDrilldownIntent(
+  seed: DrilldownSeed,
+  options?: LogsDrilldownOptions
+): LogsPageIntent {
   const context = resolvedContext(seed, options);
   return {
     kind: 'logs',
@@ -125,7 +132,7 @@ export function buildLogsDrilldownIntent(seed: DrilldownSeed, options?: LogsDril
 
 export function buildDiagnosticsDrilldownIntent(
   seed: DrilldownSeed,
-  options?: DiagnosticsDrilldownOptions,
+  options?: DiagnosticsDrilldownOptions
 ): DiagnosticsPageIntent {
   const context = resolvedContext(seed, options);
   const logName = options?.logName ?? fallbackLogName(context);
@@ -139,7 +146,7 @@ export function buildDiagnosticsDrilldownIntent(
 
 export function buildExtensionsDrilldownIntent(
   seed: DrilldownSeed,
-  options?: ExtensionsDrilldownOptions,
+  options?: ExtensionsDrilldownOptions
 ): ExtensionsPageIntent {
   const context = resolvedContext(seed, options);
   return {
@@ -156,19 +163,20 @@ export function buildExtensionsDrilldownIntent(
 
 export function buildGatewayDrilldownIntent(
   seed: DrilldownSeed,
-  options?: GatewayDrilldownOptions,
+  options?: GatewayDrilldownOptions
 ): GatewayPageIntent {
   const context = resolvedContext(seed, options);
   return {
     kind: 'gateway',
     ...buildBase(seed, options),
-    platformName: options?.platformName ?? (gatewayLikeContext(context) ? context?.source : undefined),
+    platformName:
+      options?.platformName ?? (gatewayLikeContext(context) ? context?.source : undefined),
   };
 }
 
 export function buildConfigDrilldownIntent(
   seed: DrilldownSeed,
-  options?: ConfigDrilldownOptions,
+  options?: ConfigDrilldownOptions
 ): ConfigPageIntent {
   const context = resolvedContext(seed, options);
   const defaultFocus: ConfigFocus =
