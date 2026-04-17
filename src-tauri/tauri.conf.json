@@ -31,7 +31,9 @@
     "active": true,
     "targets": "all",
     "icon": [
-      "icons/icon.png"
+      "icons/icon.png",
+      "icons/icon.ico",
+      "icons/icon.icns"
     ],
     "category": "DeveloperTool",
     "shortDescription": "Hermes Agent 桌面管理客户端",
