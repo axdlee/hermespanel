@@ -27,6 +27,11 @@ jobs:
       release_id: ${{ steps.ensure-release.outputs.release_id }}
 
     steps:
+      - name: 签出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: 解析发布标签
         id: resolve-tag
         shell: bash
