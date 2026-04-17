@@ -149,7 +149,7 @@ jobs:
 
       - name: 构建并上传标准安装包
         if: matrix.platform.full_package == false
-        uses: tauri-apps/tauri-action@v1
+        uses: tauri-apps/tauri-action@action-v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
