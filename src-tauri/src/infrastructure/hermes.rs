@@ -4560,6 +4560,7 @@ pip_dependencies:
         assert!(result
             .imported
             .directory_path
+            .replace('\\', "/")
             .ends_with("plugins/vector-memory/retaindb"));
     }
 
@@ -4586,6 +4587,7 @@ pip_dependencies:
         assert_eq!(result.created.category, "memory-tools");
         assert!(result
             .target_directory
+            .replace('\\', "/")
             .ends_with("plugins/memory-tools/release-memory"));
         assert_eq!(result.created_files, 2);
         assert!(PathBuf::from(&result.target_directory)
@@ -4858,6 +4860,7 @@ Memory status
 
         assert!(detail
             .file_path
+            .replace('\\', "/")
             .ends_with("skills/ops-automation/release-notes/SKILL.md"));
         assert!(detail.content.contains("name: Release Notes"));
         assert!(detail.content.contains("## 步骤"));
@@ -4965,6 +4968,7 @@ Memory status
         assert!(result
             .imported
             .file_path
+            .replace('\\', "/")
             .ends_with("skills/quality-assurance/browser-qa/SKILL.md"));
         assert_eq!(result.copied_files, 1);
     }
