@@ -58,7 +58,7 @@ function renderSurfaceTabs(view) {
   return `
     <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
       ${surfaceTabHtml(view.surfaceView, 'focus', '常用')}
-      ${surfaceTabHtml(view.surfaceView, 'workbench', '工作台')}
+      ${surfaceTabHtml(view.surfaceView, 'workbench', '编辑')}
     </div>
   `;
 }
@@ -73,10 +73,10 @@ function relaySeed(view) {
   return {
     sourcePage: 'memory',
     headline: view.detail?.label
-      ? `围绕 ${view.detail.label} 继续下钻`
-      : '围绕记忆工作台继续下钻',
+      ? `围绕 ${view.detail.label} 查看详情`
+      : '围绕记忆页查看详情',
     description: view.investigation?.description
-      || '继续围绕 provider、槽位文件、字符预算和运行态一致性做排查。',
+      || '围绕 Provider、槽位文件、字符预算和运行态一致性继续查看。',
     context: view.investigation?.context,
   };
 }
@@ -93,7 +93,7 @@ function applyIntent(view, intent, announce = true) {
   }
   consumePageIntent();
   if (announce) {
-    notify('info', `${intent.headline} 已带入记忆工作台。`);
+    notify('info', `${intent.headline} 已带入记忆页。`);
   }
 }
 
@@ -101,9 +101,9 @@ function renderSkeleton(view) {
   view.page.innerHTML = `
     <div class="page-header page-header-compact">
       <div class="panel-title-row">
-        <h1 class="page-title">记忆工作台</h1>
+        <h1 class="page-title">记忆</h1>
       </div>
-      <p class="page-desc">正在同步槽位、Provider 和运行态信号。</p>
+      <p class="page-desc">正在同步记忆文件与 Provider。</p>
     </div>
     <div class="stat-cards">
       ${Array.from({ length: 6 }).map(() => '<div class="stat-card loading-placeholder" style="min-height:104px"></div>').join('')}
@@ -164,20 +164,20 @@ function renderFocusSurface(view, state) {
   const focusTitle = !view.items.length
     ? '先准备记忆槽位'
     : warnings.length > 0
-      ? `${currentLabel} 需要处理`
-      : `${currentLabel} 可继续维护`;
+      ? `${currentLabel} 有提醒`
+      : `${currentLabel} 可编辑`;
   const focusDescription = !view.items.length
     ? '先准备记忆槽位。'
     : warnings.length > 0
       ? '请先处理当前提醒。'
       : '记忆链路状态正常。';
   const budgetLabel = budgetRemaining == null ? '无限制' : `剩余 ${budgetRemaining}`;
-  const nextStep = warnings.length > 0 ? '先看工作台或诊断页' : '进入工作台继续编辑';
+  const nextStep = warnings.length > 0 ? '先看诊断' : '打开编辑页';
 
   return `
     <div class="page-header page-header-compact">
       <div class="panel-title-row">
-        <h1 class="page-title">记忆工作台</h1>
+        <h1 class="page-title">记忆</h1>
       </div>
       <p class="page-desc">记忆文件、Provider 与运行链路。</p>
     </div>
@@ -202,7 +202,7 @@ function renderFocusSurface(view, state) {
       </section>
       <section class="summary-mini-card">
         <span class="summary-mini-label">当前状态</span>
-        <strong class="summary-mini-value">${escapeHtml(warnings.length === 0 ? '当前稳定' : `${warnings.length} 条提醒`)}</strong>
+        <strong class="summary-mini-value">${escapeHtml(warnings.length === 0 ? '正常' : `${warnings.length} 条提醒`)}</strong>
         <span class="summary-mini-meta">${escapeHtml(nextStep)}</span>
       </section>
     </section>
@@ -218,7 +218,7 @@ function renderFocusSurface(view, state) {
           <div class="dashboard-focus-pills">
             ${pillHtml(memoryEnabled ? '记忆开启' : '记忆关闭', memoryEnabled ? 'good' : 'warn')}
             ${pillHtml(gatewayRunning ? '网关运行中' : '网关未运行', gatewayRunning ? 'good' : 'warn')}
-            ${pillHtml(warnings.length === 0 ? '当前稳定' : `${warnings.length} 条提醒`, warnings.length === 0 ? 'good' : 'warn')}
+            ${pillHtml(warnings.length === 0 ? '正常' : `${warnings.length} 条提醒`, warnings.length === 0 ? 'good' : 'warn')}
           </div>
         </div>
         <div class="dashboard-signal-grid">
@@ -240,12 +240,12 @@ function renderFocusSurface(view, state) {
           <section class="dashboard-signal-card">
             <span class="dashboard-signal-label">用户画像</span>
             <strong class="dashboard-signal-value">${escapeHtml(userProfileEnabled ? '已开启' : '已关闭')}</strong>
-            <span class="dashboard-signal-meta">${escapeHtml(memoryEnabled ? '可继续参与记忆闭环' : '关闭后不会稳定注入运行态')}</span>
+            <span class="dashboard-signal-meta">${escapeHtml(memoryEnabled ? '会参与记忆闭环' : '关闭后不会稳定注入运行态')}</span>
           </section>
         </div>
         <div class="dashboard-focus-actions">
-          ${buttonHtml({ action: 'open-memory-workbench', label: '进入工作台', kind: 'primary' })}
-          ${buttonHtml({ action: 'memory-setup', label: '调整 Provider / 开关', disabled: Boolean(view.runningAction) || Boolean(view.runningDiagnostic) || Boolean(view.saving) })}
+          ${buttonHtml({ action: 'open-memory-workbench', label: '打开编辑页', kind: 'primary' })}
+          ${buttonHtml({ action: 'memory-setup', label: 'Provider 设置', disabled: Boolean(view.runningAction) || Boolean(view.runningDiagnostic) || Boolean(view.saving) })}
           ${buttonHtml({ action: 'goto-diagnostics', label: '系统诊断' })}
           ${buttonHtml({ action: 'refresh', label: view.refreshing ? '同步中…' : '刷新', disabled: Boolean(view.refreshing) || Boolean(view.runningAction) || Boolean(view.runningDiagnostic) || Boolean(view.saving) })}
         </div>
@@ -254,8 +254,8 @@ function renderFocusSurface(view, state) {
       <aside class="dashboard-jump-panel">
         <div class="workspace-main-header">
           <div>
-            <strong>常用入口</strong>
-            <p class="workspace-main-copy">打开最常用的 4 个工作区。</p>
+            <strong>快捷入口</strong>
+            <p class="workspace-main-copy">只放最常用的 4 项。</p>
           </div>
           ${pillHtml('常用 4 项', 'neutral')}
         </div>
@@ -263,7 +263,7 @@ function renderFocusSurface(view, state) {
           ${launcherCardHtml({
             action: 'open-memory-workbench',
             kicker: '编辑',
-            title: '继续写当前槽位',
+            title: '编辑当前槽位',
             meta: `${currentLabel} · ${budgetLabel}`,
             tone: selected?.exists ? 'good' : 'warn',
           })}
@@ -277,14 +277,14 @@ function renderFocusSurface(view, state) {
           ${launcherCardHtml({
             action: 'plugins-panel',
             kicker: '扩展',
-            title: '插件与扩展',
-            meta: `${view.extensions?.plugins?.installedCount ?? 0} 个插件 · 继续治理运行时能力`,
+            title: '插件',
+            meta: `${view.extensions?.plugins?.installedCount ?? 0} 个插件 · 运行时能力`,
           })}
           ${launcherCardHtml({
             action: 'goto-diagnostics',
             kicker: '排障',
-            title: '诊断与收口',
-            meta: warnings[0] || '进入诊断页继续排查运行偏差',
+            title: '系统诊断',
+            meta: warnings[0] || '需要时再进入诊断页排查。',
             tone: warnings.length > 0 ? 'warn' : 'neutral',
           })}
         </div>
@@ -294,7 +294,7 @@ function renderFocusSurface(view, state) {
     <section class="config-section">
       <div class="config-section-header">
         <div>
-          <h2 class="config-section-title">当前边界</h2>
+          <h2 class="config-section-title">当前状态</h2>
           <p class="config-section-desc">当前槽位与系统摘要。</p>
         </div>
       </div>
@@ -326,8 +326,8 @@ function renderFocusSurface(view, state) {
         </section>
         <section class="shell-card shell-card-dense shell-card-muted">
           <div class="shell-card-header">
-            <strong>系统边界</strong>
-            ${pillHtml(warnings.length === 0 ? '当前稳定' : `${warnings.length} 条提醒`, warnings.length === 0 ? 'good' : 'warn')}
+            <strong>系统状态</strong>
+            ${pillHtml(warnings.length === 0 ? '正常' : `${warnings.length} 条提醒`, warnings.length === 0 ? 'good' : 'warn')}
           </div>
           ${keyValueRowsHtml([
             { label: '网关', value: view.dashboard?.gateway?.gatewayState || '未检测到' },
@@ -350,9 +350,9 @@ function renderWorkbenchSurface(view, state) {
   return `
     <div class="page-header page-header-compact">
       <div class="panel-title-row">
-        <h1 class="page-title">记忆工作台</h1>
+        <h1 class="page-title">记忆</h1>
       </div>
-      <p class="page-desc">需要具体编辑槽位、做保存校验、治理插件或查看原始输出时，再进入这一层。</p>
+      <p class="page-desc">编辑槽位、检查结果和插件都放在这里。</p>
     </div>
 
     ${renderSurfaceTabs(view)}
@@ -374,21 +374,21 @@ function renderPage(view) {
     view.page.innerHTML = `
       <div class="page-header page-header-compact">
         <div class="panel-title-row">
-          <h1 class="page-title">记忆工作台</h1>
+          <h1 class="page-title">记忆</h1>
         </div>
-        <p class="page-desc">围绕记忆文件、Provider 和校验动作做统一治理。</p>
+        <p class="page-desc">记忆文件与 Provider。</p>
       </div>
       <section class="config-section">
         <div class="config-section-header">
           <div>
             <h2 class="config-section-title">读取失败</h2>
-            <p class="config-section-desc">记忆工作台快照暂时不可用，可以重新同步后再继续。</p>
+            <p class="config-section-desc">记忆快照暂时不可用，可以稍后重试。</p>
           </div>
           <div class="toolbar">
             ${buttonHtml({ action: 'refresh', label: view.refreshing ? '同步中…' : '重新读取', kind: 'primary', disabled: view.refreshing })}
           </div>
         </div>
-        ${emptyStateHtml('未能读取记忆工作台快照', view.error || '请稍后再试。')}
+        ${emptyStateHtml('未能读取记忆快照', view.error || '请稍后再试。')}
       </section>
     `;
     bindEvents(view, {});
@@ -732,7 +732,7 @@ function bindEvents(view, intents) {
           return;
         case 'plugins-panel':
           navigate('extensions', buildExtensionsDrilldownIntent(relaySeed(view), {
-            description: '继续在扩展工作台直接管理插件、memory runtime 和相关依赖。',
+            description: '在扩展页直接管理插件、memory runtime 和相关依赖。',
             pluginName: view.pluginInput.trim() || undefined,
             rawKind: 'plugins',
           }));

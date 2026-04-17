@@ -92,7 +92,7 @@ function renderSkeleton(view) {
   view.page.innerHTML = `
     <div class="page-header page-header-compact">
       <div class="panel-title-row">
-        <h1 class="page-title">网关控制</h1>
+        <h1 class="page-title">Gateway</h1>
       </div>
       <p class="page-desc">正在同步 Service 与平台链路。</p>
     </div>
@@ -116,7 +116,7 @@ function renderPage(view) {
     view.page.innerHTML = `
       <div class="page-header page-header-compact">
         <div class="panel-title-row">
-          <h1 class="page-title">网关控制</h1>
+          <h1 class="page-title">Gateway</h1>
           ${infoTipHtml('Gateway 页需要同时读取运行快照和结构化配置；只要有一端异常，就先在这里暴露出来。')}
         </div>
         <p class="page-desc">Service、平台和策略没有完整读出来，先处理读取错误。</p>
@@ -213,10 +213,10 @@ function renderPage(view) {
     warnings.push('当前还没有配置任何消息通道，Gateway 启动后也不会接到外部消息。');
   }
   if (gatewayDirty) {
-    warnings.push('策略工作台还有未保存的草稿，建议先保存再继续验证。');
+    warnings.push('策略草稿还未保存，建议先保存。');
   }
   if (envDirty) {
-    warnings.push('平台连接工作台还有未保存的通道草稿。');
+    warnings.push('通道草稿还未保存。');
   }
 
   const surfaceView = view.surfaceView || 'focus';
@@ -248,13 +248,13 @@ function renderPage(view) {
             }
             : {
               title: '按需细调',
-              detail: '当前主链路基本稳定，按需进入工作台继续细调策略或平台。',
+              detail: '当前主链路基本稳定。',
             };
   const focusSectionMeta = focusSection === 'actions'
-    ? { title: '常用入口', desc: '打开最常用的工作区。', pill: '入口' }
+    ? { title: '快捷入口', desc: '常用去向。', pill: '入口' }
     : focusSection === 'details'
-      ? { title: '更多信息', desc: '查看补充资料。', pill: '更多' }
-      : { title: '状态', desc: '查看当前 Gateway 摘要。', pill: '状态' };
+      ? { title: '补充信息', desc: '查看目录和补充状态。', pill: '信息' }
+      : { title: '当前摘要', desc: '先看 Gateway 状态。', pill: '摘要' };
   const focusSectionContent = focusSection === 'actions'
     ? `
       <div class="dashboard-jump-grid">
@@ -290,7 +290,7 @@ function renderPage(view) {
           action: 'goto-logs',
           kicker: '排查',
           title: warnings.length > 0 ? '去排查提醒' : '看日志和诊断',
-          meta: warnings[0] || '进入日志或诊断页继续看原始输出',
+          meta: warnings[0] || '查看日志或诊断原始输出',
           tone: warnings.length > 0 ? 'warn' : 'neutral',
         })}
       </div>
@@ -314,9 +314,9 @@ function renderPage(view) {
           `).join('')}
         </div>
         <div class="toolbar top-gap">
-          ${buttonHtml({ action: 'open-gateway-workbench', label: '进入工作台', attrs: { 'data-tab': 'control' } })}
-          ${buttonHtml({ action: 'goto-logs', label: '进入日志页' })}
-          ${buttonHtml({ action: 'goto-diagnostics', label: '进入诊断页' })}
+          ${buttonHtml({ action: 'open-gateway-workbench', label: '打开管理', attrs: { 'data-tab': 'control' } })}
+          ${buttonHtml({ action: 'goto-logs', label: '查看日志' })}
+          ${buttonHtml({ action: 'goto-diagnostics', label: '诊断' })}
         </div>
       `
       : `
@@ -325,7 +325,7 @@ function renderPage(view) {
             { label: '网关状态', value: gatewayRunning ? '已经接管' : '还没接管' },
             { label: '消息入口', value: configuredPlatforms === 0 ? '还没有接入口' : `${connectedPlatforms}/${platforms.length || 0} 已连通` },
             { label: '当前提醒', value: warnings[0] || '暂时没有新的阻塞提醒' },
-            { label: '建议操作', value: nextStep.title },
+            { label: '下一步', value: nextStep.title },
           ].map((item) => `
             <div class="key-value-row">
               <span>${escapeHtml(item.label)}</span>
@@ -346,7 +346,7 @@ function renderPage(view) {
           <div class="dashboard-focus-pills">
             ${pillHtml(gatewayRunning ? 'Gateway 运行中' : 'Gateway 待启动', gatewayRunning ? 'good' : 'warn')}
             ${pillHtml(configuredPlatforms === 0 ? '还没接消息入口' : `${connectedPlatforms}/${platforms.length || 0} 入口已连`, connectedPlatforms > 0 ? 'good' : 'warn')}
-            ${pillHtml(warnings.length > 0 ? `${warnings.length} 条提醒` : '当前稳定', warnings.length > 0 ? 'warn' : 'good')}
+            ${pillHtml(warnings.length > 0 ? `${warnings.length} 条提醒` : '状态正常', warnings.length > 0 ? 'warn' : 'good')}
           </div>
         </div>
         <div class="dashboard-signal-grid">
@@ -361,14 +361,14 @@ function renderPage(view) {
             <span class="dashboard-signal-meta">${escapeHtml(unhealthyPlatforms.length === 0 ? '当前没有明显的平台连接异常。' : `还有 ${unhealthyPlatforms.length} 个入口异常或未就绪。`)}</span>
           </section>
                           <section class="dashboard-signal-card">
-                            <span class="dashboard-signal-label">建议操作</span>
+                            <span class="dashboard-signal-label">下一步</span>
                             <strong class="dashboard-signal-value">${escapeHtml(nextStep.title)}</strong>
                             <span class="dashboard-signal-meta">${escapeHtml(nextStep.detail)}</span>
                           </section>
         </div>
         <div class="dashboard-focus-actions">
           ${buttonHtml({ action: gatewayRunning ? 'gateway-restart' : 'gateway-start', label: gatewayRunning ? '重启 Gateway' : '启动 Gateway', kind: 'primary', disabled: Boolean(view.runningAction) || !installation.binaryFound })}
-          ${buttonHtml({ action: 'open-gateway-workbench', label: '进入策略工作台', attrs: { 'data-tab': 'control' } })}
+          ${buttonHtml({ action: 'open-gateway-workbench', label: '打开管理', attrs: { 'data-tab': 'control' } })}
           ${buttonHtml({ action: 'refresh', label: view.refreshing ? '同步中…' : '刷新', disabled: Boolean(view.refreshing || view.savingGateway || view.savingEnv) })}
         </div>
       </section>
@@ -401,14 +401,13 @@ function renderPage(view) {
       <div class="config-section-header">
         <div>
           <div class="panel-title-row">
-            <h2 class="config-section-title">Gateway 工作台</h2>
-            ${infoTipHtml('保持一个主工作区，避免 Service 区、配置区、诊断区到处重复。策略接管是默认入口，平台和作业放到次级标签。')}
+            <h2 class="config-section-title">Gateway 管理</h2>
           </div>
-          <p class="config-section-desc">策略主控，运行回执兜底。</p>
+          <p class="config-section-desc">策略、平台、投递和运行验证。</p>
         </div>
         <div class="toolbar">
           ${pillHtml(view.workspaceTab, 'neutral')}
-          ${warnings.length > 0 ? pillHtml(`${warnings.length} 条提醒`, 'warn') : pillHtml('当前稳定', 'good')}
+          ${warnings.length > 0 ? pillHtml(`${warnings.length} 条提醒`, 'warn') : pillHtml('状态正常', 'good')}
         </div>
       </div>
       ${renderGatewayTabs(view)}
@@ -437,7 +436,7 @@ function renderPage(view) {
   view.page.innerHTML = `
     <div class="page-header page-header-compact">
       <div class="panel-title-row">
-        <h1 class="page-title">网关控制</h1>
+        <h1 class="page-title">Gateway</h1>
       </div>
       <p class="page-desc">Service、会话策略、平台链路。</p>
     </div>
@@ -446,7 +445,7 @@ function renderPage(view) {
       <div class="context-banner context-banner-compact">
         <div class="context-banner-header">
           <div class="context-banner-copy">
-            <span class="context-banner-label">Session Drilldown</span>
+            <span class="context-banner-label">联动上下文</span>
             <strong class="context-banner-title">${escapeHtml(view.investigation.headline)}</strong>
             <p class="context-banner-description">${escapeHtml(view.investigation.description)}</p>
           </div>
@@ -456,16 +455,16 @@ function renderPage(view) {
           </div>
         </div>
         <div class="context-banner-actions toolbar">
-          ${buttonHtml({ action: 'clear-investigation', label: '清除上下文' })}
-          ${buttonHtml({ action: 'goto-logs', label: '进入日志页' })}
-          ${buttonHtml({ action: 'goto-diagnostics', label: '进入诊断页' })}
+          ${buttonHtml({ action: 'clear-investigation', label: '清除' })}
+          ${buttonHtml({ action: 'goto-logs', label: '查看日志' })}
+          ${buttonHtml({ action: 'goto-diagnostics', label: '诊断' })}
         </div>
       </div>
     ` : ''}
 
     <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
-      ${surfaceTabHtml(surfaceView, 'focus', '常用')}
-      ${surfaceTabHtml(surfaceView, 'workspace', '工作台')}
+      ${surfaceTabHtml(surfaceView, 'focus', '概览')}
+      ${surfaceTabHtml(surfaceView, 'workspace', '管理')}
     </div>
 
     ${surfaceView === 'focus' ? focusContent : workspaceContent}

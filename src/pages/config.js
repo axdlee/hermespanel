@@ -119,11 +119,11 @@ function investigationPrimaryAction(view) {
         attrs: { 'data-tab': 'control', 'data-section': 'model-governance' },
       });
     case 'toolsets':
-      return buttonHtml({ action: 'goto-extensions', label: '继续到扩展页', kind: 'primary' });
+      return buttonHtml({ action: 'goto-extensions', label: '打开扩展页', kind: 'primary' });
     case 'memory':
-      return buttonHtml({ action: 'goto-memory', label: '继续到记忆页', kind: 'primary' });
+      return buttonHtml({ action: 'goto-memory', label: '打开记忆页', kind: 'primary' });
     case 'context':
-      return buttonHtml({ action: 'goto-gateway', label: '继续到 Gateway', kind: 'primary' });
+      return buttonHtml({ action: 'goto-gateway', label: '打开 Gateway', kind: 'primary' });
     case 'credentials':
       return buttonHtml({
         action: 'focus-workspace',
@@ -266,7 +266,7 @@ function relaySeed(view) {
     : {
         sourcePage: 'config',
         headline: '来自配置中心的链路下钻',
-        description: '继续围绕模型、toolsets、provider 和 Gateway 关联配置做排查。',
+        description: '围绕模型、toolsets、provider 和 Gateway 关联配置继续排查。',
       };
 }
 
@@ -300,16 +300,16 @@ function renderPage(view) {
         <div class="panel-title-row">
           <h1 class="page-title">配置中心</h1>
         </div>
-        <p class="page-desc">文件、结构化控制和体检都收在这里。</p>
+        <p class="page-desc">模型、凭证、通道与能力配置。</p>
       </div>
       <section class="config-section">
         <div class="config-section-header">
           <div>
             <h2 class="config-section-title">读取失败</h2>
-            <p class="config-section-desc">配置工作台快照暂时不可用。</p>
+            <p class="config-section-desc">配置快照暂时不可用。</p>
           </div>
         </div>
-        ${emptyStateHtml('未能读取 Hermes 配置工作台', view.error || '请稍后再试。')}
+        ${emptyStateHtml('未能读取配置快照', view.error || '请稍后再试。')}
         <div class="quick-actions">
           ${buttonHtml({ action: 'refresh', label: '重新读取', kind: 'primary' })}
         </div>
@@ -350,21 +350,21 @@ function renderPage(view) {
   const actionBusy = Boolean(view.saving || view.runningDiagnostic || view.runningAction);
   const seed = relaySeed(view);
   const logsIntent = buildLogsDrilldownIntent(seed, {
-    description: '继续核对配置相关回执和运行日志。',
+    description: '核对配置相关回执和运行日志。',
     logName: snapshot?.gateway?.gatewayState === 'running' ? 'agent' : 'errors',
     contains: view.investigation?.context?.source || '',
     limit: '160',
   });
   const diagnosticsIntent = buildDiagnosticsDrilldownIntent(seed, {
-    description: '继续围绕配置完整性、provider 和 Gateway 关联链路做体检。',
+    description: '围绕配置完整性、provider 和 Gateway 关联链路做体检。',
     suggestedCommand: view.investigation?.suggestedCommand || 'config-check',
     logName: 'errors',
   });
   const gatewayIntent = buildGatewayDrilldownIntent(seed, {
-    description: '带着当前配置上下文继续看 Gateway 和平台链路。',
+    description: '带着当前配置上下文查看 Gateway 和平台链路。',
   });
   const extensionsIntent = buildExtensionsDrilldownIntent(seed, {
-    description: '继续核对 toolsets、skills、plugins 和 memory provider。',
+    description: '核对 toolsets、skills、plugins 和 memory provider。',
     rawKind: view.investigation?.focus === 'memory' ? 'memory' : 'tools',
     query: view.investigation?.focus === 'toolsets' ? data.summary.toolsets.join(' ') : '',
   });
@@ -378,9 +378,9 @@ function renderPage(view) {
       <section class="dashboard-focus-card dashboard-focus-card-${focusTone}">
         <div class="dashboard-focus-head">
           <div class="dashboard-focus-copy">
-            <span class="dashboard-focus-kicker">${modelReady ? '可以继续' : '先补齐'}</span>
-            <h2 class="dashboard-focus-title">${modelReady ? '配置已就绪' : '补齐基础配置'}</h2>
-            <p class="dashboard-focus-desc">${modelReady ? '可以继续校验、联调和扩展接入。' : '先补齐 Provider、模型和关键凭证。'}</p>
+            <span class="dashboard-focus-kicker">${modelReady ? '就绪' : '配置'}</span>
+            <h2 class="dashboard-focus-title">${modelReady ? '主要配置已可用' : '先完成基础配置'}</h2>
+            <p class="dashboard-focus-desc">${modelReady ? '可以联调和验证。' : '先补齐 Provider、模型和关键凭证。'}</p>
           </div>
           <div class="dashboard-focus-pills">
             ${pillHtml(modelReady ? '模型已就绪' : '模型待补齐', modelReady ? 'good' : 'warn')}
@@ -392,12 +392,12 @@ function renderPage(view) {
           <section class="dashboard-signal-card">
             <span class="dashboard-signal-label">对话</span>
             <strong class="dashboard-signal-value">${escapeHtml(modelReady ? '已可用' : '待补齐')}</strong>
-            <span class="dashboard-signal-meta">${escapeHtml(modelReady ? '主对话链路已经成形，可以继续微调。' : '先补 provider、默认模型和关键凭证。')}</span>
+            <span class="dashboard-signal-meta">${escapeHtml(modelReady ? '主对话链路已经成形，仍可微调。' : '先补 provider、默认模型和关键凭证。')}</span>
           </section>
           <section class="dashboard-signal-card">
             <span class="dashboard-signal-label">消息</span>
             <strong class="dashboard-signal-value">${escapeHtml(gatewayRunning ? '可验证' : '待验证')}</strong>
-            <span class="dashboard-signal-meta">${escapeHtml(remoteJobs.length > 0 ? `${remoteJobs.length} 个远端作业等待链路验证。` : `${channelCount} 项通道参数已露出，可按需继续补齐。`)}</span>
+            <span class="dashboard-signal-meta">${escapeHtml(remoteJobs.length > 0 ? `${remoteJobs.length} 个远端作业等待链路验证。` : `${channelCount} 项通道参数已露出，可按需补齐。`)}</span>
           </section>
           <section class="dashboard-signal-card">
             <span class="dashboard-signal-label">能力</span>
@@ -406,9 +406,9 @@ function renderPage(view) {
           </section>
         </div>
         <div class="dashboard-focus-actions">
-          ${buttonHtml({ action: 'focus-workspace', label: modelReady ? '继续整理对话设置' : '先把对话配通', kind: 'primary', attrs: { 'data-tab': 'control', 'data-section': 'model-governance' }, disabled: actionBusy })}
-          ${buttonHtml({ action: 'focus-workspace', label: '补凭证和消息入口', attrs: { 'data-tab': 'credentials', 'data-section': 'provider-credentials' }, disabled: actionBusy })}
-          ${buttonHtml({ action: 'goto-gateway', label: '去跑闭环验证', disabled: actionBusy })}
+          ${buttonHtml({ action: 'focus-workspace', label: modelReady ? '模型设置' : '完成模型设置', kind: 'primary', attrs: { 'data-tab': 'control', 'data-section': 'model-governance' }, disabled: actionBusy })}
+          ${buttonHtml({ action: 'focus-workspace', label: '凭证与通道', attrs: { 'data-tab': 'credentials', 'data-section': 'provider-credentials' }, disabled: actionBusy })}
+          ${buttonHtml({ action: 'goto-gateway', label: '验证 Gateway', disabled: actionBusy })}
           ${buttonHtml({ action: 'diagnostic-config-check', label: view.runningDiagnostic === 'config-check' ? '配置体检…' : '配置体检', disabled: actionBusy })}
           ${buttonHtml({ action: 'refresh', label: view.refreshing ? '同步中…' : '刷新', disabled: view.refreshing || actionBusy })}
         </div>
@@ -417,8 +417,8 @@ function renderPage(view) {
       <aside class="dashboard-jump-panel">
         <div class="workspace-main-header">
           <div>
-            <strong>常用入口</strong>
-            <p class="workspace-main-copy">打开最常用的配置与验证入口。</p>
+            <strong>快捷入口</strong>
+            <p class="workspace-main-copy">只放最常用的 4 项。</p>
           </div>
           ${pillHtml('高频 4 项', 'neutral')}
         </div>
@@ -426,31 +426,31 @@ function renderPage(view) {
           ${launcherCardHtml({
             action: 'focus-workspace',
             attrs: { 'data-tab': 'control', 'data-section': 'model-governance' },
-            kicker: '第一步',
-            title: '把对话先配通',
-            meta: modelReady ? '主链路已经可用，仍可继续细调。' : '默认模型和 provider 还没补齐。',
+            kicker: '模型',
+            title: '模型与 Provider',
+            meta: modelReady ? '主链路已经可用。' : '默认模型和 Provider 还没补齐。',
             tone: modelReady ? 'good' : 'warn',
           })}
           ${launcherCardHtml({
             action: 'focus-workspace',
             attrs: { 'data-tab': 'credentials', 'data-section': 'provider-credentials' },
-            kicker: '第二步',
-            title: '补钥匙和消息入口',
+            kicker: '凭证',
+            title: '钥匙与通道',
             meta: credentialsCount > 0 ? `${credentialsCount} 项关键凭证已写入。` : '先把关键凭证和通道变量补齐。',
             tone: credentialsCount > 0 ? 'good' : 'warn',
           })}
           ${launcherCardHtml({
             action: 'focus-workspace',
             attrs: { 'data-tab': 'control', 'data-section': 'toolsets-overview' },
-            kicker: '第三步',
-            title: '整理能力和记忆',
-            meta: data.summary.toolsets.length > 0 ? `${data.summary.toolsets.length} 组能力面已挂上去。` : '把工具面、记忆和外部技能目录理顺。',
+            kicker: '能力',
+            title: 'Toolsets 与记忆',
+            meta: data.summary.toolsets.length > 0 ? `${data.summary.toolsets.length} 组能力已配置。` : '把工具面、记忆和外部技能目录理顺。',
           })}
           ${launcherCardHtml({
             action: 'goto-gateway',
-            kicker: '完成后',
-            title: '去跑消息闭环',
-            meta: gatewayRunning ? 'Gateway 已在运行，直接去看消息链路。' : '配置完后去 Gateway 或诊断页验证。',
+            kicker: '验证',
+            title: 'Gateway 与消息',
+            meta: gatewayRunning ? 'Gateway 已在运行。' : '配置完成后到 Gateway 或诊断页验证。',
             tone: gatewayRunning ? 'good' : 'warn',
           })}
         </div>
@@ -463,18 +463,18 @@ function renderPage(view) {
     <section class="config-section dashboard-quiet-card">
       <div class="config-section-header">
         <div>
-          <h2 class="config-section-title">概览</h2>
-          <p class="config-section-desc">当前状态与建议操作。</p>
+          <h2 class="config-section-title">当前状态</h2>
+          <p class="config-section-desc">关键状态与建议。</p>
         </div>
         <div class="toolbar">
-          ${pillHtml(warnings.length > 0 ? `${warnings.length} 条提醒` : '当前稳定', warnings.length > 0 ? 'warn' : 'good')}
+          ${pillHtml(warnings.length > 0 ? `${warnings.length} 条提醒` : '正常', warnings.length > 0 ? 'warn' : 'good')}
         </div>
       </div>
       <div class="detail-list compact">
         ${[
           { label: '状态', value: modelReady ? '主配置已可用。' : '主配置尚未完成。' },
-          { label: '提醒', value: warnings[0] || (credentialsCount > 0 ? '可以继续整理能力与记忆。' : '请先补关键凭证和消息入口。') },
-          { label: '建议操作', value: !gatewayRunning ? '进入 Gateway 验证消息链路。' : '按需进入工作台或验证页。' },
+          { label: '提醒', value: warnings[0] || (credentialsCount > 0 ? '可以整理能力与记忆。' : '请先补关键凭证和消息入口。') },
+          { label: '建议', value: !gatewayRunning ? '进入 Gateway 验证消息链路。' : '按需打开编辑页或验证页。' },
         ].map((item) => `
           <div class="key-value-row">
             <span>${escapeHtml(item.label)}</span>
@@ -488,8 +488,8 @@ function renderPage(view) {
     <section class="config-section">
       <div class="config-section-header">
         <div>
-          <h2 class="config-section-title">配置工作台</h2>
-          <p class="config-section-desc">主区直改配置，侧栏负责导航和校验。</p>
+          <h2 class="config-section-title">配置编辑</h2>
+          <p class="config-section-desc">这里直接修改配置。</p>
         </div>
         <div class="toolbar">
           ${pillHtml(currentEditorBadge(view), 'neutral')}
@@ -558,9 +558,9 @@ function renderPage(view) {
           <textarea class="editor large" data-editor="config" spellcheck="false" ${view.editorTab === 'config' ? '' : 'style="display:none"'}></textarea>
           <textarea class="editor large" data-editor="env" spellcheck="false" ${view.editorTab === 'env' ? '' : 'style="display:none"'}></textarea>
           ${view.editorTab === 'config'
-            ? '<p class="helper-text config-editor-hint">保存 YAML 后建议立刻做一次配置体检，再去扩展或 Gateway 页验证运行态。</p>'
+            ? '<p class="helper-text config-editor-hint">保存 YAML 后建议立刻做一次配置体检。</p>'
             : view.editorTab === 'env'
-            ? '<p class="helper-text config-editor-hint">ENV 变更保存后最好立刻验证，避免只改变量不核对真实运行结果。</p>'
+            ? '<p class="helper-text config-editor-hint">ENV 保存后建议立刻验证。</p>'
             : ''}
         </div>
       </div>
@@ -569,11 +569,11 @@ function renderPage(view) {
   const verifyBody = verifyView === 'result'
     ? `
       <section class="config-section">
-        <div class="config-section-header">
-          <div>
-            <h2 class="config-section-title">最近动作回执</h2>
-            <p class="config-section-desc">查看最近一次动作回执。</p>
-          </div>
+          <div class="config-section-header">
+            <div>
+              <h2 class="config-section-title">最近动作回执</h2>
+              <p class="config-section-desc">查看最近一次操作结果。</p>
+            </div>
         </div>
         ${commandResultHtml(view.lastResult, '尚未执行动作', '保存、体检或执行历史迁移动作后，这里会保留最近一次原始回执。')}
       </section>
@@ -584,7 +584,7 @@ function renderPage(view) {
           <div class="config-section-header">
             <div>
               <h2 class="config-section-title">闭环入口</h2>
-              <p class="config-section-desc">改完后进入这些页面继续验证。</p>
+              <p class="config-section-desc">改完后从这里继续验证。</p>
             </div>
           </div>
           <div class="health-grid">
@@ -654,8 +654,8 @@ function renderPage(view) {
     <section class="config-section">
       <div class="config-section-header">
         <div>
-          <h2 class="config-section-title">验证与闭环</h2>
-          <p class="config-section-desc">把状态、回执和联动入口拆开看，默认只显示当前一块。</p>
+          <h2 class="config-section-title">验证</h2>
+          <p class="config-section-desc">查看状态、回执和联动入口。</p>
         </div>
         ${pillHtml(verifyView === 'status' ? '状态' : verifyView === 'result' ? '回执' : '去向', 'neutral')}
       </div>
@@ -712,8 +712,8 @@ function renderPage(view) {
 
     <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
       ${surfaceTabHtml(surfaceView, 'focus', '常用')}
-      ${surfaceTabHtml(surfaceView, 'workspace', '工作台')}
-      ${surfaceTabHtml(surfaceView, 'verify', '验证与闭环')}
+      ${surfaceTabHtml(surfaceView, 'workspace', '编辑')}
+      ${surfaceTabHtml(surfaceView, 'verify', '验证')}
     </div>
 
     ${surfaceContent}

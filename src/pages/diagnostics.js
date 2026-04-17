@@ -126,7 +126,7 @@ function applyIntent(view, intent, announce = true) {
   view.surfaceView = intent.suggestedCommand ? 'repair' : 'artifacts';
   consumePageIntent();
   if (announce) {
-    notify('info', `${intent.headline} 已带入诊断工作台。`);
+    notify('info', `${intent.headline} 已带入诊断页。`);
   }
 }
 
@@ -207,7 +207,6 @@ function renderDiagnosticGrid(commands, view) {
             ${pillHtml(item.key, item.kind === 'primary' ? 'good' : item.scope === 'capability' ? 'neutral' : 'warn')}
           </div>
           <p class="action-card-copy">${escapeHtml(item.description)}</p>
-          <p class="workspace-inline-meta">${escapeHtml(`底层动作：${item.cli}`)}</p>
           <div class="toolbar">
             ${buttonHtml({
               action: 'run-diagnostic',
@@ -238,7 +237,7 @@ function renderContextBanner(view) {
     <div class="context-banner context-banner-compact">
       <div class="context-banner-header">
         <div class="context-banner-copy">
-          <span class="context-banner-label">排障上下文</span>
+          <span class="context-banner-label">联动上下文</span>
           <strong class="context-banner-title">${escapeHtml(view.investigation.headline)}</strong>
           <p class="context-banner-description">${escapeHtml(view.investigation.description)}</p>
         </div>
@@ -300,7 +299,7 @@ function renderPostureHtml(posture) {
             ${posture.priorities.slice(0, 4).map((item) => `<div class="warning-item">${escapeHtml(`${item.title}：${item.detail}`)}</div>`).join('')}
           </div>
         `
-        : `<p class="helper-text top-gap">当前没有新的高优先项，可以继续做能力核验或直接下钻到对应工作台。</p>`
+        : `<p class="helper-text top-gap">当前没有新的高优先项。</p>`
     }
   `;
 }
@@ -323,9 +322,9 @@ function renderFocusSurface(view, state) {
     }
     : prioritiesCount > 0
       ? {
-        description: '已经定位出高优先项，默认层先给结论和去向，具体诊断命令与修复动作放到修复台。',
+        description: '已经定位出高优先项，先集中处理这些问题。',
         kicker: '先修主链路',
-        primary: buttonHtml({ action: 'open-diagnostics-surface', label: '进入修复台', kind: 'primary', attrs: { 'data-surface': 'repair' } }),
+        primary: buttonHtml({ action: 'open-diagnostics-surface', label: '打开修复', kind: 'primary', attrs: { 'data-surface': 'repair' } }),
         secondary: buttonHtml({ action: 'open-diagnostics-surface', label: '看材料与回执', attrs: { 'data-surface': 'artifacts' } }),
         title: `${prioritiesCount} 个高优先项待处理`,
         tone: 'warn',
@@ -343,8 +342,8 @@ function renderFocusSurface(view, state) {
           ? {
             description: '当前编排引用了本地没有扫描到的技能，建议优先回能力面补齐。',
             kicker: '先补能力缺口',
-            primary: buttonHtml({ action: 'goto-skills-workbench', label: '去技能工作台', kind: 'primary', disabled: state.actionBusy || !binaryFound }),
-            secondary: buttonHtml({ action: 'goto-extensions-workbench', label: '去扩展治理', disabled: state.actionBusy || !binaryFound }),
+            primary: buttonHtml({ action: 'goto-skills-workbench', label: '去技能页', kind: 'primary', disabled: state.actionBusy || !binaryFound }),
+            secondary: buttonHtml({ action: 'goto-extensions-workbench', label: '去扩展页', disabled: state.actionBusy || !binaryFound }),
             title: 'Skills 引用仍然存在缺口',
             tone: 'warn',
           }
@@ -361,7 +360,7 @@ function renderFocusSurface(view, state) {
     {
       label: '姿态',
       meta: state.posture.summary,
-      value: prioritiesCount > 0 ? `${prioritiesCount} 项待收口` : '当前稳定',
+      value: prioritiesCount > 0 ? `${prioritiesCount} 项待收口` : '状态正常',
     },
     {
       label: 'Gateway / 作业',
@@ -392,7 +391,7 @@ function renderFocusSurface(view, state) {
           <div class="dashboard-focus-pills">
             ${pillHtml(binaryFound ? '组件已接管' : '组件待安装', binaryFound ? 'good' : 'warn')}
             ${pillHtml(gatewayState === 'running' ? 'Gateway 已运行' : 'Gateway 待修复', gatewayState === 'running' ? 'good' : 'warn')}
-            ${pillHtml(state.combinedWarnings.length > 0 ? `${state.combinedWarnings.length} 条提醒` : '当前稳定', state.combinedWarnings.length > 0 ? 'warn' : 'good')}
+            ${pillHtml(state.combinedWarnings.length > 0 ? `${state.combinedWarnings.length} 条提醒` : '状态正常', state.combinedWarnings.length > 0 ? 'warn' : 'good')}
           </div>
         </div>
         <div class="dashboard-signal-grid">
@@ -414,8 +413,8 @@ function renderFocusSurface(view, state) {
       <aside class="dashboard-jump-panel">
         <div class="workspace-main-header">
           <div>
-            <strong>常用入口</strong>
-            <p class="workspace-main-copy">打开最常用的 4 个工作区。</p>
+            <strong>快捷入口</strong>
+            <p class="workspace-main-copy">常用去向。</p>
           </div>
           ${pillHtml('高频 4 项', 'neutral')}
         </div>
@@ -451,24 +450,6 @@ function renderFocusSurface(view, state) {
           })}
         </div>
       </aside>
-    </section>
-
-    <section class="config-section dashboard-quiet-card">
-      <div class="config-section-header">
-        <div>
-          <h2 class="config-section-title">概览</h2>
-          <p class="config-section-desc">当前状态与建议操作。</p>
-        </div>
-        <div class="toolbar">
-          ${pillHtml(view.profile, 'neutral')}
-        </div>
-      </div>
-      ${keyValueRowsHtml([
-        { label: '当前焦点', value: focusState.title },
-        { label: '运行面', value: `${gatewayState} · 远端作业 ${state.remoteJobs.length} 个` },
-        { label: '能力面', value: `${toolsEnabled}/${toolsTotal || 0} 工具 · ${view.skills.length} 个技能 · ${pluginCount} 个插件` },
-        { label: '建议操作', value: !binaryFound ? '先安装 Hermes' : prioritiesCount > 0 ? '进入修复台处理高优先项' : '按需查看材料或进入对应工作台' },
-      ])}
     </section>
   `;
 }
@@ -510,12 +491,12 @@ function renderRepairSurface(view, state) {
             </div>
             ${pillHtml(view.snapshot?.gateway?.gatewayState ?? 'gateway 待修复', view.snapshot?.gateway?.gatewayState === 'running' ? 'good' : 'warn')}
           </div>
-          <p class="action-card-copy">大多数问题先回结构化配置中心和 Gateway 工作台，优先在客户端里完成修正。</p>
+          <p class="action-card-copy">大多数问题先回结构化配置中心和 Gateway 处理。</p>
           <p class="workspace-inline-meta">${escapeHtml(view.installation ? `${view.config?.summary.modelProvider || 'provider 未配'} / ${view.config?.summary.modelDefault || 'model 未配'} · gateway ${view.snapshot?.gateway?.gatewayState || 'unknown'}` : '未读取配置摘要')}</p>
           <div class="toolbar">
-            ${buttonHtml({ action: 'goto-config-model', label: '配置工作台', kind: 'primary', disabled: state.actionBusy || !view.installation?.binaryFound })}
+            ${buttonHtml({ action: 'goto-config-model', label: '配置页', kind: 'primary', disabled: state.actionBusy || !view.installation?.binaryFound })}
             ${buttonHtml({ action: 'goto-config-credentials', label: '凭证 / 通道', disabled: state.actionBusy || !view.installation?.binaryFound })}
-            ${buttonHtml({ action: 'goto-gateway-workbench', label: 'Gateway 工作台', disabled: state.actionBusy || !view.installation?.binaryFound })}
+            ${buttonHtml({ action: 'goto-gateway-workbench', label: 'Gateway', disabled: state.actionBusy || !view.installation?.binaryFound })}
           </div>
         </section>
         <section class="action-card action-card-compact">
@@ -526,11 +507,11 @@ function renderRepairSurface(view, state) {
             </div>
             ${pillHtml(enabledToolCount(view.extensions) > 0 ? `${enabledToolCount(view.extensions)} 个 tools` : '能力面待修', enabledToolCount(view.extensions) > 0 ? 'good' : 'warn')}
           </div>
-          <p class="action-card-copy">能力面问题优先在工具、技能、记忆和扩展工作台处理。</p>
+          <p class="action-card-copy">能力面问题优先在工具、技能、记忆和扩展页处理。</p>
           <p class="workspace-inline-meta">${escapeHtml(view.installation ? `${view.config?.summary.toolsets?.join(', ') || '无 toolsets'} · memory ${view.config?.summary.memoryProvider || 'builtin-file'} · plugins ${pluginsCount(view.extensions)}` : '未读取能力面摘要')}</p>
           <div class="toolbar">
             ${buttonHtml({ action: 'goto-config-toolsets', label: 'Toolsets', disabled: state.actionBusy || !view.installation?.binaryFound })}
-            ${buttonHtml({ action: 'goto-skills-workbench', label: '技能工作台', disabled: state.actionBusy || !view.installation?.binaryFound })}
+            ${buttonHtml({ action: 'goto-skills-workbench', label: '技能页', disabled: state.actionBusy || !view.installation?.binaryFound })}
             ${buttonHtml({ action: 'goto-memory-config', label: '记忆配置', disabled: state.actionBusy || !view.installation?.binaryFound })}
             ${buttonHtml({ action: 'goto-extensions-workbench', label: '扩展插件', disabled: state.actionBusy || !view.installation?.binaryFound })}
           </div>
@@ -580,7 +561,7 @@ function renderRepairSurface(view, state) {
       <div class="config-section-header">
         <div>
           <h2 class="config-section-title">风险与入口</h2>
-          <p class="config-section-desc">这里保留当前最可能出问题的环节，方便继续下钻到对应工作台。</p>
+          <p class="config-section-desc">保留最容易出问题的环节。</p>
         </div>
       </div>
       <div class="health-grid health-grid-dense">
@@ -620,7 +601,7 @@ function renderRepairSurface(view, state) {
               ${state.combinedWarnings.slice(0, 6).map((warning) => `<div class="warning-item">${escapeHtml(warning)}</div>`).join('')}
             </div>
           `
-          : emptyStateHtml('当前风险不高', '没有检测到明显的结构性问题，可以直接去材料层看日志回执，或继续下钻到对应工作台。')
+          : emptyStateHtml('当前风险不高', '没有检测到明显的结构性问题，可以直接查看材料层日志与回执。')
       }
     </section>
   `;
@@ -633,7 +614,7 @@ function renderArtifactsSurface(view, state, lastCommand) {
         <div class="shell-card-header">
           <div>
             <strong>本地上下文</strong>
-            <p class="shell-card-copy">这里展示的都是当前 profile 的真实本地状态，用来决定该去配置、网关还是能力工作台修。</p>
+            <p class="shell-card-copy">这里展示当前 profile 的真实本地状态。</p>
           </div>
           ${pillHtml(view.installation?.binaryFound ? '已接管' : '待安装', view.installation?.binaryFound ? 'good' : 'warn')}
         </div>
@@ -650,16 +631,16 @@ function renderArtifactsSurface(view, state, lastCommand) {
             ])
           : emptyStateHtml('上下文未就绪', '暂时还没有读取到 dashboard、config 与安装摘要。')}
         <div class="toolbar top-gap">
-          ${buttonHtml({ action: 'goto-config-model', label: '配置工作台', disabled: state.actionBusy || !view.installation?.binaryFound })}
-          ${buttonHtml({ action: 'goto-gateway-workbench', label: 'Gateway 工作台', disabled: state.actionBusy || !view.installation?.binaryFound })}
-          ${buttonHtml({ action: 'goto-logs', label: '日志页' })}
+          ${buttonHtml({ action: 'goto-config-model', label: '配置页', disabled: state.actionBusy || !view.installation?.binaryFound })}
+          ${buttonHtml({ action: 'goto-gateway-workbench', label: 'Gateway', disabled: state.actionBusy || !view.installation?.binaryFound })}
+          ${buttonHtml({ action: 'goto-logs', label: '日志' })}
         </div>
       </section>
       <section class="shell-card shell-card-dense">
         <div class="shell-card-header">
           <div>
             <strong>实际文件入口</strong>
-            <p class="shell-card-copy">真正需要对照文件和目录时，从这里继续下钻，避免这些边界动作占满默认层。</p>
+            <p class="shell-card-copy">需要对照文件和目录时再从这里进入。</p>
           </div>
           ${pillHtml(state.logsDir ? '可直接定位' : '路径未就绪', state.logsDir ? 'good' : 'warn')}
         </div>
@@ -729,7 +710,7 @@ function renderSkeleton(view) {
   view.page.innerHTML = `
     <div class="page-header page-header-compact">
       <div class="panel-title-row">
-        <h1 class="page-title">诊断工作台</h1>
+        <h1 class="page-title">诊断</h1>
       </div>
       <p class="page-desc">正在构建 Hermes 诊断上下文。</p>
     </div>
@@ -756,7 +737,7 @@ function renderPage(view) {
     ? '修复动作、运行诊断与能力诊断。'
     : surfaceView === 'artifacts'
       ? '材料层统一收纳本地上下文、最近回执和日志预览。'
-      : '查看当前诊断结论与常用入口。';
+      : '查看当前诊断结论与快捷入口。';
   const surfaceContent = surfaceView === 'repair'
     ? renderRepairSurface(view, state)
     : surfaceView === 'artifacts'
@@ -766,15 +747,15 @@ function renderPage(view) {
   view.page.innerHTML = `
     <div class="page-header page-header-compact">
       <div class="panel-title-row">
-        <h1 class="page-title">诊断工作台</h1>
+        <h1 class="page-title">诊断</h1>
       </div>
       <p class="page-desc">${pageDescription}</p>
     </div>
 
     <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
-      ${surfaceTabHtml(surfaceView, 'focus', '常用')}
-      ${surfaceTabHtml(surfaceView, 'repair', '修复台')}
-      ${surfaceTabHtml(surfaceView, 'artifacts', '材料与回执')}
+      ${surfaceTabHtml(surfaceView, 'focus', '概览')}
+      ${surfaceTabHtml(surfaceView, 'repair', '修复')}
+      ${surfaceTabHtml(surfaceView, 'artifacts', '材料')}
     </div>
 
     ${renderContextBanner(view)}

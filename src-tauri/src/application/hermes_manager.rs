@@ -4,13 +4,13 @@ use crate::models::{
     CommandRunResult, ConfigDocuments, ConfigWorkspace, CronCreateRequest, CronDeleteRequest,
     CronJobsSnapshot, CronUpdateRequest, DashboardSnapshot, EnvWorkspace, ExtensionsSnapshot,
     GatewayWorkspace, HermesHome, InstallationSnapshot, LogReadResult, MemoryFileDetail,
-    MemoryFileSummary, PluginCreateRequest, PluginCreateResult, PluginImportRequest,
-    PluginImportResult, PluginManifestDetail, PluginManifestSaveRequest, PluginReadmeDetail,
-    PluginReadmeSaveRequest, PluginDeleteRequest, PluginDeleteResult,
+    MemoryFileSummary, PluginCreateRequest, PluginCreateResult, PluginDeleteRequest,
+    PluginDeleteResult, PluginImportRequest, PluginImportResult, PluginManifestDetail,
+    PluginManifestSaveRequest, PluginReadmeDetail, PluginReadmeSaveRequest,
     ProfileAliasCreateRequest, ProfileAliasDeleteRequest, ProfileCreateRequest,
     ProfileDeleteRequest, ProfileExportRequest, ProfileImportRequest, ProfileRenameRequest,
-    ProfilesSnapshot, SessionDetail, SessionRecord, SkillCreateRequest, SkillFileDetail,
-    SkillDeleteRequest, SkillDeleteResult, SkillFrontmatterSaveRequest, SkillImportRequest,
+    ProfilesSnapshot, SessionDetail, SessionRecord, SkillCreateRequest, SkillDeleteRequest,
+    SkillDeleteResult, SkillFileDetail, SkillFrontmatterSaveRequest, SkillImportRequest,
     SkillImportResult, SkillItem, SkillSaveRequest,
 };
 
@@ -189,10 +189,7 @@ impl HermesManager {
         hermes::import_skill(&self.home, request)
     }
 
-    pub fn delete_local_skill(
-        &self,
-        request: &SkillDeleteRequest,
-    ) -> AppResult<SkillDeleteResult> {
+    pub fn delete_local_skill(&self, request: &SkillDeleteRequest) -> AppResult<SkillDeleteResult> {
         hermes::delete_local_skill(&self.home, request)
     }
 

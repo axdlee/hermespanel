@@ -2,8 +2,7 @@ use crate::application::hermes_manager::HermesManager;
 use crate::models::{
     CommandRunResult, ExtensionsSnapshot, PluginCreateRequest, PluginCreateResult,
     PluginDeleteRequest, PluginDeleteResult, PluginImportRequest, PluginImportResult,
-    PluginManifestDetail, PluginManifestSaveRequest, PluginReadmeDetail,
-    PluginReadmeSaveRequest,
+    PluginManifestDetail, PluginManifestSaveRequest, PluginReadmeDetail, PluginReadmeSaveRequest,
 };
 
 #[tauri::command]

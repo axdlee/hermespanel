@@ -9,6 +9,7 @@
     "dev:vite": "vite --host 127.0.0.1 --port 1420",
     "build": "tsc && vite build",
     "check": "npm run build && cargo test --manifest-path src-tauri/Cargo.toml",
+    "check:ci": "cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml && npm run build",
     "preview": "vite preview --host 127.0.0.1 --port 1420",
     "tauri": "tauri",
     "tauri:dev": "bash ./scripts/tauri-dev-clean.sh",

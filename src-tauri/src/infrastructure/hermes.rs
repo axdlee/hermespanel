@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -25,9 +24,9 @@ use crate::models::{
     ProfileAliasDeleteRequest, ProfileAliasItem, ProfileCreateRequest, ProfileDeleteRequest,
     ProfileExportRequest, ProfileImportRequest, ProfileRenameRequest, ProfileSummary,
     ProfilesSnapshot, RuntimeSkillItem, SessionDetail, SessionMessage, SessionRecord,
-    SkillCreateRequest, SkillDeleteRequest, SkillDeleteResult, SkillFileDetail,
-    SkillFrontmatter, SkillFrontmatterSaveRequest, SkillImportRequest, SkillImportResult,
-    SkillItem, ToolPlatformInventory, ToolPlatformSummary, ToolRuntimeItem,
+    SkillCreateRequest, SkillDeleteRequest, SkillDeleteResult, SkillFileDetail, SkillFrontmatter,
+    SkillFrontmatterSaveRequest, SkillImportRequest, SkillImportResult, SkillItem,
+    ToolPlatformInventory, ToolPlatformSummary, ToolRuntimeItem,
 };
 
 const QUICK_INSTALL_COMMAND: &str =
@@ -475,17 +474,17 @@ pub fn run_hermes_command_owned(
 
 fn installation_action_command(action: &str) -> AppResult<InstallationActionCommand> {
     match action {
-        "install" | "reinstall" => {
-            Ok(InstallationActionCommand::Shell(QUICK_INSTALL_COMMAND.to_string()))
-        }
-        "update" => Ok(InstallationActionCommand::Hermes(vec!["update".to_string()])),
+        "install" | "reinstall" => Ok(InstallationActionCommand::Shell(
+            QUICK_INSTALL_COMMAND.to_string(),
+        )),
+        "update" => Ok(InstallationActionCommand::Hermes(
+            vec!["update".to_string()],
+        )),
         "uninstall" => Ok(InstallationActionCommand::Hermes(vec![
             "uninstall".to_string(),
             "--yes".to_string(),
         ])),
-        other => Err(AppError::Message(format!(
-            "不支持的安装动作: {other}"
-        ))),
+        other => Err(AppError::Message(format!("不支持的安装动作: {other}"))),
     }
 }
 
@@ -493,9 +492,7 @@ fn config_compat_action_args(action: &str) -> AppResult<Vec<String>> {
     match action {
         "config-migrate" => Ok(vec!["config".to_string(), "migrate".to_string()]),
         "claw-migrate" => Ok(vec!["claw".to_string(), "migrate".to_string()]),
-        other => Err(AppError::Message(format!(
-            "不支持的配置兼容动作: {other}"
-        ))),
+        other => Err(AppError::Message(format!("不支持的配置兼容动作: {other}"))),
     }
 }
 
@@ -1311,9 +1308,7 @@ fn build_plugin_catalog(
     let mut items = WalkDir::new(&root)
         .into_iter()
         .filter_map(Result::ok)
-        .filter(|entry| {
-            entry.file_type().is_file() && entry.file_name() == OsString::from("plugin.yaml")
-        })
+        .filter(|entry| entry.file_type().is_file() && entry.file_name() == "plugin.yaml")
         .filter_map(|entry| parse_plugin_catalog_item(&root, entry.path(), &installed).ok())
         .collect::<Vec<_>>();
 
@@ -1400,7 +1395,8 @@ fn normalize_plugin_string_list(values: &[String]) -> Vec<String> {
 fn normalize_plugin_external_dependencies(
     items: Vec<RawPluginExternalDependency>,
 ) -> Vec<PluginExternalDependency> {
-    items.into_iter()
+    items
+        .into_iter()
         .filter_map(|item| {
             let name = item.name.unwrap_or_default().trim().to_string();
             if name.is_empty() {
@@ -1614,7 +1610,10 @@ pub fn read_plugin_readme(
     })
 }
 
-pub fn import_plugin(home: &HermesHome, request: &PluginImportRequest) -> AppResult<PluginImportResult> {
+pub fn import_plugin(
+    home: &HermesHome,
+    request: &PluginImportRequest,
+) -> AppResult<PluginImportResult> {
     let source_path = resolve_import_source_path(&request.source_path)?;
     let source_metadata = fs::metadata(&source_path)?;
     let (source_root, manifest_path) = if source_metadata.is_dir() {
@@ -1631,9 +1630,9 @@ pub fn import_plugin(home: &HermesHome, request: &PluginImportRequest) -> AppRes
                 "导入源必须是插件目录，或明确指向 plugin.yaml 文件".into(),
             ));
         }
-        let parent = source_path.parent().ok_or_else(|| {
-            AppError::Message("无法解析导入插件所在目录".into())
-        })?;
+        let parent = source_path
+            .parent()
+            .ok_or_else(|| AppError::Message("无法解析导入插件所在目录".into()))?;
         (parent.to_path_buf(), source_path.clone())
     };
 
@@ -1664,7 +1663,9 @@ pub fn import_plugin(home: &HermesHome, request: &PluginImportRequest) -> AppRes
             .map(|path| path == source_root)
             .unwrap_or(false);
         if same_target {
-            return Err(AppError::Message("源插件已经位于当前 profile，无需再次导入".into()));
+            return Err(AppError::Message(
+                "源插件已经位于当前 profile，无需再次导入".into(),
+            ));
         }
 
         if !request.overwrite {
@@ -1679,7 +1680,11 @@ pub fn import_plugin(home: &HermesHome, request: &PluginImportRequest) -> AppRes
 
     fs::create_dir_all(&catalog_root)?;
     let copied_files = copy_directory_contents(&source_root, &target_directory)?;
-    let imported = parse_plugin_catalog_item(&catalog_root, &target_directory.join("plugin.yaml"), &BTreeSet::new())?;
+    let imported = parse_plugin_catalog_item(
+        &catalog_root,
+        &target_directory.join("plugin.yaml"),
+        &BTreeSet::new(),
+    )?;
 
     Ok(PluginImportResult {
         copied_files,
@@ -1690,7 +1695,10 @@ pub fn import_plugin(home: &HermesHome, request: &PluginImportRequest) -> AppRes
     })
 }
 
-pub fn create_plugin(home: &HermesHome, request: &PluginCreateRequest) -> AppResult<PluginCreateResult> {
+pub fn create_plugin(
+    home: &HermesHome,
+    request: &PluginCreateRequest,
+) -> AppResult<PluginCreateResult> {
     let plugin_name = request.name.trim();
     if plugin_name.is_empty() {
         return Err(AppError::Message("请先填写插件名称".into()));
@@ -1759,11 +1767,7 @@ pub fn write_plugin_manifest(
     set_yaml_string(&mut value, &["name"], plugin_name);
     set_yaml_optional_string(&mut value, &["description"], &request.description);
     set_yaml_string_array_or_remove(&mut value, &["requires_env"], &request.requires_env);
-    set_yaml_string_array_or_remove(
-        &mut value,
-        &["pip_dependencies"],
-        &request.pip_dependencies,
-    );
+    set_yaml_string_array_or_remove(&mut value, &["pip_dependencies"], &request.pip_dependencies);
     set_yaml_external_dependencies(
         &mut value,
         &["external_dependencies"],
@@ -1796,7 +1800,9 @@ pub fn delete_local_plugin(
 ) -> AppResult<PluginDeleteResult> {
     let expected_name = request.name.trim();
     if expected_name.is_empty() {
-        return Err(AppError::Message("删除本地插件前必须提供插件名称确认".into()));
+        return Err(AppError::Message(
+            "删除本地插件前必须提供插件名称确认".into(),
+        ));
     }
 
     let (canonical_directory, catalog_root) =
@@ -1850,9 +1856,7 @@ pub fn list_skills(home: &HermesHome) -> AppResult<Vec<SkillItem>> {
     for entry in WalkDir::new(&home.skills_dir)
         .into_iter()
         .filter_map(Result::ok)
-        .filter(|entry| {
-            entry.file_type().is_file() && entry.file_name() == OsString::from("SKILL.md")
-        })
+        .filter(|entry| entry.file_type().is_file() && entry.file_name() == "SKILL.md")
     {
         let full_path = entry.path().to_path_buf();
         let relative = full_path
@@ -1913,12 +1917,16 @@ pub fn delete_local_skill(
 ) -> AppResult<SkillDeleteResult> {
     let expected_name = request.name.trim();
     if expected_name.is_empty() {
-        return Err(AppError::Message("删除本地技能前必须提供技能名称确认".into()));
+        return Err(AppError::Message(
+            "删除本地技能前必须提供技能名称确认".into(),
+        ));
     }
 
     let path = ensure_skill_file_within_home(home, &request.file_path)?;
     if path.file_name() != Some(std::ffi::OsStr::new("SKILL.md")) {
-        return Err(AppError::Message("只能删除本地 skills 目录内的 SKILL.md".into()));
+        return Err(AppError::Message(
+            "只能删除本地 skills 目录内的 SKILL.md".into(),
+        ));
     }
 
     let actual_name = build_skill_file_detail(home, &path)
@@ -1938,9 +1946,9 @@ pub fn delete_local_skill(
         )));
     }
 
-    let directory = path.parent().ok_or_else(|| {
-        AppError::Message("无法解析技能目录".into())
-    })?;
+    let directory = path
+        .parent()
+        .ok_or_else(|| AppError::Message("无法解析技能目录".into()))?;
     let removed_files = WalkDir::new(directory)
         .into_iter()
         .filter_map(Result::ok)
@@ -2015,7 +2023,10 @@ pub fn create_skill_file(
     read_skill_file(home, &file_path.display().to_string())
 }
 
-pub fn import_skill(home: &HermesHome, request: &SkillImportRequest) -> AppResult<SkillImportResult> {
+pub fn import_skill(
+    home: &HermesHome,
+    request: &SkillImportRequest,
+) -> AppResult<SkillImportResult> {
     let source_path = resolve_import_source_path(&request.source_path)?;
     let source_metadata = fs::metadata(&source_path)?;
 
@@ -2033,9 +2044,9 @@ pub fn import_skill(home: &HermesHome, request: &SkillImportRequest) -> AppResul
                 "导入源必须是技能目录，或明确指向 SKILL.md 文件".into(),
             ));
         }
-        let parent = source_path.parent().ok_or_else(|| {
-            AppError::Message("无法解析导入技能所在目录".into())
-        })?;
+        let parent = source_path
+            .parent()
+            .ok_or_else(|| AppError::Message("无法解析导入技能所在目录".into()))?;
         (parent.to_path_buf(), source_path.clone(), false)
     };
 
@@ -2065,7 +2076,9 @@ pub fn import_skill(home: &HermesHome, request: &SkillImportRequest) -> AppResul
             .map(|path| path == source_skill_file)
             .unwrap_or(false);
         if same_target {
-            return Err(AppError::Message("源技能已经位于当前 profile，无需再次导入".into()));
+            return Err(AppError::Message(
+                "源技能已经位于当前 profile，无需再次导入".into(),
+            ));
         }
 
         if !request.overwrite {
@@ -3294,7 +3307,9 @@ fn build_plugin_readme(name: &str, description: &str) -> String {
 fn resolve_import_source_path(source_path: &str) -> AppResult<PathBuf> {
     let trimmed = source_path.trim();
     if trimmed.is_empty() {
-        return Err(AppError::Message("请先提供要导入的技能目录或 SKILL.md 路径".into()));
+        return Err(AppError::Message(
+            "请先提供要导入的技能目录或 SKILL.md 路径".into(),
+        ));
     }
 
     let expanded = if trimmed == "~" {
@@ -3308,10 +3323,7 @@ fn resolve_import_source_path(source_path: &str) -> AppResult<PathBuf> {
     };
 
     fs::canonicalize(&expanded).map_err(|error| {
-        AppError::Message(format!(
-            "无法访问导入源：{} ({error})",
-            expanded.display()
-        ))
+        AppError::Message(format!("无法访问导入源：{} ({error})", expanded.display()))
     })
 }
 
@@ -3333,8 +3345,8 @@ fn copy_directory_contents(source_root: &Path, target_root: &Path) -> AppResult<
     let mut copied_files = 0usize;
 
     for entry in WalkDir::new(source_root).min_depth(1) {
-        let entry = entry
-            .map_err(|error| AppError::Message(format!("复制技能目录失败: {error}")))?;
+        let entry =
+            entry.map_err(|error| AppError::Message(format!("复制技能目录失败: {error}")))?;
         let relative = entry
             .path()
             .strip_prefix(source_root)
@@ -3807,7 +3819,7 @@ fn build_runtime_warnings(
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     use rusqlite::Connection;
     use tempfile::tempdir;
@@ -3829,15 +3841,14 @@ mod tests {
         build_profile_create_args, build_profile_delete_args, build_profile_export_args,
         build_profile_import_args, build_profile_rename_args, build_skill_action_args,
         build_tool_action_args, compose_hermes_command_args, config_compat_action_args,
-        create_plugin, create_skill_file, get_active_profile, import_plugin, import_skill,
-        installation_action_command, list_profile_aliases, list_profiles, load_recent_sessions,
-        parse_memory_runtime, parse_plugin_runtime, parse_runtime_skills,
-        parse_skill_frontmatter, parse_tool_inventory, parse_tool_inventory_line,
-        parse_tool_summary, read_config_documents, read_cron_jobs, read_gateway_state,
-        read_plugin_manifest, read_plugin_readme, resolve_hermes_home, set_active_profile,
-        write_plugin_manifest, write_plugin_readme, write_structured_config,
-        write_skill_frontmatter, write_structured_env, write_structured_gateway,
-        delete_local_plugin, delete_local_skill,
+        create_plugin, create_skill_file, delete_local_plugin, delete_local_skill,
+        get_active_profile, import_plugin, import_skill, installation_action_command,
+        list_profile_aliases, list_profiles, load_recent_sessions, parse_memory_runtime,
+        parse_plugin_runtime, parse_runtime_skills, parse_skill_frontmatter, parse_tool_inventory,
+        parse_tool_inventory_line, parse_tool_summary, read_config_documents, read_cron_jobs,
+        read_gateway_state, read_plugin_manifest, read_plugin_readme, resolve_hermes_home,
+        set_active_profile, write_plugin_manifest, write_plugin_readme, write_skill_frontmatter,
+        write_structured_config, write_structured_env, write_structured_gateway,
         InstallationActionCommand, QUICK_INSTALL_COMMAND,
     };
 
@@ -4080,9 +4091,9 @@ description: 管理 GitHub 认证
 
     #[test]
     fn builds_profile_aware_cli_args() {
-        let default_args = compose_hermes_command_args(Some("default"), &["status", "--all"]);
-        let named_args = compose_hermes_command_args(Some("coder"), &["gateway", "status"]);
-        let active_args = compose_hermes_command_args(None, &["version"]);
+        let default_args = compose_hermes_command_args(Some("default"), ["status", "--all"]);
+        let named_args = compose_hermes_command_args(Some("coder"), ["gateway", "status"]);
+        let active_args = compose_hermes_command_args(None, ["version"]);
 
         assert_eq!(default_args, vec!["-p", "default", "status", "--all"]);
         assert_eq!(named_args, vec!["-p", "coder", "gateway", "status"]);
@@ -4101,10 +4112,7 @@ description: 管理 GitHub 认证
         );
         assert_eq!(
             installation_action_command("uninstall").expect("uninstall 应映射成功"),
-            InstallationActionCommand::Hermes(vec![
-                "uninstall".to_string(),
-                "--yes".to_string()
-            ])
+            InstallationActionCommand::Hermes(vec!["uninstall".to_string(), "--yes".to_string()])
         );
         assert!(installation_action_command("unknown").is_err());
     }
@@ -4468,7 +4476,11 @@ requires_env:
     fn imports_plugin_directory_into_profile_catalog() {
         let temp = tempdir().expect("创建临时目录失败");
         let root = temp.path().join(".hermes");
-        let source_dir = temp.path().join("local-plugin").join("memory").join("byterover");
+        let source_dir = temp
+            .path()
+            .join("local-plugin")
+            .join("memory")
+            .join("byterover");
 
         seed_profile_root(&root, "gpt-5.4");
         fs::create_dir_all(source_dir.join("assets")).expect("创建源插件目录失败");
@@ -4508,18 +4520,11 @@ requires_env:
     fn imports_plugin_manifest_and_uses_requested_category() {
         let temp = tempdir().expect("创建临时目录失败");
         let root = temp.path().join(".hermes");
-        let manifest_path = temp
-            .path()
-            .join("manifest-source")
-            .join("plugin.yaml");
+        let manifest_path = temp.path().join("manifest-source").join("plugin.yaml");
 
         seed_profile_root(&root, "gpt-5.4");
-        fs::create_dir_all(
-            manifest_path
-                .parent()
-                .expect("解析源插件父目录失败"),
-        )
-        .expect("创建 manifest 目录失败");
+        fs::create_dir_all(manifest_path.parent().expect("解析源插件父目录失败"))
+            .expect("创建 manifest 目录失败");
         fs::write(
             &manifest_path,
             r#"name: retaindb
@@ -4583,8 +4588,12 @@ pip_dependencies:
             .target_directory
             .ends_with("plugins/memory-tools/release-memory"));
         assert_eq!(result.created_files, 2);
-        assert!(PathBuf::from(&result.target_directory).join("plugin.yaml").is_file());
-        assert!(PathBuf::from(&result.target_directory).join("README.md").is_file());
+        assert!(PathBuf::from(&result.target_directory)
+            .join("plugin.yaml")
+            .is_file());
+        assert!(PathBuf::from(&result.target_directory)
+            .join("README.md")
+            .is_file());
 
         let manifest =
             fs::read_to_string(PathBuf::from(&result.target_directory).join("plugin.yaml"))
@@ -4606,12 +4615,8 @@ pip_dependencies:
             .join("byterover")
             .join("plugin.yaml");
 
-        fs::create_dir_all(
-            manifest_path
-                .parent()
-                .expect("解析插件目录失败"),
-        )
-        .expect("创建插件目录失败");
+        fs::create_dir_all(manifest_path.parent().expect("解析插件目录失败"))
+            .expect("创建插件目录失败");
         fs::write(
             &manifest_path,
             r#"name: byterover
@@ -4656,7 +4661,10 @@ external_dependencies:
         .expect("保存插件 manifest 失败");
 
         assert_eq!(saved.name, "ByteRover Memory");
-        assert_eq!(saved.requires_env, vec!["BYTEROVER_API_KEY", "BYTEROVER_REGION"]);
+        assert_eq!(
+            saved.requires_env,
+            vec!["BYTEROVER_API_KEY", "BYTEROVER_REGION"]
+        );
         assert_eq!(saved.pip_dependencies, vec!["requests"]);
         assert_eq!(saved.external_dependencies[0].check, "brv --version");
 
@@ -4728,10 +4736,8 @@ description: "release helper"
 "#,
         )
         .expect("写入 plugin.yaml 失败");
-        fs::write(plugin_dir.join("README.md"), "# Release Memory\n")
-            .expect("写入 README 失败");
-        fs::write(plugin_dir.join("assets").join("icon.txt"), "demo")
-            .expect("写入附属文件失败");
+        fs::write(plugin_dir.join("README.md"), "# Release Memory\n").expect("写入 README 失败");
+        fs::write(plugin_dir.join("assets").join("icon.txt"), "demo").expect("写入附属文件失败");
 
         let home =
             resolve_hermes_home(Some("default"), Some(&root)).expect("解析 Hermes Home 失败");
@@ -4935,12 +4941,8 @@ Memory status
         let source_file = temp.path().join("skills-source").join("SKILL.md");
 
         seed_profile_root(&root, "gpt-5.4");
-        fs::create_dir_all(
-            source_file
-                .parent()
-                .expect("解析源技能父目录失败"),
-        )
-        .expect("创建源技能目录失败");
+        fs::create_dir_all(source_file.parent().expect("解析源技能父目录失败"))
+            .expect("创建源技能目录失败");
         fs::write(
             &source_file,
             "---\nname: Browser QA\ndescription: 浏览器验收巡检\n---\n\n# Browser QA\n",
@@ -4980,8 +4982,7 @@ Memory status
             "---\nname: Release Notes\ndescription: 生成版本摘要\n---\n\n# Release Notes\n",
         )
         .expect("写入技能文件失败");
-        fs::write(skill_dir.join("assets").join("notes.txt"), "demo")
-            .expect("写入附属文件失败");
+        fs::write(skill_dir.join("assets").join("notes.txt"), "demo").expect("写入附属文件失败");
 
         let home =
             resolve_hermes_home(Some("default"), Some(&root)).expect("解析 Hermes Home 失败");
@@ -5438,7 +5439,7 @@ Built-in toolsets (cli):
         PathBuf::from(value)
     }
 
-    fn seed_profile_root(root: &PathBuf, model: &str) {
+    fn seed_profile_root(root: &Path, model: &str) {
         fs::create_dir_all(root.join("skills")).expect("创建 skills 目录失败");
         fs::create_dir_all(root.join("logs")).expect("创建 logs 目录失败");
         fs::create_dir_all(root.join("memories")).expect("创建 memories 目录失败");

@@ -12,9 +12,55 @@ on:
         type: string
         default: "v0.1.0"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name || github.event.inputs.tag_name }}
+  cancel-in-progress: false
+
 jobs:
+  prepare-release:
+    name: 准备 Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag_name: ${{ steps.resolve-tag.outputs.tag_name }}
+      release_id: ${{ steps.ensure-release.outputs.release_id }}
+
+    steps:
+      - name: 解析发布标签
+        id: resolve-tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag_name=${{ github.event.inputs.tag_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag_name=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 创建或复用 Release
+        id: ensure-release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ steps.resolve-tag.outputs.tag_name }}
+        run: |
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release edit "$TAG_NAME" \
+              --title "HermesPanel $TAG_NAME" \
+              --latest
+          else
+            gh release create "$TAG_NAME" \
+              --title "HermesPanel $TAG_NAME" \
+              --notes "自动构建的多平台安装包。" \
+              --latest
+          fi
+
+          RELEASE_ID="$(gh release view "$TAG_NAME" --json id --jq '.id')"
+          echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
+
   build:
     name: 构建 (${{ matrix.platform.name }})
+    needs: prepare-release
     runs-on: ${{ matrix.platform.os }}
     permissions:
       contents: write
@@ -57,11 +103,7 @@ jobs:
       - name: 解析发布标签
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "TAG_NAME=${{ github.event.inputs.tag_name }}" >> "$GITHUB_ENV"
-          else
-            echo "TAG_NAME=${{ github.ref_name }}" >> "$GITHUB_ENV"
-          fi
+          echo "TAG_NAME=${{ needs.prepare-release.outputs.tag_name }}" >> "$GITHUB_ENV"
 
       - name: 安装 Node.js
         uses: actions/setup-node@v4
@@ -73,6 +115,11 @@ jobs:
         run: npm ci
 
       - name: 安装 Rust 工具链
+        if: matrix.platform.rust_target == ''
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 安装 Rust 工具链（含目标）
+        if: matrix.platform.rust_target != ''
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.platform.rust_target }}
@@ -97,13 +144,12 @@ jobs:
 
       - name: 构建并上传标准安装包
         if: matrix.platform.full_package == false
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          releaseId: ${{ needs.prepare-release.outputs.release_id }}
           tagName: ${{ env.TAG_NAME }}
-          releaseName: "HermesPanel ${{ env.TAG_NAME }}"
-          releaseBody: "自动构建的多平台安装包。"
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.platform.args }}
@@ -131,32 +177,26 @@ jobs:
         if: matrix.platform.full_package == true
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION="${TAG_NAME#v}"
           BUNDLE_DIR="src-tauri/target/release/bundle"
+          shopt -s nullglob
 
-          gh release create "$TAG_NAME" \
-            --title "HermesPanel $TAG_NAME" \
-            --notes "自动构建的多平台安装包。" 2>/dev/null || true
+          for installer in "${BUNDLE_DIR}"/nsis/*.exe; do
+            full_installer="${installer%.exe}-full.exe"
+            mv "$installer" "$full_installer"
+            gh release upload "$TAG_NAME" "$full_installer" --clobber
+          done
 
-          if [ -f "${BUNDLE_DIR}/nsis/HermesPanel_${VERSION}_x64-setup.exe" ]; then
-            mv "${BUNDLE_DIR}/nsis/HermesPanel_${VERSION}_x64-setup.exe" \
-               "${BUNDLE_DIR}/nsis/HermesPanel_${VERSION}_x64-setup-full.exe"
-            gh release upload "$TAG_NAME" \
-               "${BUNDLE_DIR}/nsis/HermesPanel_${VERSION}_x64-setup-full.exe" --clobber
-          fi
-
-          if [ -f "${BUNDLE_DIR}/msi/HermesPanel_${VERSION}_x64_en-US.msi" ]; then
-            mv "${BUNDLE_DIR}/msi/HermesPanel_${VERSION}_x64_en-US.msi" \
-               "${BUNDLE_DIR}/msi/HermesPanel_${VERSION}_x64-full_en-US.msi"
-            gh release upload "$TAG_NAME" \
-               "${BUNDLE_DIR}/msi/HermesPanel_${VERSION}_x64-full_en-US.msi" --clobber
-          fi
+          for installer in "${BUNDLE_DIR}"/msi/*.msi; do
+            full_installer="${installer%.msi}-full.msi"
+            mv "$installer" "$full_installer"
+            gh release upload "$TAG_NAME" "$full_installer" --clobber
+          done
 
   update-release-notes:
     name: 更新 Release Notes
-    needs: build
+    needs: [prepare-release, build]
     runs-on: ubuntu-latest
     if: always() && needs.build.result != 'cancelled'
     permissions:
@@ -166,11 +206,7 @@ jobs:
       - name: 解析发布标签
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "TAG_NAME=${{ github.event.inputs.tag_name }}" >> "$GITHUB_ENV"
-          else
-            echo "TAG_NAME=${{ github.ref_name }}" >> "$GITHUB_ENV"
-          fi
+          echo "TAG_NAME=${{ needs.prepare-release.outputs.tag_name }}" >> "$GITHUB_ENV"
 
       - name: 生成 Release Notes
         shell: bash
@@ -203,6 +239,10 @@ jobs:
       - name: 写回 Release Notes
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release edit "$TAG_NAME" --notes-file RELEASE_NOTES.md
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release edit "$TAG_NAME" --notes-file RELEASE_NOTES.md
+          else
+            echo "Release $TAG_NAME 尚未创建，跳过 Release Notes 更新。"
+          fi

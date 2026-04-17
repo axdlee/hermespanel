@@ -195,7 +195,7 @@ function runtimeHealthWarnings(profile, bundle) {
 function relaySeed(view, profileName) {
   return {
     sourcePage: 'profiles',
-    headline: `从 Profile 管理继续治理 ${profileName}`,
+    headline: `从实例页继续处理 ${profileName}`,
     description: '继续围绕当前实例的配置、扩展、日志、诊断和 Gateway 做闭环。',
     context: undefined,
   };
@@ -442,8 +442,8 @@ function renderProfileRail(view) {
 function renderSurfaceTabs(view) {
   return `
     <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
-      ${surfaceTabHtml(view.surfaceView, 'focus', '常用')}
-      ${surfaceTabHtml(view.surfaceView, 'workspace', '实例台')}
+      ${surfaceTabHtml(view.surfaceView, 'focus', '概览')}
+      ${surfaceTabHtml(view.surfaceView, 'workspace', '详情')}
       ${surfaceTabHtml(view.surfaceView, 'maintain', '维护')}
     </div>
   `;
@@ -527,7 +527,7 @@ function renderFocusSurface(view) {
                 detail: '模型已就绪，但 Gateway 还没完全进入 running。',
               }
               : {
-                title: '进入实例台',
+                title: '查看详情',
                 detail: '当前实例主链路基本稳定。',
               };
   const focusSignals = [
@@ -542,27 +542,27 @@ function renderFocusSurface(view) {
       value: readinessValue,
     },
     {
-      label: '建议操作',
+      label: '下一步',
       meta: nextStep.detail,
       value: nextStep.title,
     },
   ];
   const focusSubviewMeta = focusSubview === 'routes'
     ? {
-      title: '常用入口',
-      desc: '打开最常用的工作台。',
+      title: '快捷入口',
+      desc: '常用去向。',
       pill: '入口',
     }
     : focusSubview === 'more'
       ? {
-        title: '更多信息',
-        desc: '查看补充资料。',
-        pill: '更多',
+        title: '补充信息',
+        desc: '查看目录和补充状态。',
+        pill: '信息',
       }
       : {
-        title: '状态',
-        desc: '查看当前实例摘要。',
-        pill: '状态',
+        title: '当前摘要',
+        desc: '先看实例状态。',
+        pill: '摘要',
       };
   const focusSubviewContent = focusSubview === 'routes'
     ? `
@@ -653,28 +653,28 @@ function renderFocusSurface(view) {
             </label>
             <p class="shell-card-copy">${escapeHtml(selected ? selected.homePath : '先选择一个 Hermes profile，再继续往下治理。')}</p>
             <div class="toolbar">
-              ${buttonHtml({ action: 'open-profile-surface', label: '进入实例台', kind: 'primary', disabled: !selected, attrs: { 'data-surface': 'workspace' } })}
-              ${buttonHtml({ action: 'open-profile-surface', label: '进入维护区', disabled: !selected, attrs: { 'data-surface': 'maintain' } })}
+              ${buttonHtml({ action: 'open-profile-surface', label: '查看详情', kind: 'primary', disabled: !selected, attrs: { 'data-surface': 'workspace' } })}
+              ${buttonHtml({ action: 'open-profile-surface', label: '维护', disabled: !selected, attrs: { 'data-surface': 'maintain' } })}
               ${buttonHtml({ action: 'goto-diagnostics', label: '系统诊断', disabled: !selected })}
             </div>
           </section>
           <section class="shell-card shell-card-dense shell-card-muted">
             <div class="shell-card-header">
-              <strong>当前边界</strong>
-              ${pillHtml(selected && bundle && warnings.length === 0 ? '偏稳定' : '需要关注', selected && bundle && warnings.length === 0 ? 'good' : 'warn')}
+              <strong>当前概况</strong>
+              ${pillHtml(selected && bundle && warnings.length === 0 ? '状态正常' : '需处理', selected && bundle && warnings.length === 0 ? 'good' : 'warn')}
             </div>
             ${selected && bundle
               ? keyValueRowsHtml([
                 { label: '模型链路', value: bundle.config.summary.modelDefault || '默认模型待配置' },
                 { label: 'Gateway', value: bundle.dashboard.gateway?.gatewayState || 'unknown' },
                 { label: '基础材料', value: materialValue },
-                { label: '建议操作', value: nextStep.title },
+                { label: '下一步', value: nextStep.title },
               ])
               : keyValueRowsHtml([
                 { label: '默认实例', value: defaultProfile },
                 { label: '运行态缓存', value: `${runtimeReady}/${items.length || 0}` },
                 { label: '结构缺口', value: structuralGaps === 0 ? '已收敛' : `${structuralGaps} 个` },
-                { label: '建议操作', value: '先选择实例' },
+                { label: '下一步', value: '先选择实例' },
               ])}
             ${warnings.length > 0 ? `<div class="warning-stack top-gap">${warnings.slice(0, 2).map((item) => `<div class="warning-item">${escapeHtml(item)}</div>`).join('')}</div>` : ''}
           </section>
@@ -684,41 +684,18 @@ function renderFocusSurface(view) {
   return `
     <div class="page-header page-header-compact">
       <div class="panel-title-row">
-        <h1 class="page-title">Profile 管理</h1>
+        <h1 class="page-title">实例</h1>
       </div>
       <p class="page-desc">多实例选择、查看与维护。</p>
     </div>
 
     ${renderSurfaceTabs(view)}
 
-    <section class="workspace-summary-strip workspace-summary-strip-dense">
-      <section class="summary-mini-card">
-        <span class="summary-mini-label">默认实例</span>
-        <strong class="summary-mini-value">${escapeHtml(defaultProfile)}</strong>
-        <span class="summary-mini-meta">${escapeHtml(snapshot?.activeProfile ? '当前写回 Hermes 的主实例' : '还没有识别到默认实例')}</span>
-      </section>
-      <section class="summary-mini-card">
-        <span class="summary-mini-label">实例总数</span>
-        <strong class="summary-mini-value">${escapeHtml(String(items.length))}</strong>
-        <span class="summary-mini-meta">${escapeHtml(`${readyProfiles}/${items.length || 0} 个基础齐备 · ${runtimeReady}/${items.length || 0} 个已读运行态`)}</span>
-      </section>
-      <section class="summary-mini-card">
-        <span class="summary-mini-label">结构缺口</span>
-        <strong class="summary-mini-value">${escapeHtml(structuralGaps === 0 ? '已收敛' : `${structuralGaps} 个`)}</strong>
-        <span class="summary-mini-meta">${escapeHtml(structuralGaps === 0 ? '当前没有发现 .env / SOUL 结构缺口' : '优先补 .env、SOUL 和默认实例链路')}</span>
-      </section>
-      <section class="summary-mini-card">
-        <span class="summary-mini-label">当前状态</span>
-        <strong class="summary-mini-value">${escapeHtml(readinessValue)}</strong>
-        <span class="summary-mini-meta">${escapeHtml(selected ? `当前实例 ${selected.name}` : '尚未选择实例')}</span>
-      </section>
-    </section>
-
     <section class="dashboard-focus-shell dashboard-focus-shell-single">
       <section class="dashboard-focus-card dashboard-focus-card-${focusReady ? 'good' : 'warn'}">
         <div class="dashboard-focus-head">
           <div class="dashboard-focus-copy">
-            <span class="dashboard-focus-kicker">${escapeHtml(selected?.isActive ? '当前默认实例' : '当前焦点实例')}</span>
+            <span class="dashboard-focus-kicker">${escapeHtml(selected?.isActive ? '默认实例' : '当前实例')}</span>
             <h2 class="dashboard-focus-title">${escapeHtml(focusTitle)}</h2>
             <p class="dashboard-focus-desc">${escapeHtml(focusDescription)}</p>
           </div>
@@ -726,7 +703,7 @@ function renderFocusSurface(view) {
             ${selected ? pillHtml(selected.name, 'neutral') : pillHtml('先选实例', 'warn')}
             ${selected ? pillHtml(selected.isActive ? '已是默认' : '浏览实例', selected.isActive ? 'good' : 'neutral') : ''}
             ${selected ? pillHtml(selected.gatewayState || 'gateway unknown', platformTone(selected.gatewayState)) : ''}
-            ${warnings.length > 0 ? pillHtml(`${warnings.length} 条提醒`, 'warn') : selected && bundle ? pillHtml('当前稳定', 'good') : ''}
+            ${warnings.length > 0 ? pillHtml(`${warnings.length} 条提醒`, 'warn') : selected && bundle ? pillHtml('状态正常', 'good') : ''}
           </div>
         </div>
         <div class="dashboard-signal-grid">
@@ -739,7 +716,7 @@ function renderFocusSurface(view) {
           `).join('')}
         </div>
         <div class="dashboard-focus-actions">
-          ${buttonHtml({ action: 'open-profile-surface', label: '进入实例台', kind: 'primary', disabled: !selected, attrs: { 'data-surface': 'workspace' } })}
+          ${buttonHtml({ action: 'open-profile-surface', label: '查看详情', kind: 'primary', disabled: !selected, attrs: { 'data-surface': 'workspace' } })}
           ${buttonHtml({ action: 'goto-config-model', label: '去改模型', disabled: !selected || Boolean(view.runningAction) || !installation?.binaryFound })}
           ${buttonHtml({
             action: 'set-default',
@@ -813,20 +790,20 @@ function renderWorkbench(view) {
               };
   const workbenchSubviewMeta = workbenchSubview === 'routes'
     ? {
-      title: '常用入口',
-      desc: '打开最常用的工作台。',
+      title: '快捷入口',
+      desc: '常用去向。',
       pill: '入口',
     }
     : workbenchSubview === 'more'
       ? {
-        title: '更多信息',
-        desc: '查看补充资料。',
-        pill: '更多',
+        title: '补充信息',
+        desc: '目录、文件和补充状态。',
+        pill: '信息',
       }
       : {
-        title: '当前状态',
-        desc: '查看当前实例摘要。',
-        pill: '状态',
+        title: '当前摘要',
+        desc: '先看当前实例状态。',
+        pill: '摘要',
       };
   const workbenchSubviewContent = workbenchSubview === 'routes'
     ? `
@@ -855,8 +832,8 @@ function renderWorkbench(view) {
         ${profileViewCardHtml({
           key: 'runtime',
           kicker: '运行',
-          title: '进入运行信号页',
-          meta: '把更细的运行态、材料和诊断继续拆到下一层看',
+          title: '查看运行状态',
+          meta: '继续查看运行态、材料和诊断',
           tone: warnings.length > 0 ? 'warn' : 'neutral',
         })}
       </div>
@@ -877,7 +854,7 @@ function renderWorkbench(view) {
             : [
               { label: '当前实例', value: selected?.name || '未选择' },
               { label: '状态', value: error || '运行态还没完整进入页面' },
-              { label: '建议操作', value: '先刷新实例或切换到其他实例' },
+              { label: '下一步', value: '先刷新实例或切换到其他实例' },
             ])
           .map((item) => `
             <div class="key-value-row">
@@ -887,9 +864,9 @@ function renderWorkbench(view) {
           `).join('')}
         </div>
         <div class="toolbar top-gap">
-          ${buttonHtml({ action: 'goto-logs', label: '进入日志页', disabled: !selected })}
-          ${buttonHtml({ action: 'goto-diagnostics', label: '进入诊断页', disabled: !selected })}
-          ${buttonHtml({ action: 'open-profile-surface', label: '去维护区', disabled: !selected, attrs: { 'data-surface': 'maintain' } })}
+          ${buttonHtml({ action: 'goto-logs', label: '查看日志', disabled: !selected })}
+          ${buttonHtml({ action: 'goto-diagnostics', label: '诊断', disabled: !selected })}
+          ${buttonHtml({ action: 'open-profile-surface', label: '维护', disabled: !selected, attrs: { 'data-surface': 'maintain' } })}
         </div>
       `
       : `
@@ -899,12 +876,12 @@ function renderWorkbench(view) {
               { label: 'Provider / 模型', value: `${bundle.config.summary.modelProvider || 'provider 未配置'} / ${bundle.config.summary.modelDefault || 'model 未配置'}` },
               { label: 'Toolsets', value: toolsetLabel(bundle) },
               { label: '材料', value: `${selected.skillCount} 技能 · ${selected.aliases.length} Alias · ${selected.envExists ? '.env ok' : '.env missing'}` },
-              { label: '建议操作', value: nextStep.title },
+              { label: '下一步', value: nextStep.title },
             ]
             : [
               { label: '当前实例', value: selected?.name || '未选择' },
               { label: '运行态', value: loading ? '读取中' : error || '待同步' },
-              { label: '建议操作', value: nextStep.title },
+              { label: '下一步', value: nextStep.title },
             ])
           .map((item) => `
             <div class="key-value-row">
@@ -919,7 +896,7 @@ function renderWorkbench(view) {
     <section class="config-section">
       <div class="config-section-header">
         <div>
-          <h2 class="config-section-title">当前实例工作台</h2>
+          <h2 class="config-section-title">实例详情</h2>
           <p class="config-section-desc">当前实例的常用操作。</p>
         </div>
         <div class="toolbar">
@@ -928,7 +905,7 @@ function renderWorkbench(view) {
       </div>
       ${
         !selected
-          ? emptyStateHtml('未选择实例', '从左侧选择一个 Hermes profile 后，这里会显示它的治理入口。')
+          ? emptyStateHtml('未选择实例', '从左侧选择一个 Hermes profile。')
           : `
             <div class="service-card">
               <div class="service-info">
@@ -963,63 +940,17 @@ function renderWorkbench(view) {
                 : error && !bundle
                   ? emptyStateHtml('实例运行态读取失败', error)
                   : `
-                    <div class="dashboard-focus-shell dashboard-focus-shell-single top-gap">
-                      <section class="dashboard-focus-card dashboard-focus-card-${warnings.length === 0 ? 'good' : 'warn'}">
-                        <div class="dashboard-focus-head">
-                          <div class="dashboard-focus-copy">
-                            <span class="dashboard-focus-kicker">${selected.isActive ? '当前默认实例' : '实例工作台'}</span>
-                            <h2 class="dashboard-focus-title">${escapeHtml(selected.name)}</h2>
-                            <p class="dashboard-focus-desc">当前实例的常用治理入口。</p>
-                          </div>
-                          <div class="dashboard-focus-pills">
-                            ${selected.isDefault ? pillHtml('default', 'neutral') : ''}
-                            ${selected.isActive ? pillHtml('active', 'good') : pillHtml('浏览实例', 'neutral')}
-                            ${pillHtml(selected.gatewayState || 'gateway unknown', platformTone(selected.gatewayState))}
-                            ${warnings.length > 0 ? pillHtml(`${warnings.length} 条提醒`, 'warn') : pillHtml('当前稳定', 'good')}
-                          </div>
-                        </div>
-                        <div class="dashboard-signal-grid">
-                          <section class="dashboard-signal-card">
-                            <span class="dashboard-signal-label">当前实例</span>
-                            <strong class="dashboard-signal-value">${escapeHtml(selected.name)}</strong>
-                            <span class="dashboard-signal-meta">${escapeHtml(selected.isActive ? '当前默认实例' : '正在浏览的实例')}</span>
-                          </section>
-                          <section class="dashboard-signal-card">
-                            <span class="dashboard-signal-label">模型链路</span>
-                            <strong class="dashboard-signal-value">${escapeHtml(bundle.config.summary.modelDefault || '待配置')}</strong>
-                            <span class="dashboard-signal-meta">${escapeHtml(bundle.config.summary.modelProvider || 'provider 未配置')}</span>
-                          </section>
-                          <section class="dashboard-signal-card">
-                            <span class="dashboard-signal-label">当前状态</span>
-                            <strong class="dashboard-signal-value">${escapeHtml(warnings.length === 0 ? '可继续工作' : `${warnings.length} 条提醒`)}</strong>
-                            <span class="dashboard-signal-meta">${escapeHtml(`${enabledToolCount(bundle.extensions)} 个工具 · ${bundle.extensions.plugins.installedCount} 个插件`)}</span>
-                          </section>
-                          <section class="dashboard-signal-card">
-                            <span class="dashboard-signal-label">建议操作</span>
-                            <strong class="dashboard-signal-value">${escapeHtml(nextStep.title)}</strong>
-                            <span class="dashboard-signal-meta">${escapeHtml(nextStep.detail)}</span>
-                          </section>
-                        </div>
-                        <div class="dashboard-focus-actions">
-                          ${buttonHtml({ action: 'goto-config-model', label: '去改模型', kind: 'primary', disabled: Boolean(view.runningAction) || !installation?.binaryFound })}
-                          ${buttonHtml({ action: 'goto-config-credentials', label: '凭证 / 通道', disabled: Boolean(view.runningAction) || !installation?.binaryFound })}
-                          ${buttonHtml({
-                            action: 'set-default',
-                            label: view.runningAction === `activate:${selected.name}` ? '同步中…' : selected.isActive ? '已是默认' : '设为默认',
-                            disabled: selected.isActive || Boolean(view.runningAction),
-                          })}
-                          ${buttonHtml({ action: 'open-home', label: '打开目录', disabled: Boolean(view.runningAction) })}
-                        </div>
-                      </section>
-                    </div>
-
                     <section class="workspace-main-card dashboard-quiet-card">
                       <div class="workspace-main-header">
                         <div>
-                          <strong>${escapeHtml(workbenchSubviewMeta.title)}</strong>
-                          <p class="workspace-main-copy">${escapeHtml(workbenchSubviewMeta.desc)}</p>
+                          <strong>${escapeHtml(selected.name)}</strong>
+                          <p class="workspace-main-copy">${escapeHtml(nextStep.detail)}</p>
                         </div>
-                        ${pillHtml(workbenchSubviewMeta.pill, 'neutral')}
+                        <div class="toolbar">
+                          ${selected.isActive ? pillHtml('默认实例', 'good') : pillHtml('当前实例', 'neutral')}
+                          ${pillHtml(selected.gatewayState || 'gateway unknown', platformTone(selected.gatewayState))}
+                          ${warnings.length > 0 ? pillHtml(`${warnings.length} 条提醒`, 'warn') : pillHtml('状态正常', 'good')}
+                        </div>
                       </div>
                       <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
                         ${subviewTabHtml('data-profile-workbench-view', workbenchSubview, 'status', '状态')}
@@ -1128,7 +1059,7 @@ function renderRuntimeSection(view) {
                       : emptyStateHtml('运行态较完整', '当前实例没有出现明显的结构性缺口，可以继续做迁移或对照。')
                   }
                 `
-                : emptyStateHtml('运行态暂未就绪', '可以先刷新实例，或直接从工作台进入官方向导。')
+                : emptyStateHtml('运行态暂未就绪', '可以先刷新实例，或直接进入官方向导。')
       }
     </section>
   `;
@@ -1478,9 +1409,9 @@ function renderWorkspaceSurface(view) {
   return `
     <div class="page-header page-header-compact">
       <div class="panel-title-row">
-        <h1 class="page-title">Profile 实例台</h1>
+        <h1 class="page-title">实例详情</h1>
       </div>
-      <p class="page-desc">实例详情、运行信号与实例对照。</p>
+      <p class="page-desc">查看实例详情、运行状态与差异。</p>
     </div>
 
     ${renderSurfaceTabs(view)}
@@ -1489,8 +1420,8 @@ function renderWorkspaceSurface(view) {
       ${renderProfileRail(view)}
       <div class="page-stack">
         <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
-          ${detailTabHtml(detailView, 'focus', '实例详情')}
-          ${detailTabHtml(detailView, 'runtime', '运行信号')}
+          ${detailTabHtml(detailView, 'focus', '详情')}
+          ${detailTabHtml(detailView, 'runtime', '运行状态')}
           ${detailTabHtml(detailView, 'compare', '实例对照')}
         </div>
         ${detailContent}
@@ -1511,7 +1442,7 @@ function renderMaintenanceSurface(view) {
   return `
     <div class="page-header page-header-compact">
       <div class="panel-title-row">
-        <h1 class="page-title">Profile 维护区</h1>
+        <h1 class="page-title">实例维护</h1>
       </div>
       <p class="page-desc">创建、导入导出、Alias 与维护操作。</p>
     </div>
@@ -1524,12 +1455,12 @@ function renderMaintenanceSurface(view) {
         <section class="config-section">
           <div class="config-section-header">
             <div>
-              <h2 class="config-section-title">维护入口</h2>
-              <p class="config-section-desc">围绕当前实例做创建、迁移、Alias 接管和删除确认。</p>
+              <h2 class="config-section-title">维护</h2>
+              <p class="config-section-desc">创建、迁移、Alias 和删除。</p>
             </div>
             <div class="toolbar">
               ${current ? pillHtml(current.name, 'good') : pillHtml('未选择实例', 'warn')}
-              ${buttonHtml({ action: 'open-profile-surface', label: '回到实例台', disabled: !current, attrs: { 'data-surface': 'workspace' } })}
+              ${buttonHtml({ action: 'open-profile-surface', label: '回到详情', disabled: !current, attrs: { 'data-surface': 'workspace' } })}
             </div>
           </div>
         </section>
@@ -1563,13 +1494,13 @@ function renderPage(view) {
         <div class="panel-title-row">
           <h1 class="page-title">Profile 管理</h1>
         </div>
-        <p class="page-desc">以 profile 为核心做实例治理、迁移和能力面闭环。</p>
+        <p class="page-desc">围绕实例做查看、迁移和能力闭环。</p>
       </div>
       <section class="config-section">
         <div class="config-section-header">
           <div>
             <h2 class="config-section-title">读取失败</h2>
-            <p class="config-section-desc">profile 工作台快照暂时不可用，可以直接重试。</p>
+            <p class="config-section-desc">当前无法读取实例快照，可以直接重试。</p>
           </div>
         </div>
         ${emptyStateHtml('未能读取 profile 快照', view.error)}

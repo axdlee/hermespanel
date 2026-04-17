@@ -37,13 +37,13 @@ export const PAGE_TITLES: Record<AppPageKey, string> = {
   cron: '定时任务',
   dashboard: '仪表盘',
   diagnostics: '系统诊断',
-  extensions: '扩展工具',
+  extensions: '扩展',
   gateway: 'Gateway',
-  logs: '日志查看',
-  memory: '记忆文件',
-  profiles: '实例管理',
-  sessions: '会话浏览',
-  skills: '技能工作台',
+  logs: '日志',
+  memory: '记忆',
+  profiles: '实例',
+  sessions: '会话',
+  skills: '技能',
 };
 
 export const PAGE_HINTS: Record<AppPageKey, string> = {

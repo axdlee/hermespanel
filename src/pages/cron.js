@@ -80,8 +80,8 @@ function launcherCardHtml({ action, kicker, title, meta, tone = 'neutral', attrs
 function renderSurfaceTabs(view) {
   return `
     <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
-      ${surfaceTabHtml(view.surfaceView, 'focus', '常用')}
-      ${surfaceTabHtml(view.surfaceView, 'workbench', '工作台')}
+      ${surfaceTabHtml(view.surfaceView, 'focus', '概览')}
+      ${surfaceTabHtml(view.surfaceView, 'workbench', '管理')}
     </div>
   `;
 }
@@ -523,45 +523,22 @@ function renderFocusSurface(view, state) {
       : '调度链路状态正常。';
   const selectedPreview = selectedJob
     ? truncate(selectedJob.prompt || selectedJob.script || '无 prompt', 72)
-    : '先从工作台中选择一条作业，或直接新建第一条自动化。';
+    : '先从管理页选择一条作业，或直接新建第一条自动化。';
   const currentStatus = !state.jobs.length
     ? '尚无作业'
     : state.warnings.length > 0
       ? `${state.warnings.length} 条提醒`
-      : '当前稳定';
+      : '状态正常';
 
   return `
     <div class="page-header page-header-compact">
       <div class="panel-title-row">
-        <h1 class="page-title">定时任务</h1>
+        <h1 class="page-title">自动化</h1>
       </div>
       <p class="page-desc">自动化作业、投递与运行状态。</p>
     </div>
 
     ${renderSurfaceTabs(view)}
-
-    <section class="workspace-summary-strip workspace-summary-strip-dense">
-      <section class="summary-mini-card">
-        <span class="summary-mini-label">当前实例</span>
-        <strong class="summary-mini-value">${escapeHtml(view.profile)}</strong>
-        <span class="summary-mini-meta">${escapeHtml(view.snapshot.jobsPath || 'jobs.json 未解析')}</span>
-      </section>
-      <section class="summary-mini-card">
-        <span class="summary-mini-label">调度规模</span>
-        <strong class="summary-mini-value">${escapeHtml(state.jobs.length === 0 ? '尚无作业' : `${state.enabledCount}/${state.jobs.length} 已启用`)}</strong>
-        <span class="summary-mini-meta">${escapeHtml(`${state.remoteJobs.length} 个远端投递 · ${state.failingJobs.length} 个失败`)}</span>
-      </section>
-      <section class="summary-mini-card">
-        <span class="summary-mini-label">Gateway</span>
-        <strong class="summary-mini-value">${escapeHtml(view.dashboard.gateway?.gatewayState ?? '未检测到')}</strong>
-        <span class="summary-mini-meta">${escapeHtml(gatewayRunning ? '远端投递链路可继续验证' : '远端投递会受阻')}</span>
-      </section>
-      <section class="summary-mini-card">
-        <span class="summary-mini-label">技能引用</span>
-        <strong class="summary-mini-value">${escapeHtml(state.missingReferencedSkills.length === 0 ? '已对齐' : `${state.missingReferencedSkills.length} 个缺口`)}</strong>
-        <span class="summary-mini-meta">${escapeHtml(`${state.referencedSkillNames.length} 个被引用 skill · ${state.jobsWithSkills.length} 条声明作业`)}</span>
-      </section>
-    </section>
 
     <section class="dashboard-focus-shell">
       <section class="dashboard-focus-card dashboard-focus-card-${focusTone}">
@@ -591,7 +568,7 @@ function renderFocusSurface(view, state) {
           <section class="dashboard-signal-card">
             <span class="dashboard-signal-label">当前焦点</span>
             <strong class="dashboard-signal-value">${escapeHtml(selectedJob?.name || '未选择')}</strong>
-            <span class="dashboard-signal-meta">${escapeHtml(selectedJob ? `${selectedJob.scheduleDisplay} · ${selectedJob.deliver}` : '进入工作台后再选择具体作业')}</span>
+            <span class="dashboard-signal-meta">${escapeHtml(selectedJob ? `${selectedJob.scheduleDisplay} · ${selectedJob.deliver}` : '进入管理页后再选择具体作业')}</span>
           </section>
           <section class="dashboard-signal-card">
             <span class="dashboard-signal-label">Skills 缺口</span>
@@ -600,7 +577,7 @@ function renderFocusSurface(view, state) {
           </section>
         </div>
         <div class="dashboard-focus-actions">
-          ${buttonHtml({ action: 'open-cron-workbench', label: '进入作业台', kind: 'primary', attrs: { 'data-tab': 'detail' } })}
+          ${buttonHtml({ action: 'open-cron-workbench', label: '打开管理', kind: 'primary', attrs: { 'data-tab': 'detail' } })}
           ${buttonHtml({ action: 'open-create-editor', label: '新建作业', disabled: Boolean(view.runningAction) })}
           ${buttonHtml({ action: 'goto-skills', label: '查看 Skills' })}
           ${buttonHtml({ action: 'goto-logs', label: '查看日志' })}
@@ -610,8 +587,8 @@ function renderFocusSurface(view, state) {
       <aside class="dashboard-jump-panel">
         <div class="workspace-main-header">
           <div>
-            <strong>常用入口</strong>
-            <p class="workspace-main-copy">打开最常用的 4 个工作区。</p>
+            <strong>快捷入口</strong>
+            <p class="workspace-main-copy">常用去向。</p>
           </div>
           ${pillHtml('常用 4 项', 'neutral')}
         </div>
@@ -620,7 +597,7 @@ function renderFocusSurface(view, state) {
             action: 'open-cron-workbench',
             kicker: '作业',
             title: '查看当前作业',
-            meta: selectedJob ? `${selectedJob.name} · ${selectedJob.scheduleDisplay}` : '先进入工作台再选择作业',
+            meta: selectedJob ? `${selectedJob.name} · ${selectedJob.scheduleDisplay}` : '先进入管理页再选择作业',
             tone: selectedJob ? 'good' : 'warn',
             attrs: { 'data-tab': 'detail' },
           })}
@@ -642,67 +619,45 @@ function renderFocusSurface(view, state) {
             action: 'goto-diagnostics',
             kicker: '排障',
             title: '诊断与收口',
-            meta: state.warnings[0] || '进入诊断页继续看 skills、memory、gateway 和 CLI',
+            meta: state.warnings[0] || '继续查看 skills、memory、gateway 和运行状态',
             tone: state.warnings.length > 0 ? 'warn' : 'neutral',
           })}
         </div>
       </aside>
     </section>
 
-    <section class="config-section">
+    <section class="config-section dashboard-quiet-card">
       <div class="config-section-header">
         <div>
-          <h2 class="config-section-title">当前边界</h2>
-          <p class="config-section-desc">当前作业与系统摘要。</p>
+          <h2 class="config-section-title">当前摘要</h2>
+          <p class="config-section-desc">当前焦点作业与系统状态。</p>
         </div>
         <div class="toolbar">
           ${buttonHtml({ action: 'refresh', label: view.refreshing ? '同步中…' : '刷新', kind: 'primary', disabled: view.refreshing || Boolean(view.runningAction) })}
         </div>
       </div>
-      <div class="compact-overview-grid compact-overview-grid-dense">
-        <section class="shell-card shell-card-dense">
-          <div class="shell-card-header">
-            <strong>当前焦点作业</strong>
-            ${selectedJob ? pillHtml(selectedJob.state, cronTone(selectedJob)) : pillHtml('未选择', 'warn')}
-          </div>
-          ${
-            selectedJob
-              ? `
-                ${keyValueRowsHtml([
-                  { label: '作业名', value: selectedJob.name },
-                  { label: '调度', value: selectedJob.scheduleDisplay },
-                  { label: '投递', value: selectedJob.deliver },
-                  { label: 'Skills', value: selectedJob.skills.length ? selectedJob.skills.join(', ') : '未绑定' },
-                ])}
-                <p class="shell-card-copy top-gap">${escapeHtml(selectedPreview)}</p>
-              `
-              : `
-                <p class="shell-card-copy">当前还没有选中的作业。进入工作台后可以筛选、选择、编辑或立即触发作业。</p>
-                ${keyValueRowsHtml([
-                  { label: '作业总数', value: String(state.jobs.length) },
-                  { label: '建议操作', value: state.jobs.length === 0 ? '先创建第一条作业' : '进入工作台后选中一条作业' },
-                ])}
-              `
-          }
-        </section>
-        <section class="shell-card shell-card-dense shell-card-muted">
-          <div class="shell-card-header">
-            <strong>系统边界</strong>
-            ${pillHtml(state.warnings.length > 0 ? `${state.warnings.length} 条提醒` : '当前稳定', state.warnings.length > 0 ? 'warn' : 'good')}
-          </div>
-          ${keyValueRowsHtml([
-            { label: 'jobs.json', value: view.snapshot.jobsPath || '—' },
+      ${keyValueRowsHtml(selectedJob
+        ? [
+            { label: '当前作业', value: selectedJob.name },
+            { label: '调度', value: selectedJob.scheduleDisplay },
+            { label: '投递', value: selectedJob.deliver },
+            { label: 'Skills', value: selectedJob.skills.length ? selectedJob.skills.join(', ') : '未绑定' },
             { label: 'Gateway', value: view.dashboard.gateway?.gatewayState ?? '未检测到' },
-            { label: '记忆 Provider', value: view.dashboard.config.memoryProvider || 'builtin-file' },
-            { label: '建议操作', value: state.warnings.length > 0 ? '先看诊断或 Gateway' : '进入工作台继续细看作业' },
+            { label: '下一步', value: state.warnings.length > 0 ? '先处理提醒' : '进入管理页继续编辑或触发' },
+          ]
+        : [
+            { label: '作业总数', value: String(state.jobs.length) },
+            { label: '远端投递', value: String(state.remoteJobs.length) },
+            { label: 'Gateway', value: view.dashboard.gateway?.gatewayState ?? '未检测到' },
+            { label: '技能缺口', value: state.missingReferencedSkills.length === 0 ? '已对齐' : `${state.missingReferencedSkills.length} 个` },
+            { label: '下一步', value: state.jobs.length === 0 ? '先创建第一条作业' : '进入管理页选择作业' },
           ])}
-          ${
-            state.warnings.length > 0
-              ? `<div class="warning-stack top-gap">${state.warnings.slice(0, 2).map((warning) => `<div class="warning-item">${escapeHtml(warning)}</div>`).join('')}</div>`
-              : ''
-          }
-        </section>
-      </div>
+      <p class="shell-card-copy top-gap">${escapeHtml(selectedPreview)}</p>
+      ${
+        state.warnings.length > 0
+          ? `<div class="warning-stack top-gap">${state.warnings.slice(0, 2).map((warning) => `<div class="warning-item">${escapeHtml(warning)}</div>`).join('')}</div>`
+          : ''
+      }
     </section>
   `;
 }
@@ -718,9 +673,9 @@ function renderWorkbenchSurface(view, state) {
   return `
     <div class="page-header page-header-compact">
       <div class="panel-title-row">
-        <h1 class="page-title">定时任务工作台</h1>
+        <h1 class="page-title">自动化管理</h1>
       </div>
-      <p class="page-desc">需要具体看作业列表、筛选、编辑或立即触发时，再进入这层。</p>
+      <p class="page-desc">查看作业列表、筛选、编辑和触发。</p>
     </div>
 
     ${renderSurfaceTabs(view)}
@@ -773,7 +728,7 @@ function renderWorkbenchSurface(view, state) {
       <div class="config-section-header">
         <div>
           <h2 class="config-section-title">自动化总览</h2>
-          <p class="config-section-desc">进入工作台后，再完整查看 Hermes 自动化链路的结构状态。</p>
+          <p class="config-section-desc">查看当前 profile 的自动化状态。</p>
         </div>
       </div>
       <div class="compact-overview-grid">
@@ -826,8 +781,8 @@ function renderWorkbenchSurface(view, state) {
     <section class="config-section">
       <div class="config-section-header">
         <div>
-          <h2 class="config-section-title">调度工作台</h2>
-          <p class="config-section-desc">主区域保留作业本身，筛选、列表和跳转入口放到侧边轨道。</p>
+          <h2 class="config-section-title">作业管理</h2>
+          <p class="config-section-desc">筛选、列表和编辑。</p>
         </div>
         <div class="toolbar">
           ${pillHtml(view.workspaceTab, 'neutral')}
@@ -880,18 +835,18 @@ function renderPage(view) {
     view.page.innerHTML = `
       <div class="page-header">
         <div class="panel-title-row">
-          <h1 class="page-title">定时任务</h1>
+          <h1 class="page-title">自动化</h1>
         </div>
-        <p class="page-desc">围绕 Hermes 自动化调度、skills、gateway 和 delivery 做统一治理。</p>
+        <p class="page-desc">自动化作业、skills、Gateway 和投递。</p>
       </div>
       <section class="config-section">
         <div class="config-section-header">
           <div>
             <h2 class="config-section-title">读取失败</h2>
-            <p class="config-section-desc">cron 工作台快照暂时不可用，可以直接重试。</p>
+            <p class="config-section-desc">当前无法读取自动化快照，可以直接重试。</p>
           </div>
         </div>
-        ${emptyStateHtml('未能读取 cron 工作台', view.error || '请稍后再试。')}
+        ${emptyStateHtml('未能读取自动化快照', view.error || '请稍后再试。')}
         <div class="quick-actions">
           ${buttonHtml({ action: 'refresh', label: '重新读取', kind: 'primary' })}
         </div>

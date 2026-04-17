@@ -196,15 +196,15 @@ function renderPage(view) {
     view.page.innerHTML = `
       <div class="page-header page-header-compact">
         <div class="panel-title-row">
-          <h1 class="page-title">扩展能力台</h1>
+          <h1 class="page-title">扩展</h1>
         </div>
-        <p class="page-desc">围绕工具、插件、技能运行态和 Provider 做集中治理。</p>
+        <p class="page-desc">工具、插件与运行状态。</p>
       </div>
       <section class="config-section">
         <div class="config-section-header">
           <div>
             <h2 class="config-section-title">读取失败</h2>
-            <p class="config-section-desc">扩展工作台快照暂时不可用，可以直接重试。</p>
+            <p class="config-section-desc">扩展快照暂时不可用，可以稍后重试。</p>
           </div>
         </div>
         ${emptyStateHtml('未能读取扩展快照', view.error || '请稍后再试。')}
@@ -236,8 +236,8 @@ function renderPage(view) {
   const focusState = !view.installation.binaryFound
     ? {
       description: '请先完成环境检查。',
-      kicker: '先补底座',
-      title: '暂不可直接治理扩展',
+      kicker: '环境',
+      title: '暂不可用',
       tone: 'warn',
     }
     : !state.providerAligned
@@ -263,21 +263,21 @@ function renderPage(view) {
           }
           : state.warnings.length > 0
             ? {
-              description: '有提醒需要处理。',
-              kicker: '继续收口',
-              title: '扩展层可用',
+              description: '还有少量项目需要处理。',
+              kicker: '提醒',
+              title: '扩展已可用',
               tone: 'warn',
             }
             : {
-              description: '可以继续管理工具、插件与运行态。',
-              kicker: '可以继续',
-              title: '扩展能力面已就绪',
+              description: '可以管理工具、插件和运行状态。',
+              kicker: '就绪',
+              title: '扩展已准备好',
               tone: 'good',
             };
   const focusSignals = [
     {
       label: '当前平台',
-      meta: state.currentPlatformSummary?.description || '优先围绕当前平台做治理',
+      meta: state.currentPlatformSummary?.description || '优先围绕当前平台查看与调整',
       value: state.currentPlatform?.displayName || '未选择',
     },
     {
@@ -306,7 +306,7 @@ function renderPage(view) {
           ? buttonHtml({ action: 'goto-skills', label: '去校对 Skills', kind: 'primary' })
           : state.warnings.length > 0
             ? buttonHtml({ action: 'open-extensions-workbench', label: '查看运行摘要', kind: 'primary', attrs: { 'data-tab': 'runtime' } })
-            : buttonHtml({ action: 'open-extensions-workbench', label: '进入工具治理', kind: 'primary', attrs: { 'data-tab': 'tools' } });
+            : buttonHtml({ action: 'open-extensions-workbench', label: '打开工具页', kind: 'primary', attrs: { 'data-tab': 'tools' } });
   const focusContent = `
     <section class="dashboard-focus-shell">
       <section class="dashboard-focus-card dashboard-focus-card-${focusState.tone}">
@@ -319,7 +319,7 @@ function renderPage(view) {
           <div class="dashboard-focus-pills">
             ${pillHtml(state.providerAligned ? 'Provider 已对齐' : 'Provider 待对齐', state.providerAligned ? 'good' : 'warn')}
             ${pillHtml(gatewayRunning ? 'Gateway 运行中' : 'Gateway 待启动', gatewayRunning ? 'good' : 'warn')}
-            ${pillHtml(state.warnings.length ? `${state.warnings.length} 条提醒` : '当前稳定', state.warnings.length ? 'warn' : 'good')}
+            ${pillHtml(state.warnings.length ? `${state.warnings.length} 条提醒` : '正常', state.warnings.length ? 'warn' : 'good')}
           </div>
         </div>
         <div class="dashboard-signal-grid">
@@ -341,8 +341,8 @@ function renderPage(view) {
       <section class="dashboard-jump-panel">
         <div class="config-section-header">
           <div>
-            <h2 class="config-section-title">常用入口</h2>
-            <p class="config-section-desc">打开最常用的 4 个工作区。</p>
+            <h2 class="config-section-title">快捷入口</h2>
+            <p class="config-section-desc">只放最常用的 4 项。</p>
           </div>
         </div>
         <div class="dashboard-jump-grid">
@@ -350,7 +350,7 @@ function renderPage(view) {
             action: 'open-extensions-workbench',
             attrs: { 'data-tab': 'tools' },
             kicker: 'Tools',
-            title: '接管工具平台',
+            title: '工具平台',
             meta: '按平台接入、移出和补齐顶层 toolsets',
             tone: 'good',
           })}
@@ -358,22 +358,22 @@ function renderPage(view) {
             action: 'open-extensions-workbench',
             attrs: { 'data-tab': 'plugins' },
             kicker: 'Plugins',
-            title: '治理插件',
+            title: '插件管理',
             meta: '安装、移除、编辑 manifest 与 README',
           })}
           ${dashboardJumpCardHtml({
             action: 'open-extensions-workbench',
             attrs: { 'data-tab': 'skills' },
             kicker: 'Skills',
-            title: '核对技能来源',
-            meta: '只在需要时再进入运行态与 source 差异明细',
+            title: '技能来源',
+            meta: '需要时再进入来源与运行差异明细',
           })}
           ${dashboardJumpCardHtml({
             action: 'open-extensions-workbench',
             attrs: { 'data-tab': 'runtime' },
             kicker: 'Signals',
-            title: '查看运行摘要',
-            meta: '原始输出、提醒项和快照全部放在这一层',
+            title: '运行状态',
+            meta: '提醒项、结果和快照都放在这一层',
             tone: state.warnings.length ? 'warn' : 'neutral',
           })}
         </div>
@@ -383,8 +383,8 @@ function renderPage(view) {
     <section class="config-section dashboard-quiet-card">
       <div class="config-section-header">
         <div>
-          <h2 class="config-section-title">概览</h2>
-          <p class="config-section-desc">当前状态与建议操作。</p>
+          <h2 class="config-section-title">当前状态</h2>
+          <p class="config-section-desc">关键状态与建议。</p>
         </div>
         <div class="toolbar">
           ${pillHtml(state.currentPlatform?.displayName || '未选择平台', state.currentPlatform ? 'good' : 'warn')}
@@ -394,7 +394,7 @@ function renderPage(view) {
         { label: '当前 Provider', value: state.configuredProviderDisplay === 'builtin-file' ? '内置文件' : state.configuredProviderDisplay },
         { label: '平台绑定', value: state.currentPlatformBindingToolsets.join(', ') || '当前平台还没有平台绑定' },
         { label: '目录插件', value: state.pluginAvailableCount ? `${state.pluginAvailableCount} 个` : '暂未发现' },
-        { label: '建议操作', value: !state.providerAligned ? '优先去对齐 Memory Provider' : state.toolsEnabled === 0 ? '先接入至少一组常用工具' : state.runtimeSkillMismatch ? '回技能页核对目录与运行态' : '按需进入治理台继续处理' },
+        { label: '建议', value: !state.providerAligned ? '优先对齐 Memory Provider' : state.toolsEnabled === 0 ? '先接入至少一组常用工具' : state.runtimeSkillMismatch ? '回技能页核对目录与运行态' : '打开管理页继续处理' },
       ])}
     </section>
   `;
@@ -452,8 +452,8 @@ function renderPage(view) {
     <section class="config-section">
       <div class="config-section-header">
         <div>
-          <h2 class="config-section-title">扩展工作台</h2>
-          <p class="config-section-desc">治理主区，运行快照兜底。</p>
+          <h2 class="config-section-title">扩展管理</h2>
+          <p class="config-section-desc">工具、插件和运行状态。</p>
         </div>
         <div class="toolbar">
           ${pillHtml(view.workbenchTab === 'tools' ? '工具' : view.workbenchTab === 'plugins' ? '插件' : view.workbenchTab === 'skills' ? '技能' : '运行快照', 'neutral')}
@@ -480,9 +480,9 @@ function renderPage(view) {
   view.page.innerHTML = `
     <div class="page-header page-header-compact">
       <div class="panel-title-row">
-        <h1 class="page-title">扩展能力台</h1>
+        <h1 class="page-title">扩展</h1>
       </div>
-      <p class="page-desc">工具、插件、技能与运行态治理。</p>
+      <p class="page-desc">工具、插件与运行状态。</p>
     </div>
 
     ${view.investigation ? `
@@ -510,8 +510,8 @@ function renderPage(view) {
 
     <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
       ${surfaceTabHtml(surfaceView, 'focus', '常用')}
-      ${surfaceTabHtml(surfaceView, 'workbench', '治理台')}
-      ${surfaceTabHtml(surfaceView, 'summary', '摘要')}
+      ${surfaceTabHtml(surfaceView, 'workbench', '管理')}
+      ${surfaceTabHtml(surfaceView, 'summary', '状态')}
     </div>
 
     ${surfaceContent}
@@ -794,7 +794,7 @@ async function openInFinder(view, path, label, revealInFinder = false) {
 
 async function executeToolAction(view, action, platformKey, names, options = {}) {
   if (!view.configDocs?.workspace) {
-    notify('error', '结构化配置尚未加载完成，暂时不能直接治理工具能力。');
+    notify('error', '结构化配置尚未加载完成，暂时不能直接修改工具能力。');
     return;
   }
 
@@ -813,7 +813,7 @@ async function executeToolAction(view, action, platformKey, names, options = {})
     const nextConfigDocs = await api.saveStructuredConfig(mutation.request, view.profile);
     view.configDocs = nextConfigDocs;
     const message = toolGovernanceMessage(action, platformKey, mutation.normalizedNames);
-    storeResult(view, options.label ?? `${platformKey} 工具治理`, {
+    storeResult(view, options.label ?? `${platformKey} 工具调整`, {
       command: 'save_structured_config',
       exitCode: 0,
       success: true,

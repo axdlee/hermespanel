@@ -1,5 +1,7 @@
 use crate::application::hermes_manager::HermesManager;
-use crate::models::{CommandRunResult, ConfigDocuments, ConfigWorkspace, EnvWorkspace, GatewayWorkspace};
+use crate::models::{
+    CommandRunResult, ConfigDocuments, ConfigWorkspace, EnvWorkspace, GatewayWorkspace,
+};
 
 #[tauri::command]
 pub fn get_config_documents(profile: Option<String>) -> Result<ConfigDocuments, String> {

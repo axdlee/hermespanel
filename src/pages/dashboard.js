@@ -83,7 +83,7 @@ function renderSkeleton(view) {
   view.page.innerHTML = `
     <div class="page-header page-header-compact">
       <h1 class="page-title">仪表盘</h1>
-      <p class="page-desc">正在同步 Hermes 安装、网关、工作区和最近运行材料。</p>
+      <p class="page-desc">正在同步安装状态与常用入口。</p>
     </div>
     <div class="stat-cards">
       ${Array.from({ length: 6 }).map(() => '<div class="stat-card loading-placeholder" style="min-height:132px"></div>').join('')}
@@ -105,16 +105,16 @@ function renderPage(view) {
     view.page.innerHTML = `
       <div class="page-header page-header-compact">
         <h1 class="page-title">仪表盘</h1>
-        <p class="page-desc">Hermes 运行状态与治理入口。</p>
+        <p class="page-desc">安装状态、当前进度与常用入口。</p>
       </div>
       <section class="config-section">
         <div class="config-section-header">
           <div>
             <h2 class="config-section-title">读取失败</h2>
-            <p class="config-section-desc">控制快照暂时不可用，可以直接重试或者回到桌面端窗口继续验证。</p>
+            <p class="config-section-desc">桌面快照暂时不可用，可以稍后重试。</p>
           </div>
         </div>
-        ${emptyStateHtml('未能读取 Hermes 控制中心快照', view.error || '请稍后再试。')}
+        ${emptyStateHtml('未能读取当前桌面快照', view.error || '请稍后再试。')}
         <div class="quick-actions">
           ${buttonHtml({ action: 'refresh', label: '重新读取', kind: 'primary' })}
         </div>
@@ -153,57 +153,57 @@ function renderPage(view) {
   const boundaryView = view.boundaryView || 'radar';
   const focusState = !installation.binaryFound
     ? {
-      kicker: '先安装',
-      title: '先把 Hermes 安装好',
-      description: '安装完成后即可开始使用客户端。',
+      kicker: '安装',
+      title: '先安装 Hermes',
+      description: '安装完成后即可开始使用。',
       tone: 'warn',
       primaryAction: { action: 'quick-primary', label: primaryActionLabel, kind: 'primary' },
       secondaryActions: [
-        { action: 'goto-diagnostics', label: '先看环境体检' },
+        { action: 'goto-diagnostics', label: '环境检查' },
       ],
     }
     : !modelReady
       ? {
-        kicker: '先配置',
-        title: '先补齐模型链路',
-        description: '补齐 Provider、模型和关键凭证后再继续。',
+        kicker: '配置',
+        title: '先完成模型设置',
+        description: '补齐 Provider、模型和关键凭证。',
         tone: 'warn',
-        primaryAction: { action: 'goto-config-model', label: '去配置模型', kind: 'primary' },
+        primaryAction: { action: 'goto-config-model', label: '配置模型', kind: 'primary' },
         secondaryActions: [
-          { action: 'goto-config-credentials', label: '凭证 / 通道' },
-          { action: 'goto-config-toolsets', label: '能力面' },
+          { action: 'goto-config-credentials', label: '凭证与通道' },
+          { action: 'goto-config-toolsets', label: '能力设置' },
         ],
       }
       : !gatewayRunning
         ? {
-          kicker: '先启动',
-          title: '让 Gateway 真正跑起来',
-          description: '启动 Gateway 后即可验证消息链路。',
+          kicker: '启动',
+          title: '启动 Gateway',
+          description: '启动后即可验证消息链路。',
           tone: 'warn',
           primaryAction: { action: 'quick-primary', label: primaryActionLabel, kind: 'primary' },
           secondaryActions: [
-            { action: 'goto-gateway', label: '进入 Gateway' },
-            { action: 'goto-logs', label: '先看日志' },
+            { action: 'goto-gateway', label: 'Gateway' },
+            { action: 'goto-logs', label: '日志' },
           ],
         }
         : warnings.length > 0 || missingDependencies.length > 0 || missingArtifacts > 0
           ? {
-            kicker: '继续收口',
-            title: '主链路可用，仍有提醒',
-            description: '请优先处理当前提醒项。',
+            kicker: '提醒',
+            title: '基础链路已连通',
+            description: '还有少量项目需要处理。',
             tone: workspaceTone,
             primaryAction: { action: 'goto-diagnostics', label: '查看提醒', kind: 'primary' },
             secondaryActions: [
-              { action: 'goto-logs', label: '最近日志' },
-              { action: 'goto-gateway', label: '运行边界' },
+              { action: 'goto-logs', label: '日志' },
+              { action: 'goto-gateway', label: '系统' },
             ],
           }
           : {
-            kicker: '可以开始',
-            title: '工作区已就绪',
-            description: '常用入口已准备好。',
+            kicker: '就绪',
+            title: '可以开始使用',
+            description: '常用入口已经准备好。',
             tone: 'good',
-            primaryAction: { action: 'goto-skills', label: '进入技能工作台', kind: 'primary' },
+            primaryAction: { action: 'goto-skills', label: '技能', kind: 'primary' },
             secondaryActions: [
               { action: 'goto-extensions', label: '能力扩展' },
               { action: 'goto-gateway', label: 'Gateway' },
@@ -213,17 +213,17 @@ function renderPage(view) {
     {
       label: '环境',
       value: installation.binaryFound ? '已接管' : '待安装',
-      meta: installation.binaryFound ? `${versionLine} · 运行组件已接管` : '先安装 Hermes，再继续使用桌面端。',
+      meta: installation.binaryFound ? `${versionLine} · 运行组件已接管` : '安装后即可开始使用。',
     },
     {
       label: '主链路',
       value: !modelReady ? '待补齐' : gatewayRunning ? '可直接使用' : '待验证',
-      meta: !modelReady ? '先把模型和关键凭证补齐。' : gatewayRunning ? '消息入口已经接通，可以继续跑闭环。' : '启动 Gateway 后再验证消息链路。',
+      meta: !modelReady ? '先补模型和关键凭证。' : gatewayRunning ? '消息入口已经接通。' : '启动 Gateway 后再验证消息链路。',
     },
     {
-      label: '工作区',
+      label: '概况',
       value: `${dashboard.counts.sessions} 会话 / ${dashboard.counts.skills} 技能`,
-      meta: `Cron ${dashboard.counts.cronJobs} · ${warnings[0] || (primaryAlias?.name ? `主别名 ${primaryAlias.name}` : '当前没有新的结构性提醒')}`,
+      meta: `Cron ${dashboard.counts.cronJobs} · ${warnings[0] || (primaryAlias?.name ? `主别名 ${primaryAlias.name}` : '当前没有新的提醒')}`,
     },
   ];
   const launchWorkspace = `
@@ -265,37 +265,37 @@ function renderPage(view) {
       <aside class="dashboard-jump-panel">
         <div class="workspace-main-header">
           <div>
-            <strong>常用入口</strong>
-            <p class="workspace-main-copy">打开最常用的 4 个页面。</p>
+            <strong>快捷入口</strong>
+            <p class="workspace-main-copy">只放最常用的 4 项。</p>
           </div>
           ${pillHtml('常用 4 项', 'neutral')}
         </div>
         <div class="dashboard-jump-grid">
           ${dashboardJumpCardHtml({
             action: 'goto-config-model',
-            kicker: '配置',
-            title: '先把对话配通',
-            meta: modelReady ? '主对话链路已经可用，仍可继续细调。' : '默认模型、provider 和关键凭证还没补齐。',
+            kicker: '模型',
+            title: '模型与凭证',
+            meta: modelReady ? '主对话链路已经可用。' : '默认模型、Provider 和关键凭证还没补齐。',
             tone: modelReady ? 'good' : 'warn',
           })}
           ${dashboardJumpCardHtml({
             action: 'goto-gateway',
-            kicker: '运行',
-            title: '打开消息入口',
-            meta: gatewayRunning ? '消息链路已经启动，继续去看平台状态。' : '启动后才能接消息与远端作业。',
+            kicker: 'Gateway',
+            title: '消息入口',
+            meta: gatewayRunning ? '消息链路已经启动。' : '启动后才能接消息与远端作业。',
             tone: gatewayRunning ? 'good' : 'warn',
           })}
           ${dashboardJumpCardHtml({
             action: 'goto-extensions',
             kicker: '能力',
-            title: '整理工具和技能',
+            title: '工具与技能',
             meta: `${dashboard.counts.skills} 个技能 · ${toolsetsLine || '能力面待整理'}`,
           })}
           ${dashboardJumpCardHtml({
             action: 'goto-logs',
             kicker: '材料',
-            title: '看最近回执和日志',
-            meta: warnings[0] || (view.logName ? `最近日志 ${view.logName}` : '需要时再进入日志与诊断页继续排查。'),
+            title: '日志与回执',
+            meta: warnings[0] || (view.logName ? `最近日志 ${view.logName}` : '需要时再进入日志与诊断页。'),
           })}
         </div>
       </aside>
@@ -304,27 +304,27 @@ function renderPage(view) {
     <section class="workspace-main-card dashboard-quiet-card">
       <div class="workspace-main-header">
         <div>
-          <strong>概览</strong>
-          <p class="workspace-main-copy">当前状态与提醒。</p>
+          <strong>当前状态</strong>
+          <p class="workspace-main-copy">关键状态与提醒。</p>
         </div>
-        ${pillHtml(workspaceTone === 'good' ? '当前稳定' : '仍有提醒', workspaceTone)}
+        ${pillHtml(workspaceTone === 'good' ? '正常' : '有提醒', workspaceTone)}
       </div>
       ${keyValueRowsHtml([
         { label: '当前阶段', value: focusState.title },
         { label: '主链路', value: !installation.binaryFound ? '组件待安装' : !modelReady ? '模型链路待补齐' : gatewayRunning ? '模型与 Gateway 已接通' : 'Gateway 待启动' },
-        { label: '工作区现况', value: `${dashboard.counts.sessions} 会话 · ${dashboard.counts.skills} 技能 · Cron ${dashboard.counts.cronJobs}` },
-        { label: '仍需收口', value: warnings[0] || (missingArtifacts === 0 ? '当前没有明显材料缺口' : missingArtifactList.map((item) => item.label).join('、')) },
+        { label: '当前概况', value: `${dashboard.counts.sessions} 会话 · ${dashboard.counts.skills} 技能 · Cron ${dashboard.counts.cronJobs}` },
+        { label: '待处理', value: warnings[0] || (missingArtifacts === 0 ? '当前没有明显材料缺口' : missingArtifactList.map((item) => item.label).join('、')) },
       ])}
     </section>
   `;
   const recentBody = recentView === 'logs'
     ? `
       <section class="workspace-main-card">
-        <div class="workspace-main-header">
-          <div>
-            <strong>最近日志</strong>
-            <p class="workspace-main-copy">先看最近材料，再决定要不要下钻到日志页或诊断页。</p>
-          </div>
+          <div class="workspace-main-header">
+            <div>
+              <strong>最近日志</strong>
+              <p class="workspace-main-copy">查看最近日志片段。</p>
+            </div>
           <div class="toolbar">
             ${buttonHtml({ action: 'goto-logs', label: '查看日志' })}
             ${buttonHtml({ action: 'open-logs', label: '打开目录', disabled: Boolean(view.runningAction) || !installation.logsDirExists })}
@@ -339,7 +339,7 @@ function renderPage(view) {
           <div class="workspace-main-header">
             <div>
               <strong>最近会话</strong>
-              <p class="workspace-main-copy">查看最近几条会话。</p>
+              <p class="workspace-main-copy">查看最近几条会话记录。</p>
             </div>
             <div class="toolbar">
               ${buttonHtml({ action: 'goto-sessions', label: '会话页' })}
@@ -378,9 +378,9 @@ function renderPage(view) {
               <div class="panel-title-row">
                 <strong>最近动作回执</strong>
               </div>
-              <p class="workspace-main-copy">安装、Gateway 控制和桌面动作都会在这里保留最近一次回执。</p>
+              <p class="workspace-main-copy">这里保留最近一次操作结果。</p>
             </div>
-            ${buttonHtml({ action: 'goto-diagnostics', label: '进入诊断页' })}
+            ${buttonHtml({ action: 'goto-diagnostics', label: '诊断页' })}
           </div>
           ${commandResultHtml(view.lastResult, '暂无最近动作', '先从上方入口执行一次动作，这里会保留最近回执。')}
         </section>
@@ -392,7 +392,7 @@ function renderPage(view) {
         <div class="workspace-main-header">
           <div>
             <strong>运行材料</strong>
-            <p class="workspace-main-copy">查看最近回执、日志和会话。</p>
+            <p class="workspace-main-copy">回执、日志和会话。</p>
           </div>
           ${pillHtml(recentView === 'result' ? '回执' : recentView === 'logs' ? '日志' : '会话', 'neutral')}
         </div>
@@ -413,9 +413,8 @@ function renderPage(view) {
           <div>
             <div class="panel-title-row">
               <strong>系统动作</strong>
-              ${infoTipHtml('真正触及系统边界的动作收在这里，例如安装、升级、诊断和目录打开。')}
             </div>
-            <p class="workspace-main-copy">默认收口到一个工作面，避免首页视觉中心被危险动作抢走。</p>
+            <p class="workspace-main-copy">安装、目录和系统动作。</p>
           </div>
           ${pillHtml(installation.binaryFound ? '已接管' : '待安装', installation.binaryFound ? 'good' : 'warn')}
         </div>
@@ -443,7 +442,7 @@ function renderPage(view) {
           <div class="workspace-main-header">
             <div>
               <strong>工作区材料</strong>
-              <p class="workspace-main-copy">查看关键材料摘要。</p>
+              <p class="workspace-main-copy">查看关键材料状态。</p>
             </div>
             ${pillHtml(missingArtifacts === 0 ? '已齐备' : `${missingArtifacts} 项缺失`, missingArtifacts === 0 ? 'good' : 'warn')}
           </div>
@@ -465,9 +464,9 @@ function renderPage(view) {
           <div class="workspace-main-header">
             <div>
               <strong>风险雷达</strong>
-              <p class="workspace-main-copy">集中查看依赖、材料和结构提醒。</p>
+              <p class="workspace-main-copy">集中查看依赖、材料和提醒。</p>
             </div>
-            ${pillHtml(workspaceTone === 'good' ? '稳定' : '待关注', workspaceTone)}
+            ${pillHtml(workspaceTone === 'good' ? '正常' : '待关注', workspaceTone)}
           </div>
           ${keyValueRowsHtml([
             { label: '当前 Profile', value: view.profile },
@@ -492,10 +491,10 @@ function renderPage(view) {
             </div>
             <div class="list-card">
               <div class="list-card-title">
-                <strong>结构提醒</strong>
+                <strong>提醒</strong>
                 ${pillHtml(warnings.length > 0 ? `${warnings.length} 条` : '无新增', warnings.length > 0 ? 'warn' : 'good')}
               </div>
-              <p>${escapeHtml(warnings[0] || '当前没有新的结构性阻塞项，适合继续做配置或联调。')}</p>
+              <p>${escapeHtml(warnings[0] || '当前没有明显阻塞项，可以配置或联调。')}</p>
             </div>
           </div>
         </section>
@@ -506,7 +505,7 @@ function renderPage(view) {
       <section class="workspace-main-card">
         <div class="workspace-main-header">
           <div>
-            <strong>运行边界</strong>
+            <strong>系统</strong>
             <p class="workspace-main-copy">查看风险、系统动作和材料。</p>
           </div>
           ${pillHtml(boundaryView === 'radar' ? '风险' : boundaryView === 'system' ? '系统动作' : '材料', 'neutral')}
@@ -531,12 +530,12 @@ function renderPage(view) {
       <div class="panel-title-row">
         <h1 class="page-title">仪表盘</h1>
       </div>
-      <p class="page-desc">安装、运行与常用入口。</p>
+      <p class="page-desc">安装、状态与常用入口。</p>
     </div>
     <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
       ${workspaceTabHtml(workspaceView, 'launch', '开始')}
       ${workspaceTabHtml(workspaceView, 'recent', '材料')}
-      ${workspaceTabHtml(workspaceView, 'boundary', '边界')}
+      ${workspaceTabHtml(workspaceView, 'boundary', '系统')}
     </div>
 
     ${workspaceContent}
@@ -789,7 +788,7 @@ function bindEvents(view) {
           navigate('gateway', buildGatewayDrilldownIntent({
             sourcePage: 'dashboard',
             headline: '从仪表盘进入 Gateway 控制',
-            description: '继续围绕 service、平台和远端投递做排查。',
+            description: '围绕 service、平台和远端投递做排查。',
           }));
           return;
         case 'goto-config':
@@ -799,7 +798,7 @@ function bindEvents(view) {
           navigate('config', buildConfigDrilldownIntent({
             sourcePage: 'dashboard',
             headline: '从仪表盘进入配置中心',
-            description: '继续在配置中心直接配置模型、provider 和默认链路。',
+            description: '在配置中心直接配置模型、provider 和默认链路。',
             focus: 'model',
             suggestedCommand: 'config-check',
           }));
@@ -808,7 +807,7 @@ function bindEvents(view) {
           navigate('config', buildConfigDrilldownIntent({
             sourcePage: 'dashboard',
             headline: '从仪表盘进入凭证配置',
-            description: '继续在配置中心直接配置 API Key、消息通道和相关凭证。',
+            description: '在配置中心直接配置 API Key、消息通道和相关凭证。',
             focus: 'credentials',
             suggestedCommand: 'config-check',
           }));
@@ -817,7 +816,7 @@ function bindEvents(view) {
           navigate('config', buildConfigDrilldownIntent({
             sourcePage: 'dashboard',
             headline: '从仪表盘进入 Toolsets 配置',
-            description: '继续在配置中心直接接管 toolsets 与 platform toolsets。',
+            description: '在配置中心直接调整 toolsets 与 platform toolsets。',
             focus: 'toolsets',
             suggestedCommand: 'tools-summary',
           }));
@@ -826,7 +825,7 @@ function bindEvents(view) {
           navigate('config', buildConfigDrilldownIntent({
             sourcePage: 'dashboard',
             headline: '从仪表盘进入记忆配置',
-            description: '继续在配置中心直接调整 memory provider、记忆开关和用户画像。',
+            description: '在配置中心直接调整 memory provider、记忆开关和用户画像。',
             focus: 'memory',
             suggestedCommand: 'memory-status',
           }));
@@ -834,8 +833,8 @@ function bindEvents(view) {
         case 'goto-extensions':
           navigate('extensions', buildExtensionsDrilldownIntent({
             sourcePage: 'dashboard',
-            headline: '从仪表盘进入扩展能力台',
-            description: '继续在扩展工作台处理工具面、插件安装态和 memory runtime。',
+            headline: '从仪表盘打开扩展页',
+            description: '在扩展页处理工具面、插件安装态和 memory runtime。',
             rawKind: 'tools',
           }));
           return;
@@ -852,7 +851,7 @@ function bindEvents(view) {
           navigate('logs', buildLogsDrilldownIntent({
             sourcePage: 'dashboard',
             headline: '从仪表盘进入日志页',
-            description: '结合最近动作和运行材料继续看具体日志。',
+            description: '结合最近动作和运行材料查看具体日志。',
           }, {
             logName: view.logName || 'gateway',
             limit: '160',
@@ -862,7 +861,7 @@ function bindEvents(view) {
           navigate('diagnostics', buildDiagnosticsDrilldownIntent({
             sourcePage: 'dashboard',
             headline: '从仪表盘进入诊断页',
-            description: '继续围绕安装、依赖、配置与网关做更深诊断。',
+            description: '围绕安装、依赖、配置与网关做更深诊断。',
           }, {
             suggestedCommand: installation.binaryFound ? 'doctor' : 'dump',
           }));

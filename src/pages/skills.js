@@ -151,22 +151,22 @@ function renderFocusSurface(view, state) {
         }
         : skill && jobs.length === 0 && (view.cron?.jobs.length ?? 0) > 0
           ? {
-            description: '请在编排页继续绑定。',
-            kicker: '继续布线',
-            title: `${skill.name} 未接入编排`,
-            tone: 'warn',
-          }
+              description: '如需自动运行，请到自动化页绑定。',
+              kicker: '编排',
+              title: `${skill.name} 未加入自动化`,
+              tone: 'warn',
+            }
           : warnings.length > 0
             ? {
-              description: '有提醒需要处理。',
-              kicker: '继续收口',
-              title: '技能工作面可用',
+              description: '还有少量项目需要处理。',
+              kicker: '提醒',
+              title: '技能已可用',
               tone: 'warn',
             }
             : {
-              description: '可以继续管理技能与编排。',
-              kicker: '可以继续',
-              title: '技能层已就绪',
+              description: '常用操作已经准备好。',
+              kicker: '就绪',
+              title: '可以开始使用',
               tone: 'good',
             };
   const focusSignals = [
@@ -199,19 +199,19 @@ function renderFocusSurface(view, state) {
         ? buttonHtml({ action: 'goto-config-toolsets', label: '去配置 Toolsets', kind: 'primary' })
         : skill && jobs.length === 0 && (view.cron?.jobs.length ?? 0) > 0
           ? buttonHtml({ action: 'goto-cron', label: '去绑定编排', kind: 'primary' })
-          : buttonHtml({ action: 'open-skill-workbench', label: '进入本地治理', kind: 'primary', attrs: { 'data-tab': 'studio' } });
+          : buttonHtml({ action: 'open-skill-workbench', label: '打开技能', kind: 'primary', attrs: { 'data-tab': 'studio' } });
 
   return `
     <div class="page-header page-header-compact">
       <div class="panel-title-row">
-        <h1 class="page-title">技能工作台</h1>
+        <h1 class="page-title">技能</h1>
       </div>
-      <p class="page-desc">技能查看、治理与编排。</p>
+      <p class="page-desc">查看、安装与编辑技能。</p>
     </div>
 
     <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
       ${surfaceTabHtml(view.surfaceView, 'focus', '常用')}
-      ${surfaceTabHtml(view.surfaceView, 'workbench', '治理台')}
+      ${surfaceTabHtml(view.surfaceView, 'workbench', '管理')}
     </div>
 
     <section class="dashboard-focus-shell">
@@ -225,7 +225,7 @@ function renderFocusSurface(view, state) {
           <div class="dashboard-focus-pills">
             ${pillHtml(runtimeMismatch ? '运行态待对齐' : '运行态已对齐', runtimeMismatch ? 'warn' : 'good')}
             ${pillHtml(currentToolsets.length ? `${currentToolsets.length} 个 toolsets` : 'Toolsets 为空', currentToolsets.length ? 'good' : 'warn')}
-            ${pillHtml(warnings.length ? `${warnings.length} 条提醒` : '当前稳定', warnings.length ? 'warn' : 'good')}
+            ${pillHtml(warnings.length ? `${warnings.length} 条提醒` : '正常', warnings.length ? 'warn' : 'good')}
           </div>
         </div>
         <div class="dashboard-signal-grid">
@@ -247,38 +247,38 @@ function renderFocusSurface(view, state) {
       <section class="dashboard-jump-panel">
         <div class="config-section-header">
           <div>
-            <h2 class="config-section-title">常用入口</h2>
-            <p class="config-section-desc">打开最常用的 4 个工作区。</p>
+            <h2 class="config-section-title">快捷入口</h2>
+            <p class="config-section-desc">只放最常用的 4 项。</p>
           </div>
         </div>
         <div class="dashboard-jump-grid">
           ${dashboardJumpCardHtml({
             action: 'open-skill-workbench',
             attrs: { 'data-tab': 'overview' },
-            kicker: 'Overview',
-            title: '查看当前技能',
-            meta: skill ? `围绕 ${skill.name} 看详情和引用` : '先进入治理台再选技能',
+            kicker: '详情',
+            title: '当前技能',
+            meta: skill ? `${skill.name} 的详情与引用` : '先打开管理页再选择技能',
             tone: skill ? 'good' : 'neutral',
           })}
           ${dashboardJumpCardHtml({
             action: 'open-skill-workbench',
             attrs: { 'data-tab': 'studio' },
-            kicker: 'Studio',
-            title: '本地治理',
-            meta: '编辑 frontmatter、内容和本地导入创建动作',
+            kicker: '编辑',
+            title: '本地编辑',
+            meta: '编辑 frontmatter、内容和本地导入',
           })}
           ${dashboardJumpCardHtml({
             action: 'open-skill-workbench',
             attrs: { 'data-tab': 'registry' },
-            kicker: 'Registry',
-            title: '安装治理',
-            meta: '搜索、预检、安装、更新和审计技能',
+            kicker: '安装',
+            title: '安装与更新',
+            meta: '搜索、预检、安装和更新技能',
           })}
           ${dashboardJumpCardHtml({
             action: 'goto-cron',
-            kicker: 'Cron',
+            kicker: '自动化',
             title: '查看编排',
-            meta: '确认哪些技能真正被作业引用',
+            meta: '确认哪些技能正在被作业引用',
             tone: jobs.length > 0 ? 'good' : 'neutral',
           })}
         </div>
@@ -288,8 +288,8 @@ function renderFocusSurface(view, state) {
     <section class="config-section dashboard-quiet-card">
       <div class="config-section-header">
         <div>
-          <h2 class="config-section-title">概览</h2>
-          <p class="config-section-desc">当前状态与建议操作。</p>
+          <h2 class="config-section-title">当前状态</h2>
+          <p class="config-section-desc">关键状态与建议。</p>
         </div>
         <div class="toolbar">
           ${pillHtml(skill?.name || '等待选择', skill ? 'good' : 'warn')}
@@ -298,8 +298,8 @@ function renderFocusSurface(view, state) {
       ${keyValueRowsHtml([
         { label: '当前技能', value: skill?.name || '还没有选择技能' },
         { label: '分类', value: skill?.category || '—' },
-        { label: '最近动作', value: view.lastResult?.label || '还没有执行过治理动作' },
-        { label: '建议操作', value: !view.skills.length ? '先创建或导入一个技能' : runtimeMismatch ? '优先对齐运行态' : !currentToolsets.length ? '先去补齐 toolsets' : '进入治理台继续处理' },
+        { label: '最近动作', value: view.lastResult?.label || '还没有最近操作' },
+        { label: '建议', value: !view.skills.length ? '先创建或导入一个技能' : runtimeMismatch ? '优先对齐运行态' : !currentToolsets.length ? '先去补齐 toolsets' : '打开管理页继续处理' },
       ])}
     </section>
   `;
@@ -309,7 +309,7 @@ function renderSkeleton(view) {
   view.page.innerHTML = `
     <div class="page-header page-header-compact">
       <div class="panel-title-row">
-        <h1 class="page-title">技能工作台</h1>
+        <h1 class="page-title">技能</h1>
       </div>
       <p class="page-desc">正在同步技能目录、运行态和安装面。</p>
     </div>
@@ -333,21 +333,21 @@ function renderPage(view) {
     view.page.innerHTML = `
       <div class="page-header page-header-compact">
         <div class="panel-title-row">
-          <h1 class="page-title">技能工作台</h1>
+          <h1 class="page-title">技能</h1>
         </div>
-        <p class="page-desc">围绕技能目录、安装和运行态做统一治理。</p>
+        <p class="page-desc">查看、安装与编辑技能。</p>
       </div>
       <section class="config-section">
         <div class="config-section-header">
           <div>
             <h2 class="config-section-title">读取失败</h2>
-            <p class="config-section-desc">技能快照暂时不可用，可以重新拉取状态后再继续治理。</p>
+            <p class="config-section-desc">技能快照暂时不可用，可以稍后重试。</p>
           </div>
           <div class="toolbar">
             ${buttonHtml({ action: 'refresh', label: view.refreshing ? '同步中…' : '重新读取', kind: 'primary', disabled: view.refreshing })}
           </div>
         </div>
-        ${emptyStateHtml('未能读取技能工作台快照', view.error || '请稍后重试。')}
+        ${emptyStateHtml('未能读取技能快照', view.error || '请稍后重试。')}
       </section>
     `;
     bindEvents(view);
@@ -388,13 +388,13 @@ function renderPage(view) {
     : `
       <div class="page-header page-header-compact">
         <div class="panel-title-row">
-          <h1 class="page-title">技能工作台</h1>
+          <h1 class="page-title">技能</h1>
         </div>
-        <p class="page-desc">治理台里保留目录、安装、本地编辑和原始回执；常用判断继续留在上一层。</p>
+        <p class="page-desc">详情、安装和编辑都放在这里。</p>
       </div>
       <div class="tab-bar tab-bar-dense dashboard-workspace-tabs">
         ${surfaceTabHtml(surfaceView, 'focus', '常用')}
-        ${surfaceTabHtml(surfaceView, 'workbench', '治理台')}
+        ${surfaceTabHtml(surfaceView, 'workbench', '管理')}
       </div>
       ${renderSkillsWorkbench(view, state, { includeHeader: false })}
     `;
