@@ -1,275 +1,105 @@
-import { useCallback, useState, useMemo } from 'react';
+/**
+ * HermesPanel 主应用
+ *
+ * - Welcome → EnvCheck → Dashboard 流程
+ * - Zustand 状态管理
+ * - MainLayout 侧边栏布局
+ */
 
-import { LoadingState } from './components/ui';
-import { AppSidebar } from './components/AppSidebar';
-import { AppTopbar } from './components/AppTopbar';
-import { NoticeToast } from './components/NoticeToast';
-import { PageErrorBoundary } from './components/ErrorBoundary';
-import { useAppShell } from './hooks/useAppShell';
-import { useSidebar } from './hooks/useSidebar';
-import { CronPage } from './pages/CronPage';
-import { ConfigPage } from './pages/ConfigPage';
-import { DashboardPage } from './pages/DashboardPage';
-import { DiagnosticsPage } from './pages/DiagnosticsPage';
-import { ExtensionsPage } from './pages/ExtensionsPage';
-import { GatewayPage } from './pages/GatewayPage';
-import { LogsPage } from './pages/LogsPage';
-import { MemoryPage } from './pages/MemoryPage';
-import { ProfilesPage } from './pages/ProfilesPage';
-import { SessionsPage } from './pages/SessionsPage';
-import { SkillsPage } from './pages/SkillsPage';
-import type { AppPageKey, PageIntent } from './pages/types';
+import { useEffect } from 'react';
+import { useAppStore, useDashboardStore, AppPageKey } from './stores';
+import { MainLayout } from './components/shared';
+import {
+  WelcomePage,
+  EnvCheckPage,
+  DashboardPage,
+  ChatPage,
+  SkillsPage,
+  SessionsPage,
+  ConfigPage,
+  GatewayPage,
+  ProfilesPage,
+  ExtensionsPage,
+  MemoryPage,
+  CronPage,
+  LogsPage,
+  DiagnosticsPage,
+} from './pages';
 
-function renderPage(
-  key: AppPageKey,
-  profile: string,
-  profiles: ReturnType<typeof useAppShell>['profiles'],
-  refreshProfiles: (preferredProfile?: string) => Promise<void>,
-  notify: (tone: 'success' | 'error' | 'info', message: string) => void,
-  navigate: (page: AppPageKey, intent?: PageIntent | null) => void,
-  pageIntent: PageIntent | null,
-  consumePageIntent: () => void
-) {
-  switch (key) {
-    case 'profiles':
-      return (
-        <ProfilesPage
-          notify={notify}
-          profile={profile}
-          profiles={profiles}
-          refreshProfiles={refreshProfiles}
-          navigate={navigate}
-          pageIntent={pageIntent}
-          consumePageIntent={consumePageIntent}
-        />
-      );
-    case 'gateway':
-      return (
-        <GatewayPage
-          notify={notify}
-          profile={profile}
-          profiles={profiles}
-          refreshProfiles={refreshProfiles}
-          navigate={navigate}
-          pageIntent={pageIntent}
-          consumePageIntent={consumePageIntent}
-        />
-      );
-    case 'config':
-      return (
-        <ConfigPage
-          notify={notify}
-          profile={profile}
-          profiles={profiles}
-          refreshProfiles={refreshProfiles}
-          navigate={navigate}
-          pageIntent={pageIntent}
-          consumePageIntent={consumePageIntent}
-        />
-      );
-    case 'sessions':
-      return (
-        <SessionsPage
-          notify={notify}
-          profile={profile}
-          profiles={profiles}
-          refreshProfiles={refreshProfiles}
-          navigate={navigate}
-          pageIntent={pageIntent}
-          consumePageIntent={consumePageIntent}
-        />
-      );
-    case 'skills':
-      return (
-        <SkillsPage
-          notify={notify}
-          profile={profile}
-          profiles={profiles}
-          refreshProfiles={refreshProfiles}
-          navigate={navigate}
-          pageIntent={pageIntent}
-          consumePageIntent={consumePageIntent}
-        />
-      );
-    case 'extensions':
-      return (
-        <ExtensionsPage
-          notify={notify}
-          profile={profile}
-          profiles={profiles}
-          refreshProfiles={refreshProfiles}
-          navigate={navigate}
-          pageIntent={pageIntent}
-          consumePageIntent={consumePageIntent}
-        />
-      );
-    case 'cron':
-      return (
-        <CronPage
-          notify={notify}
-          profile={profile}
-          profiles={profiles}
-          refreshProfiles={refreshProfiles}
-          navigate={navigate}
-          pageIntent={pageIntent}
-          consumePageIntent={consumePageIntent}
-        />
-      );
-    case 'logs':
-      return (
-        <LogsPage
-          notify={notify}
-          profile={profile}
-          profiles={profiles}
-          refreshProfiles={refreshProfiles}
-          navigate={navigate}
-          pageIntent={pageIntent}
-          consumePageIntent={consumePageIntent}
-        />
-      );
-    case 'memory':
-      return (
-        <MemoryPage
-          notify={notify}
-          profile={profile}
-          profiles={profiles}
-          refreshProfiles={refreshProfiles}
-          navigate={navigate}
-          pageIntent={pageIntent}
-          consumePageIntent={consumePageIntent}
-        />
-      );
-    case 'diagnostics':
-      return (
-        <DiagnosticsPage
-          notify={notify}
-          profile={profile}
-          profiles={profiles}
-          refreshProfiles={refreshProfiles}
-          navigate={navigate}
-          pageIntent={pageIntent}
-          consumePageIntent={consumePageIntent}
-        />
-      );
-    case 'dashboard':
-    default:
-      return (
-        <DashboardPage
-          notify={notify}
-          profile={profile}
-          profiles={profiles}
-          refreshProfiles={refreshProfiles}
-          navigate={navigate}
-          pageIntent={pageIntent}
-          consumePageIntent={consumePageIntent}
-        />
-      );
+// 页面组件映射（不包括 Welcome 和 EnvCheck，它们是特殊流程页面）
+const PAGE_COMPONENTS: Partial<Record<AppPageKey, React.FC>> = {
+  dashboard: DashboardPage,
+  chat: ChatPage,
+  skills: SkillsPage,
+  sessions: SessionsPage,
+  config: ConfigPage,
+  gateway: GatewayPage,
+  profiles: ProfilesPage,
+  extensions: ExtensionsPage,
+  memory: MemoryPage,
+  cron: CronPage,
+  logs: LogsPage,
+  diagnostics: DiagnosticsPage,
+};
+
+// 页面路由组件
+function PageRoute() {
+  const activePage = useAppStore(state => state.activePage);
+  const PageComponent = PAGE_COMPONENTS[activePage];
+
+  if (PageComponent) {
+    return <PageComponent />;
   }
+
+  // 未知页面，返回 Dashboard
+  return <DashboardPage />;
 }
 
 export default function App() {
-  const [activePage, setActivePage] = useState<AppPageKey>('dashboard');
-  const [pageIntent, setPageIntent] = useState<{ target: AppPageKey; payload: PageIntent } | null>(
-    null
-  );
+  const { welcomeConfirmed, envChecked, setWelcomeConfirmed, setEnvChecked, setPage } =
+    useAppStore();
+  const { loadAll } = useDashboardStore();
 
-  const shell = useAppShell();
-  const sidebar = useSidebar();
-
-  const navigate = useCallback((page: AppPageKey, intent?: PageIntent | null) => {
-    setActivePage(page);
-    setPageIntent(intent ? { target: page, payload: intent } : null);
+  // 初始化加载
+  useEffect(() => {
+    // 检查是否有存储的状态
+    if (welcomeConfirmed && envChecked) {
+      loadAll();
+      setPage('dashboard');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const consumePageIntent = useCallback(() => {
-    setPageIntent(null);
-  }, []);
-
-  const handleRefreshShell = useCallback(() => {
-    void shell.loadShell(shell.selectedProfile, { silent: true });
-  }, [shell]);
-
-  const handleMakeProfileActive = useCallback(() => {
-    void shell.makeProfileActive();
-  }, [shell]);
-
-  const handleProfileChange = useCallback(
-    (profile: string) => {
-      shell.setSelectedProfile(profile);
-    },
-    [shell]
-  );
-
-  const handleRefreshProfiles = useCallback(
-    (preferredProfile?: string) => {
-      return shell.loadProfiles(preferredProfile ?? shell.selectedProfile);
-    },
-    [shell]
-  );
-
-  const viewedProfile = useMemo(() => {
-    return shell.profiles?.profiles.find(item => item.name === shell.selectedProfile) ?? null;
-  }, [shell.profiles, shell.selectedProfile]);
-
-  return (
-    <div className={`app-shell ${sidebar.sidebarCollapsed ? 'app-shell-sidebar-collapsed' : ''}`}>
-      <AppSidebar
-        activePage={activePage}
-        navigate={navigate}
-        selectedProfile={shell.selectedProfile}
-        activeProfile={shell.activeProfile}
-        profiles={shell.profiles}
-        shellDashboard={shell.shellDashboard}
-        shellInstallation={shell.shellInstallation}
-        shellBusy={shell.shellBusy}
-        syncingActive={shell.syncingActive}
-        viewedProfile={viewedProfile}
-        onRefreshShell={handleRefreshShell}
-        onMakeProfileActive={handleMakeProfileActive}
-        sidebarCollapsed={sidebar.sidebarCollapsed}
-        toggleSidebar={sidebar.toggleSidebar}
-        collapsedNavGroups={sidebar.collapsedNavGroups}
-        toggleNavGroup={sidebar.toggleNavGroup}
-      />
-
-      <div className="content-shell">
-        <AppTopbar
-          activePage={activePage}
-          selectedProfile={shell.selectedProfile}
-          profiles={shell.profiles}
-          shellDashboard={shell.shellDashboard}
-          shellInstallation={shell.shellInstallation}
-          shellExtensions={shell.shellExtensions}
-          shellBusy={shell.shellBusy}
-          loadingProfiles={shell.loadingProfiles}
-          onProfileChange={handleProfileChange}
-          onRefreshProfiles={() => handleRefreshProfiles()}
-          onRefreshShell={handleRefreshShell}
-        />
-
-        <main className="content-area">
-          {shell.loadingProfiles && !shell.profiles ? (
-            <LoadingState label="正在同步 Hermes profile 列表。" skeleton />
-          ) : (
-            <PageErrorBoundary>
-              <div key={`${activePage}:${shell.selectedProfile}`}>
-                {renderPage(
-                  activePage,
-                  shell.selectedProfile,
-                  shell.profiles,
-                  handleRefreshProfiles,
-                  shell.notify,
-                  navigate,
-                  pageIntent?.target === activePage ? pageIntent.payload : null,
-                  consumePageIntent
-                )}
-              </div>
-            </PageErrorBoundary>
-          )}
-        </main>
+  // Welcome 页面流程
+  if (!welcomeConfirmed) {
+    return (
+      <div className="app-root">
+        <WelcomePage onConfirm={() => setWelcomeConfirmed(true)} />
       </div>
+    );
+  }
 
-      <NoticeToast notice={shell.notice} onClear={shell.clearNotice} />
+  // EnvCheck 页面流程
+  if (!envChecked) {
+    return (
+      <div className="app-root">
+        <EnvCheckPage
+          onComplete={() => {
+            setEnvChecked(true);
+            loadAll();
+            setPage('dashboard');
+          }}
+        />
+      </div>
+    );
+  }
+
+  // 正常布局 - MainLayout + 页面路由
+  return (
+    <div className="app-root">
+      <MainLayout>
+        <PageRoute />
+      </MainLayout>
     </div>
   );
 }
